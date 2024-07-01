@@ -14,6 +14,8 @@ private:
 	float m_invWidth{};
 	float m_invHeight{};
 
+	bool m_sizeChanged{ false };
+
 	GLFWwindow* m_glfwWindow{};
 public:
 	Window(int width, int height) : m_width{ width }, m_height{ height }, m_invWidth{ 1.0f / width }, m_invHeight{ 1.0f / height } 
@@ -26,8 +28,9 @@ public:
 		m_glfwWindow = glfwCreateWindow(m_width, m_height, "ratbite", NULL, NULL);
 		R_ASSERT(m_glfwWindow != nullptr);
 		glfwMakeContextCurrent(m_glfwWindow);
+		glfwSetWindowUserPointer(m_glfwWindow, this);
+		glfwSetFramebufferSizeCallback(m_glfwWindow, glfwFramebufferSizeCallback);
 		R_ASSERT_LOG(gladLoadGLLoader((GLADloadproc) glfwGetProcAddress), "GLAD failed to load OpenGL funcitons");
-		// R_ASSERT(gladLoadGL());
 
 #ifdef _DEBUG
 		glEnable(GL_DEBUG_OUTPUT);
@@ -60,4 +63,10 @@ public:
 	int getHeight() const { return m_height; }
 	int getInvWidth() const { return m_invWidth; }
 	int getInvHeight() const { return m_invHeight; }
+private:
+	static void glfwFramebufferSizeCallback(GLFWwindow* window, int width, int height)
+	{
+		Window* win{ reinterpret_cast<Window*>(glfwGetWindowUserPointer(window)) };
+		win->resize(width, height);
+	}
 };

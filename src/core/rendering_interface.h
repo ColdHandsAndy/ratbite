@@ -5,6 +5,7 @@
 #include <glm/mat3x3.hpp>
 
 #include "scene.h"
+#include "window.h"
 #include "camera.h"
 #include "render_context.h"
 
@@ -47,6 +48,9 @@ private:
 	cudaGraphicsResource_t m_graphicsResource{};
 	cudaArray_t m_imageCudaArray{};
 	cudaSurfaceObject_t m_imageCudaSurface{};
+
+	cudaEvent_t m_exexEvent{};
+	cudaStream_t m_streams[5]{};
 
 	// TEMP
 	uint32_t lightEmissionSpectrumIndex{};
@@ -99,7 +103,7 @@ public:
 	~RenderingInterface();
 
 	void render(const glm::mat3& colorspaceTransform);
-	void drawPreview();
+	void drawPreview(const Window& window);
 	bool renderingIsFinished() const { return m_renderingIsFinished; }
 	bool sublaunchIsFinished() const { return m_sublaunchIsFinished; }
 };

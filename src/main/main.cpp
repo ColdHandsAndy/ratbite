@@ -3,9 +3,7 @@
 
 #include <glad/glad.h>
 #include <GLFW/glfw3.h>
-#include <optix_stack_size.h>
 #include <optix.h>
-#include <optix_function_table_definition.h>
 #include <optix_stubs.h>
 #include <cuda_runtime.h>
 #define GLM_ENABLE_EXPERIMENTAL
@@ -29,12 +27,14 @@ void initialize()
 int main(int argc, char** argv)
 {
 	// TODO:
+	// BxDFs
 	// Setting up default rendering values
 	// Window resizing
 	// Quasi-random sequence
 	// Camera interface in pt kernel
 	// Sample count heuristic
 	// Window focus (scissors)
+	// GLTF loading
 
 	initialize();
 
@@ -53,7 +53,7 @@ int main(int argc, char** argv)
 	{
 		if (!rInterface.renderingIsFinished())
 			rInterface.render(rContext.getColorspaceTransform());
-		rInterface.drawPreview();
+		rInterface.drawPreview(window);
 
 		glfwSwapBuffers(window.getGLFWwindow());
 		glfwPollEvents();

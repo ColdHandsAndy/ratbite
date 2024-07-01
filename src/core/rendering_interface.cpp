@@ -11,6 +11,7 @@
 #include <windows.h>
 
 #include <optix.h>
+#include <optix_function_table_definition.h>
 #include <optix_stack_size.h>
 #include <optix_stubs.h>
 #include <cuda.h>
@@ -21,6 +22,7 @@
 
 #include "scene.h"
 #include "camera.h"
+#include "window.h"
 #include "render_context.h"
 #include "launch_parameters.h"
 #include "util_macros.h"
@@ -49,8 +51,8 @@ void RenderingInterface::createAccelerationStructures(const SceneData& scene, co
 
 	float preTransform[12]{
 		1.0f, 0.0f, 0.0f, -cameraPosition.x,
-			0.0f, 1.0f, 0.0f, -cameraPosition.y,
-			0.0f, 0.0f, 1.0f, -cameraPosition.z, };
+		0.0f, 1.0f, 0.0f, -cameraPosition.y,
+		0.0f, 0.0f, 1.0f, -cameraPosition.z, };
 
 	const uint32_t instanceCount{ 2 };
 
@@ -463,6 +465,8 @@ void RenderingInterface::prepareDataForPreviewDrawing()
 	const char* fShaderCode{
 		"#version 430 core\n"
 		"uniform sampler2D tex;\n"
+		"uniform vec2 uvScale;\n"
+		"uniform vec2 uvOffset;\n"
 
 		"in vec2 uv;\n"
 
@@ -470,7 +474,7 @@ void RenderingInterface::prepareDataForPreviewDrawing()
 
 		"void main()\n"
 		"{\n"
-			"vec3 color = texture(tex, uv).xyz;\n"
+			"vec3 color = texture(tex, uv * uvScale + uvOffset).xyz;\n"
 			"FragColor = vec4(color, 1.0f);\n"
 		"}\0"
 	};
@@ -497,7 +501,7 @@ void RenderingInterface::prepareDataForPreviewDrawing()
 
 void RenderingInterface::resolveRender(const glm::mat3& colorspaceTransform)
 {
-	CUDA_CHECK(cudaGraphicsMapResources(1, &m_graphicsResource));
+	CUDA_CHECK(cudaGraphicsMapResources(1, &m_graphicsResource, m_streams[0]));
 	CUDA_CHECK(cudaGraphicsSubResourceGetMappedArray(&m_imageCudaArray, m_graphicsResource, 0, 0));
 	cudaResourceDesc resDesc{ .resType = cudaResourceTypeArray, .res = { m_imageCudaArray } };
 	CUDA_CHECK(cudaCreateSurfaceObject(&m_imageCudaSurface, &resDesc));
@@ -508,10 +512,10 @@ void RenderingInterface::resolveRender(const glm::mat3& colorspaceTransform)
 				DISPATCH_SIZE(m_launchWidth, 16), DISPATCH_SIZE(m_launchHeight, 16), 1, 
 				16, 16, 1,
 				0, 
-				0, 
+				m_streams[0], 
 				params, nullptr));
 
-	CUDA_CHECK(cudaGraphicsUnmapResources(1, &m_graphicsResource));
+	CUDA_CHECK(cudaGraphicsUnmapResources(1, &m_graphicsResource, m_streams[0]));
 }
 void RenderingInterface::updateSubLaunchData()
 {
@@ -519,11 +523,12 @@ void RenderingInterface::updateSubLaunchData()
 		.offset = static_cast<uint32_t>(m_currentSampleOffset),
 		.count = static_cast<uint32_t>(m_currentSampleCount) };
 
-	CUDA_CHECK(cudaMemcpy(
+	CUDA_CHECK(cudaMemcpyAsync(
 				reinterpret_cast<void*>(m_lpBuffer + offsetof(LaunchParameters, samplingState)),
 				reinterpret_cast<void*>(&currentSamplingState),
 				sizeof(currentSamplingState),
-				cudaMemcpyHostToDevice));
+				cudaMemcpyHostToDevice,
+				m_streams[1]));
 }
 void RenderingInterface::updateSamplingState()
 {
@@ -532,7 +537,7 @@ void RenderingInterface::updateSamplingState()
 }
 void RenderingInterface::launch()
 {
-	OPTIX_CHECK(optixLaunch(m_pipeline, 0, m_lpBuffer, sizeof(LaunchParameters), &m_sbt, m_launchWidth, m_launchHeight, 1));
+	OPTIX_CHECK(optixLaunch(m_pipeline, m_streams[1], m_lpBuffer, sizeof(LaunchParameters), &m_sbt, m_launchWidth, m_launchHeight, 1));
 }
 
 RenderingInterface::RenderingInterface(const Camera& camera, const RenderContext& renderContext, const SceneData& scene)
@@ -546,6 +551,12 @@ RenderingInterface::RenderingInterface(const Camera& camera, const RenderContext
 	fillSpectralCurvesData();
 	prepareDataForRendering(camera, renderContext, scene);
 	prepareDataForPreviewDrawing();
+
+	CUDA_CHECK(cudaEventCreateWithFlags(&m_exexEvent, cudaEventDisableTiming));
+	for(auto& stream : m_streams)
+	{
+		cudaStreamCreate(&stream);
+	}
 }
 RenderingInterface::~RenderingInterface()
 {
@@ -579,6 +590,9 @@ RenderingInterface::~RenderingInterface()
 
 void RenderingInterface::render(const glm::mat3& colorspaceTransform)
 {
+	if (cudaEventQuery(m_exexEvent) != cudaSuccess)
+		return;
+
 	static bool first{ true };
 	if (first) [[unlikely]]
 		first = false;
@@ -593,7 +607,7 @@ void RenderingInterface::render(const glm::mat3& colorspaceTransform)
 	updateSamplingState();
 	launch();
 }
-void RenderingInterface::drawPreview()
+void RenderingInterface::drawPreview(const Window& window)
 {
 	glClearColor(0.4f, 1.0f, 0.8f, 1.0f);
 	glClear(GL_COLOR_BUFFER_BIT);
@@ -602,6 +616,29 @@ void RenderingInterface::drawPreview()
 	glBindTexture(GL_TEXTURE_2D, m_glTexture);
 	glBindVertexArray(m_VAO);
 	glUseProgram(m_drawProgram);
+
+	// Identify render image and window size relationship and scale and offset appropriately
+	static GLint uvScaleLoc{ glGetUniformLocation(m_drawProgram, "uvScale") };
+	static GLint uvOffsetLoc{ glGetUniformLocation(m_drawProgram, "uvOffset") };
+	bool relResCheck{ (static_cast<float>(m_launchWidth) / static_cast<float>(m_launchHeight)) * (static_cast<float>(window.getHeight()) / static_cast<float>(window.getWidth())) > 1.0f };
+	if (relResCheck)
+	{
+		float aspect{ static_cast<float>(m_launchWidth) / static_cast<float>(m_launchHeight) };
+		aspect *= static_cast<float>(window.getHeight()) / static_cast<float>(window.getWidth());
+		float scale{ aspect };
+		float offset{ 0.5f * (1.0f - aspect) };
+		glUniform2f(uvScaleLoc, 1.0f, scale);
+		glUniform2f(uvOffsetLoc, 0.0f, offset);
+	}
+	else
+	{
+		float aspect{ static_cast<float>(m_launchHeight) / static_cast<float>(m_launchWidth) };
+		aspect *= static_cast<float>(window.getWidth()) / static_cast<float>(window.getHeight());
+		float scale{ aspect };
+		float offset{ 0.5f * (1.0f - aspect) };
+		glUniform2f(uvScaleLoc, scale, 1.0f);
+		glUniform2f(uvOffsetLoc, offset, 0.0f);
+	}
 
 	glDrawArrays(GL_TRIANGLES, 0, 3);
 }

@@ -2,6 +2,7 @@
 
 #include <cstdint>
 #include <glad/glad.h>
+#include <GLFW/glfw3.h>
 
 void optixLogCallback(unsigned int level, const char* tag, const char* message, void*);
 void GLAPIENTRY openGLLogCallback(GLenum source, 
