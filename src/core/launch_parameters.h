@@ -3,12 +3,15 @@
 #include <optix_types.h>
 #include <cuda/std/cstdint>
 
-#include <glm/glm.hpp>
+#include <glm/vec3.hpp>
 #include <glm/ext/quaternion_common.hpp>
+#include <glm/ext/quaternion_float.hpp>
 
 #include "../core/util_macros.h"
-#include "material.h"
+#include "../core/material.h"
+#ifdef __CUDACC__
 #include "../device/spectral.h"
+#endif // __CUDACC__
 
 struct LaunchParameters
 {

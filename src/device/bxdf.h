@@ -1,9 +1,12 @@
 #pragma once
 
-#include <cuda/std/cstdint>
+#include <cuda/std/cmath>
 #include <cuda/std/complex>
+#include <cuda/std/cstdint>
 
-#include <glm/glm.hpp>
+#include <glm/vec2.hpp>
+#include <glm/vec3.hpp>
+#include <glm/common.hpp>
 #include <glm/gtc/constants.hpp>
 
 #include "../core/util_macros.h"
@@ -16,14 +19,14 @@ namespace microfacet
 	CU_DEVICE CU_INLINE static float localSin2Theta(const glm::vec3& w) { return glm::max(0.0f, 1.0f - localCos2Theta(w)); };
 	CU_DEVICE CU_INLINE static float localTan2Theta(const glm::vec3& w) { return localSin2Theta(w) / localCos2Theta(w); };
 	CU_DEVICE CU_INLINE static float localCosTheta(const glm::vec3& w) { return w.z; };
-	CU_DEVICE CU_INLINE static float localSinTheta(const glm::vec3& w) { return glm::sqrt(glm::max(0.0f, 1.0f - localCos2Theta(w))); };
+	CU_DEVICE CU_INLINE static float localSinTheta(const glm::vec3& w) { return cuda::std::sqrtf(glm::max(0.0f, 1.0f - localCos2Theta(w))); };
 	CU_DEVICE CU_INLINE static float localTanTheta(const glm::vec3& w) { return localSinTheta(w) / localCosTheta(w); };
 	CU_DEVICE CU_INLINE static float localCosPhi(const glm::vec3& w) { float sinTheta{ localSinTheta(w) }; return (sinTheta == 0.0f) ? 1.0f : glm::clamp(w.x / sinTheta, -1.0f, 1.0f); };
 	CU_DEVICE CU_INLINE static float localSinPhi(const glm::vec3& w) { float sinTheta{ localSinTheta(w) }; return (sinTheta == 0.0f) ? 0.0f : glm::clamp(w.y / sinTheta, -1.0f, 1.0f); };
 
 	CU_DEVICE CU_INLINE static float localSin2Theta(float cos2Theta) { return glm::max(0.0f, 1.0f - cos2Theta); };
 	CU_DEVICE CU_INLINE static float localTan2Theta(float cos2Theta, float sin2Theta) { return sin2Theta / cos2Theta; };
-	CU_DEVICE CU_INLINE static float localSinTheta(float cos2Theta) { return glm::sqrt(glm::max(0.0f, 1.0f - cos2Theta)); };
+	CU_DEVICE CU_INLINE static float localSinTheta(float cos2Theta) { return cuda::std::sqrtf(glm::max(0.0f, 1.0f - cos2Theta)); };
 	CU_DEVICE CU_INLINE static float localTanTheta(float cosTheta, float sinTheta) { return sinTheta / cosTheta; };
 	CU_DEVICE CU_INLINE static float localCosPhi(const glm::vec3& w, float sinTheta) { return (sinTheta == 0.0f) ? 1.0f : glm::clamp(w.x / sinTheta, -1.0f, 1.0f); };
 	CU_DEVICE CU_INLINE static float localSinPhi(const glm::vec3& w, float sinTheta) { return (sinTheta == 0.0f) ? 0.0f : glm::clamp(w.y / sinTheta, -1.0f, 1.0f); };
@@ -31,14 +34,14 @@ namespace microfacet
 	
 	namespace distribution
 	{
-		CU_DEVICE CU_INLINE glm::vec3 sample(const glm::vec2& uv)
-		{
-
-		}
-		CU_DEVICE CU_INLINE float pdf(const glm::vec3& wo, const glm::vec3& wm)
-		{
-
-		}
+		// CU_DEVICE CU_INLINE glm::vec3 sample(const glm::vec2& uv)
+		// {
+		//
+		// }
+		// CU_DEVICE CU_INLINE float pdf(const glm::vec3& wo, const glm::vec3& wm)
+		// {
+		//
+		// }
 	}
 
 	struct Context
@@ -59,10 +62,10 @@ namespace microfacet
 		float localCosPhi{};
 	};
 
-	Context createContext()
-	{
-
-	}
+	// Context createContext()
+	// {
+	//
+	// }
 
 	CU_DEVICE CU_INLINE float LambdaG(const glm::vec3& w, float alphaX, float alphaY, float cosPhi, float sinPhi, float tan2Theta)
 	{
@@ -71,7 +74,7 @@ namespace microfacet
 		float aXCos{ cosPhi * alphaX };
 		float aYSin{ sinPhi * alphaY };
 		float alpha2{ aXCos * aXCos + aYSin * aYSin };
-		return (glm::sqrt(1.0f + alpha2 * tan2Theta) - 1.0f) / 2.0f;
+		return (cuda::std::sqrtf(1.0f + alpha2 * tan2Theta) - 1.0f) / 2.0f;
 	}
 
 	//Masking function
@@ -138,7 +141,7 @@ namespace microfacet
 		float mfSin2ThetaT{ mfSin2Theta / (eta * eta) };
 		if (mfSin2ThetaT >= 1.0f)
 			return 1.0f;
-		float mfCosThetaT{ glm::sqrt(glm::max(0.0f, 1.0f - mfSin2ThetaT)) };
+		float mfCosThetaT{ cuda::std::sqrtf(glm::max(0.0f, 1.0f - mfSin2ThetaT)) };
 
 		float rParl{ (eta * mfCosTheta - mfCosThetaT) / (eta * mfCosTheta + mfCosThetaT) };
 		float rPerp{ (mfCosTheta - eta * mfCosThetaT) / (mfCosTheta + eta * mfCosThetaT) };

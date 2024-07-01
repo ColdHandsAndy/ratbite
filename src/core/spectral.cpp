@@ -2,6 +2,8 @@
 #include "util_macros.h"
 #include "debug_macros.h"
 
+#include <glm/common.hpp>
+
 //Data is taken from PBRT github repo (https://github.com/mmp/pbrt-v4/blob/39e01e61f8de07b99859df04b271a02a53d9aeb2/src/pbrt/util/spectrum.cpp)
 namespace SpectralData
 {

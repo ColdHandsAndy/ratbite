@@ -1,6 +1,6 @@
 #pragma once
 
-#include <glm/glm.hpp>
+#include <glm/vec3.hpp>
 
 #include "../core/util_macros.h"
 #include "spectral.h"

@@ -4,7 +4,8 @@
 #include <cuda/std/cmath>
 #include <cuda/std/concepts>
 
-#include <glm/glm.hpp>
+#include <glm/vec3.hpp>
+#include <glm/mat3x3.hpp>
 #include <glm/gtc/quaternion.hpp>
 
 #include "../core/util_macros.h"

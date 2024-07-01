@@ -9,6 +9,7 @@
 
 #include "../core/launch_parameters.h"
 #include "../core/util_macros.h"
+#include "../core/material.h"
 #include "../device/geometry.h"
 #include "../device/filter.h"
 #include "../device/color.h"
@@ -32,7 +33,7 @@ STRONGLY_TYPED_ENUM_OPERATOR_EXPAND_WITH_PREFIX(PathTracingStateFlags, PathTraci
 
 extern "C"
 {
-	__constant__ LaunchParameters parameters;
+	__constant__ LaunchParameters parameters{};
 }
 
 struct DirectLightData

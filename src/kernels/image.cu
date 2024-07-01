@@ -1,7 +1,10 @@
 #include <cuda_runtime.h>
 #include <cuda/std/cstdint>
+#include <cuda/std/cmath>
 
-#include <glm/glm.hpp>
+#include <glm/common.hpp>
+#include <glm/mat3x3.hpp>
+#include <glm/vec3.hpp>
 
 #include "../core/util_macros.h"
 
@@ -14,8 +17,12 @@ CU_DEVICE CU_INLINE void tonemap(glm::vec3& col)
 	float e{ 0.14f }; 
 	col = glm::clamp((col * (a * col + b)) / (col * (c * col + d) + e), 0.0f, 1.0f);
 }
+CU_DEVICE CU_INLINE void gammaCorrect(glm::vec3& col)
+{
+	col = glm::vec3{cuda::std::pow(col.x, 1.0f / 2.2f), cuda::std::pow(col.y, 1.0f / 2.2f), cuda::std::pow(col.z, 1.0f / 2.2f)};
+}
 
-extern "C" __global__ void resolveImage(const uint32_t winWidth, const uint32_t winHeight, const glm::mat3 colorspaceTransform, const glm::dvec4* renderData, cudaSurfaceObject_t presentData)
+extern "C" __global__ void renderResolve(const uint32_t winWidth, const uint32_t winHeight, const glm::mat3 colorspaceTransform, const glm::dvec4* renderData, cudaSurfaceObject_t presentData)
 {
 	uint32_t x{ blockIdx.x * blockDim.x + threadIdx.x };
 	uint32_t y{ blockIdx.y * blockDim.y + threadIdx.y };
@@ -31,6 +38,8 @@ extern "C" __global__ void resolveImage(const uint32_t winWidth, const uint32_t 
 	glm::vec3 color{ colorspaceTransform * normalized };
 
 	tonemap(color);
+
+	gammaCorrect(color);
 
 	uchar4 res{ 
 		static_cast<uint8_t>(color.x * 255.99999f),

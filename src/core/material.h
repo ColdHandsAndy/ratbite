@@ -2,8 +2,6 @@
 
 #include <cuda/std/cstdint>
 
-#include <glm/glm.hpp>
-
 struct MaterialData
 {
 	uint32_t bxdfIndexSBT{};
