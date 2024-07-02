@@ -610,7 +610,7 @@ void RenderingInterface::render(const glm::mat3& colorspaceTransform)
 	updateSamplingState();
 	launch();
 }
-void RenderingInterface::drawPreview(const Window& window)
+void RenderingInterface::drawPreview(int winWidth, int winHeight) const
 {
 	glClearColor(0.4f, 1.0f, 0.8f, 1.0f);
 	glClear(GL_COLOR_BUFFER_BIT);
@@ -623,11 +623,11 @@ void RenderingInterface::drawPreview(const Window& window)
 	// Identify render image and window size relationship and scale and offset appropriately
 	static GLint uvScaleLoc{ glGetUniformLocation(m_drawProgram, "uvScale") };
 	static GLint uvOffsetLoc{ glGetUniformLocation(m_drawProgram, "uvOffset") };
-	bool relResCheck{ (static_cast<float>(m_launchWidth) / static_cast<float>(m_launchHeight)) * (static_cast<float>(window.getHeight()) / static_cast<float>(window.getWidth())) > 1.0f };
+	bool relResCheck{ (static_cast<float>(m_launchWidth) / static_cast<float>(m_launchHeight)) * (static_cast<float>(winHeight) / static_cast<float>(winWidth)) > 1.0f };
 	if (relResCheck)
 	{
 		float aspect{ static_cast<float>(m_launchWidth) / static_cast<float>(m_launchHeight) };
-		aspect *= static_cast<float>(window.getHeight()) / static_cast<float>(window.getWidth());
+		aspect *= static_cast<float>(winHeight) / static_cast<float>(winWidth);
 		float scale{ aspect };
 		float offset{ 0.5f * (1.0f - aspect) };
 		glUniform2f(uvScaleLoc, 1.0f, scale);
@@ -636,7 +636,7 @@ void RenderingInterface::drawPreview(const Window& window)
 	else
 	{
 		float aspect{ static_cast<float>(m_launchHeight) / static_cast<float>(m_launchWidth) };
-		aspect *= static_cast<float>(window.getWidth()) / static_cast<float>(window.getHeight());
+		aspect *= static_cast<float>(winWidth) / static_cast<float>(winHeight);
 		float scale{ aspect };
 		float offset{ 0.5f * (1.0f - aspect) };
 		glUniform2f(uvScaleLoc, scale, 1.0f);

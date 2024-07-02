@@ -6,6 +6,10 @@
 #include "debug_macros.h"
 #include "callbacks.h"
 
+class Window;
+class RenderingInterface;
+void draw(Window* window, const RenderingInterface* rInterface);
+
 class Window
 {
 private:
@@ -17,6 +21,13 @@ private:
 	bool m_sizeChanged{ false };
 
 	GLFWwindow* m_glfwWindow{};
+
+	struct UserDataGLFW
+	{
+		Window* window{};
+		const RenderingInterface* rInterface{};
+		void (*draw)(Window* window, const RenderingInterface* rInterface){};
+	} m_userPointer{};
 public:
 	Window(int width, int height) : m_width{ width }, m_height{ height }, m_invWidth{ 1.0f / width }, m_invHeight{ 1.0f / height } 
 	{
@@ -28,9 +39,12 @@ public:
 		m_glfwWindow = glfwCreateWindow(m_width, m_height, "ratbite", NULL, NULL);
 		R_ASSERT(m_glfwWindow != nullptr);
 		glfwMakeContextCurrent(m_glfwWindow);
+		glfwSetWindowUserPointer(m_glfwWindow, &m_userPointer);
+		m_userPointer.window = this;
+		m_userPointer.draw = draw;
 		glfwSwapInterval(1);
-		glfwSetWindowUserPointer(m_glfwWindow, this);
 		glfwSetFramebufferSizeCallback(m_glfwWindow, glfwFramebufferSizeCallback);
+		glfwSetWindowRefreshCallback(m_glfwWindow, glfwWindowRefreshCallback);
 		R_ASSERT_LOG(gladLoadGLLoader((GLADloadproc) glfwGetProcAddress), "GLAD failed to load OpenGL funcitons");
 
 #ifdef _DEBUG
@@ -47,6 +61,11 @@ public:
 	Window &operator=(Window&&) = delete;
 	Window &operator=(const Window&) = delete;
 	~Window() = default;
+
+	void attachRenderingInterface(const RenderingInterface* renderingInterface)
+	{
+		m_userPointer.rInterface = renderingInterface;
+	}
 
 	void resize(int newWidth, int newHeight)
 	{
@@ -65,9 +84,14 @@ public:
 	int getInvWidth() const { return m_invWidth; }
 	int getInvHeight() const { return m_invHeight; }
 private:
+	static void glfwWindowRefreshCallback(GLFWwindow* window)
+	{
+		UserDataGLFW* userData{ reinterpret_cast<UserDataGLFW*>(glfwGetWindowUserPointer(window)) };
+		userData->draw(userData->window, userData->rInterface);
+	}
 	static void glfwFramebufferSizeCallback(GLFWwindow* window, int width, int height)
 	{
-		Window* win{ reinterpret_cast<Window*>(glfwGetWindowUserPointer(window)) };
+		Window* win{ reinterpret_cast<UserDataGLFW*>(glfwGetWindowUserPointer(window))->window };
 		win->resize(width, height);
 	}
 };

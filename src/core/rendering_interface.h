@@ -104,7 +104,7 @@ public:
 	~RenderingInterface();
 
 	void render(const glm::mat3& colorspaceTransform);
-	void drawPreview(const Window& window);
+	void drawPreview(int winWidth, int winHeight) const;
 	bool renderingIsFinished() const { return m_renderingIsFinished; }
 	bool sublaunchIsFinished() const { return m_sublaunchIsFinished; }
 	int getProcessedSampleCount() const { return m_processedSampleCount; }

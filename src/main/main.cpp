@@ -23,12 +23,17 @@ void initialize()
 	CUDA_CHECK(cudaSetDeviceFlags(cudaDeviceMapHost));
 	OPTIX_CHECK(optixInit());
 }
+void draw(Window* window, const RenderingInterface* rInterface)
+{
+	rInterface->drawPreview(window->getWidth(), window->getHeight());
+
+	glfwSwapBuffers(window->getGLFWwindow());
+}
 
 int main(int argc, char** argv)
 {
 	// TODO:
 	// BxDFs
-	// Setting up default rendering values
 	// Camera interface in pt kernel
 	// Sample count heuristic
 	// Window focus (scissors)
@@ -49,15 +54,17 @@ int main(int argc, char** argv)
 	RenderContext rContext{ renderWidth, renderHeight, pathLength, samplesToRender, Color::RGBColorspace::sRGB };
 	RenderingInterface rInterface{ camera, rContext, scene };
 
+	window.attachRenderingInterface(&rInterface);
+
 	while (!glfwWindowShouldClose(window.getGLFWwindow()))
 	{
 		if (!rInterface.renderingIsFinished())
 			rInterface.render(rContext.getColorspaceTransform());
-		rInterface.drawPreview(window);
 
 		std::cout << "Samples processed: " << rInterface.getProcessedSampleCount() << std::endl;
 
-		glfwSwapBuffers(window.getGLFWwindow());
+		draw(&window, &rInterface);
+
 		glfwPollEvents();
 	}
 
