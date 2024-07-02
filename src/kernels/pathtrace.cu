@@ -2,7 +2,6 @@
 #include <optix_device.h>
 #include <cuda/std/cstdint>
 #include <cuda/std/cmath>
-#include <curand_kernel.h>
 
 #include <glm/glm.hpp>
 #include <glm/gtc/quaternion.hpp>
@@ -13,6 +12,7 @@
 #include "../device/geometry.h"
 #include "../device/filter.h"
 #include "../device/color.h"
+#include "../device/quasi_random.h"
 #include "../device/spectral.h"
 #include "../device/sampling.h"
 #include "../device/bxdf.h"
@@ -247,15 +247,14 @@ extern "C" __global__ void __raygen__main()
 	//
 	glm::vec3 deb{};
 	//
-	curandStatePhilox4_32_10_t randState1Dim{};
-	curand_init(1234, (li.x + 1) * (li.y + 1), parameters.samplingState.offset, &randState1Dim);
+
+	QRNG::State qrngState{ parameters.samplingState.offset, QRNG::getPixelHash(li.x, li.y) };
 
 	glm::dvec4 result{ parameters.renderingData[li.y * parameters.filmWidth + li.x] };
 	uint32_t sample{ 0 };
 	do
 	{
-		// camera::generateCameraRayData(rO, rD, camU, camV, camW, subsample, pixelCoords, invFilmCharacteristics);
-		const glm::vec2 subsampleOffset{ curand_uniform(&randState1Dim), curand_uniform(&randState1Dim) };
+		const glm::vec2 subsampleOffset{ QRNG::Sobol::sample2D(qrngState, QRNG::DimensionOffset::FILTER) };
 		const float xScale{ 2.0f * ((pixelCoordinate.x + subsampleOffset.x) * parameters.invFilmWidth) - 1.0f };
 		const float yScale{ 2.0f * ((pixelCoordinate.y + subsampleOffset.y) * parameters.invFilmHeight) - 1.0f };
 		glm::vec3 rD{ glm::normalize(parameters.camW
@@ -263,7 +262,7 @@ extern "C" __global__ void __raygen__main()
 		+ parameters.camV * yScale * parameters.camPerspectiveScaleH) };
 		glm::vec3 rO{ 0.0 };
 
-		SampledWavelengths wavelengths{ SampledWavelengths::sampleVisible(curand_uniform(&randState1Dim)) };
+		SampledWavelengths wavelengths{ SampledWavelengths::sampleVisible(QRNG::Sobol::sample1D(qrngState, QRNG::DimensionOffset::WAVELENGTH)) };
 		SampledSpectrum L{ 0.0f };
 		SampledSpectrum throughputWeight{ 1.0f };
 		float bxdfPDF{ 1.0f };
@@ -328,7 +327,7 @@ extern "C" __global__ void __raygen__main()
 			directLightData.spectrumSample =
 				parameters.spectrums[parameters.illuminantSpectralDistributionIndex].sample(wavelengths) * parameters.lightScale;
 			glm::vec3 rToLight{
-				(parameters.diskLightPosition + sampling::disk::sampleUniform3D(glm::vec2{curand_uniform(&randState1Dim), curand_uniform(&randState1Dim)}, parameters.diskFrame) * parameters.diskLightRadius) - rO };
+				(parameters.diskLightPosition + sampling::disk::sampleUniform3D(glm::vec2{QRNG::Sobol::sample2D(qrngState, QRNG::DimensionOffset::LIGHT)}, parameters.diskFrame) * parameters.diskLightRadius) - rO };
 			float sqrdToLight{ rToLight.x * rToLight.x + rToLight.y * rToLight.y + rToLight.z * rToLight.z };
 			directLightData.distToLight = cuda::std::sqrtf(sqrdToLight);
 			rToLight /= directLightData.distToLight;
@@ -337,14 +336,26 @@ extern "C" __global__ void __raygen__main()
 			directLightData.lightSamplePDF = lCos > 0.0f ? parameters.diskSurfacePDF * sqrdToLight / lCos : 0.0f;
 
 			// Generate quasi-random values
-			glm::vec2 u{ curand_uniform(&randState1Dim), curand_uniform(&randState1Dim) };
+			glm::vec2 u{ QRNG::Sobol::sample2D(qrngState, QRNG::DimensionOffset::SURFACE_BXDF) };
 			// Launch BxDF evaluation
-			optixDirectCall<void, const MaterialData&, const DirectLightData&, const glm::vec3&, const glm::vec3&, const glm::vec2&, SampledSpectrum&, SampledWavelengths&, SampledSpectrum&, float&, glm::vec3&, PathTracingStateFlags&, glm::vec3&, uint32_t>
-				(material->bxdfIndexSBT, *material, directLightData, rO, hN, u, L, wavelengths, throughputWeight, bxdfPDF, rD, stateFlags, deb, depth);
+			optixDirectCall<void, 
+				const MaterialData&, const DirectLightData&,
+				const glm::vec3&, const glm::vec3&, const glm::vec2&,
+				SampledSpectrum&, SampledWavelengths&, SampledSpectrum&,
+				float&, glm::vec3&, PathTracingStateFlags&,
+				glm::vec3&, uint32_t>
+				(material->bxdfIndexSBT,
+				 *material,directLightData,
+				 rO, hN, u,
+				 L, wavelengths, throughputWeight,
+				 bxdfPDF, rD, stateFlags,
+				 deb, depth);
 
+			qrngState.advanceBounce();
 			updateStateFlags(stateFlags);
 		} while (++depth < parameters.maxPathDepth);
 	breakPath:
+		qrngState.advanceSample();
 		resolveSample(L, wavelengths.getPDF());
 
 		result += glm::dvec4{color::toRGB(*parameters.sensorSpectralCurveA, *parameters.sensorSpectralCurveB, *parameters.sensorSpectralCurveC,

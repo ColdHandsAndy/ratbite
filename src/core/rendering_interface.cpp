@@ -532,6 +532,7 @@ void RenderingInterface::updateSubLaunchData()
 }
 void RenderingInterface::updateSamplingState()
 {
+	m_processedSampleCount = m_currentSampleOffset;
 	m_currentSampleOffset += m_currentSampleCount;
 	m_currentSampleCount = std::min(std::max(0, m_sampleCount - static_cast<int>(m_currentSampleOffset)), 8);
 }
@@ -600,9 +601,11 @@ void RenderingInterface::render(const glm::mat3& colorspaceTransform)
 		resolveRender(colorspaceTransform);
 	if (m_currentSampleCount == 0)
 	{
+		m_processedSampleCount = m_currentSampleOffset;
 		m_renderingIsFinished = true;
 		return;
 	}
+	CUDA_SYNC_CHECK();
 	updateSubLaunchData();
 	updateSamplingState();
 	launch();

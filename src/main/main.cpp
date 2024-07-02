@@ -29,8 +29,6 @@ int main(int argc, char** argv)
 	// TODO:
 	// BxDFs
 	// Setting up default rendering values
-	// Window resizing
-	// Quasi-random sequence
 	// Camera interface in pt kernel
 	// Sample count heuristic
 	// Window focus (scissors)
@@ -38,15 +36,17 @@ int main(int argc, char** argv)
 
 	initialize();
 
-	constexpr uint32_t windowWidth{ 512 };
-	constexpr uint32_t windowHeight{ 512 };
+	constexpr uint32_t windowWidth{ 1280 };
+	constexpr uint32_t windowHeight{ 720 };
+	constexpr uint32_t renderWidth{ 256 };
+	constexpr uint32_t renderHeight{ 256 };
 	const int samplesToRender{ 512 };
 	const int pathLength{ 4 };
 	
 	Window window{ windowWidth, windowHeight };
 	Camera camera{ {-278.0, 273.0, -800.0}, {0.0, 0.0, 1.0}, {0.0, 1.0, 0.0} };	
 	SceneData scene{};
-	RenderContext rContext{ windowWidth, windowHeight, pathLength, samplesToRender, Color::RGBColorspace::sRGB };
+	RenderContext rContext{ renderWidth, renderHeight, pathLength, samplesToRender, Color::RGBColorspace::sRGB };
 	RenderingInterface rInterface{ camera, rContext, scene };
 
 	while (!glfwWindowShouldClose(window.getGLFWwindow()))
@@ -54,6 +54,8 @@ int main(int argc, char** argv)
 		if (!rInterface.renderingIsFinished())
 			rInterface.render(rContext.getColorspaceTransform());
 		rInterface.drawPreview(window);
+
+		std::cout << "Samples processed: " << rInterface.getProcessedSampleCount() << std::endl;
 
 		glfwSwapBuffers(window.getGLFWwindow());
 		glfwPollEvents();

@@ -28,6 +28,7 @@ public:
 		m_glfwWindow = glfwCreateWindow(m_width, m_height, "ratbite", NULL, NULL);
 		R_ASSERT(m_glfwWindow != nullptr);
 		glfwMakeContextCurrent(m_glfwWindow);
+		glfwSwapInterval(1);
 		glfwSetWindowUserPointer(m_glfwWindow, this);
 		glfwSetFramebufferSizeCallback(m_glfwWindow, glfwFramebufferSizeCallback);
 		R_ASSERT_LOG(gladLoadGLLoader((GLADloadproc) glfwGetProcAddress), "GLAD failed to load OpenGL funcitons");

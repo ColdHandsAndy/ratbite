@@ -63,6 +63,7 @@ private:
 
 	int m_currentSampleOffset{ 0 };
 	int m_currentSampleCount{ 1 };
+	int m_processedSampleCount{ 0 };
 	bool m_renderingIsFinished{ false };
 	bool m_sublaunchIsFinished{ false };
 
@@ -106,4 +107,5 @@ public:
 	void drawPreview(const Window& window);
 	bool renderingIsFinished() const { return m_renderingIsFinished; }
 	bool sublaunchIsFinished() const { return m_sublaunchIsFinished; }
+	int getProcessedSampleCount() const { return m_processedSampleCount; }
 };
