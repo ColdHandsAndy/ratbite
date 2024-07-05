@@ -35,6 +35,7 @@ int main(int argc, char** argv)
 	// TODO:
 	// BxDFs
 	// Camera interface in pt kernel
+	// Explicit cleanup
 	// Sample count heuristic
 	// Window focus (scissors)
 	// GLTF loading

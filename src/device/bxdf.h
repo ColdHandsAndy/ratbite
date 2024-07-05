@@ -7,65 +7,39 @@
 #include <glm/vec2.hpp>
 #include <glm/vec3.hpp>
 #include <glm/common.hpp>
+#include "glm/geometric.hpp"
 #include <glm/gtc/constants.hpp>
 
 #include "../core/util_macros.h"
-#include "spectral.h"
+#include "../device/sampling.h"
+#include "../device/spectral.h"
+#include "../device/local_transform.h"
 
 namespace microfacet
 {
-	//
-	CU_DEVICE CU_INLINE static float localCos2Theta(const glm::vec3& w) { return w.z * w.z; };
-	CU_DEVICE CU_INLINE static float localSin2Theta(const glm::vec3& w) { return glm::max(0.0f, 1.0f - localCos2Theta(w)); };
-	CU_DEVICE CU_INLINE static float localTan2Theta(const glm::vec3& w) { return localSin2Theta(w) / localCos2Theta(w); };
-	CU_DEVICE CU_INLINE static float localCosTheta(const glm::vec3& w) { return w.z; };
-	CU_DEVICE CU_INLINE static float localSinTheta(const glm::vec3& w) { return cuda::std::sqrtf(glm::max(0.0f, 1.0f - localCos2Theta(w))); };
-	CU_DEVICE CU_INLINE static float localTanTheta(const glm::vec3& w) { return localSinTheta(w) / localCosTheta(w); };
-	CU_DEVICE CU_INLINE static float localCosPhi(const glm::vec3& w) { float sinTheta{ localSinTheta(w) }; return (sinTheta == 0.0f) ? 1.0f : glm::clamp(w.x / sinTheta, -1.0f, 1.0f); };
-	CU_DEVICE CU_INLINE static float localSinPhi(const glm::vec3& w) { float sinTheta{ localSinTheta(w) }; return (sinTheta == 0.0f) ? 0.0f : glm::clamp(w.y / sinTheta, -1.0f, 1.0f); };
-
-	CU_DEVICE CU_INLINE static float localSin2Theta(float cos2Theta) { return glm::max(0.0f, 1.0f - cos2Theta); };
-	CU_DEVICE CU_INLINE static float localTan2Theta(float cos2Theta, float sin2Theta) { return sin2Theta / cos2Theta; };
-	CU_DEVICE CU_INLINE static float localSinTheta(float cos2Theta) { return cuda::std::sqrtf(glm::max(0.0f, 1.0f - cos2Theta)); };
-	CU_DEVICE CU_INLINE static float localTanTheta(float cosTheta, float sinTheta) { return sinTheta / cosTheta; };
-	CU_DEVICE CU_INLINE static float localCosPhi(const glm::vec3& w, float sinTheta) { return (sinTheta == 0.0f) ? 1.0f : glm::clamp(w.x / sinTheta, -1.0f, 1.0f); };
-	CU_DEVICE CU_INLINE static float localSinPhi(const glm::vec3& w, float sinTheta) { return (sinTheta == 0.0f) ? 0.0f : glm::clamp(w.y / sinTheta, -1.0f, 1.0f); };
-	//
-	
-	namespace distribution
-	{
-		// CU_DEVICE CU_INLINE glm::vec3 sample(const glm::vec2& uv)
-		// {
-		//
-		// }
-		// CU_DEVICE CU_INLINE float pdf(const glm::vec3& wo, const glm::vec3& wm)
-		// {
-		//
-		// }
-	}
-
 	struct Context
 	{
-		glm::vec3 wm{};
 		glm::vec3 wi{};
 		glm::vec3 wo{};
+		glm::vec3 wm{};
 		float mfSamplePDF{};
+
 		float alphaX{};
 		float alphaY{};
-		//float localCosTheta{};
-		//float localSinTheta{};
-		//float localTanTheta{};
-		float localCos2Theta{};
-		//float localSin2Theta{};
-		float localTan2Theta{};
-		float localSinPhi{};
-		float localCosPhi{};
-	};
+		
+		float wmCos2Theta{};
+		float wmTan2Theta{};
+		float wmCosPhi{};
+		float wmSinPhi{};
 
-	// Context createContext()
-	// {
-	//
-	// }
+		float wiTan2Theta{};
+		float wiCosPhi{};
+		float wiSinPhi{};
+		
+		float woTan2Theta{};
+		float woCosPhi{};
+		float woSinPhi{};
+	};
 
 	CU_DEVICE CU_INLINE float LambdaG(const glm::vec3& w, float alphaX, float alphaY, float cosPhi, float sinPhi, float tan2Theta)
 	{
@@ -76,31 +50,30 @@ namespace microfacet
 		float alpha2{ aXCos * aXCos + aYSin * aYSin };
 		return (cuda::std::sqrtf(1.0f + alpha2 * tan2Theta) - 1.0f) / 2.0f;
 	}
-
 	//Masking function
 	CU_DEVICE CU_INLINE float G1(const Context& context)
 	{
 		return 1.0f / (1.0f +
-			LambdaG(context.wo, context.alphaX, context.alphaY, context.localCosPhi, context.localSinPhi, context.localTan2Theta));
+			LambdaG(context.wo, context.alphaX, context.alphaY, context.woCosPhi, context.woSinPhi, context.woTan2Theta));
 	}
 	//Masking-Shadowing function
 	CU_DEVICE CU_INLINE float G(const Context& context)
 	{
 		return 1.0f / (1.0f + 
-			LambdaG(context.wi, context.alphaX, context.alphaY, context.localCosPhi, context.localSinPhi, context.localTan2Theta) + 
-			LambdaG(context.wo, context.alphaX, context.alphaY, context.localCosPhi, context.localSinPhi, context.localTan2Theta));
+			LambdaG(context.wi, context.alphaX, context.alphaY, context.wiCosPhi, context.wiSinPhi, context.wiTan2Theta) + 
+			LambdaG(context.wo, context.alphaX, context.alphaY, context.woCosPhi, context.woSinPhi, context.woTan2Theta));
 	}
 	//Microfacet distribution function
 	CU_DEVICE CU_INLINE float D(const Context& context)
 	{
-		float tan2Theta{ context.localTan2Theta };
+		float tan2Theta{ context.wmTan2Theta };
 		if (isinf(tan2Theta))
 			return 0.0f;
-		float cos4Theta{ context.localCos2Theta * context.localCos2Theta };
+		float cos4Theta{ context.wmCos2Theta * context.wmCos2Theta };
 		if (cos4Theta < 1e-16f)
 			return 0.0f;
-		float cosPhiByAX{ context.localCosPhi / context.alphaX };
-		float sinPhiByAY{ context.localSinPhi / context.alphaY };
+		float cosPhiByAX{ context.wmCosPhi / context.alphaX };
+		float sinPhiByAY{ context.wmSinPhi / context.alphaY };
 		float e{ tan2Theta * (cosPhiByAX * cosPhiByAX + sinPhiByAY * sinPhiByAY) };
 		float oPe{ 1.0f + e };
 		return 1.0f / (glm::pi<float>() * context.alphaX * context.alphaY * cos4Theta * oPe * oPe);
@@ -146,5 +119,35 @@ namespace microfacet
 		float rParl{ (eta * mfCosTheta - mfCosThetaT) / (eta * mfCosTheta + mfCosThetaT) };
 		float rPerp{ (mfCosTheta - eta * mfCosThetaT) / (mfCosTheta + eta * mfCosThetaT) };
 		return (rParl * rParl + rPerp * rPerp) / 2.0f;
+	}
+
+	namespace VNDF
+	{
+		CU_DEVICE CU_INLINE void sample(Context& context, const glm::vec2& uv)
+		{
+			glm::vec3 wh{ glm::normalize(glm::vec3{context.alphaX * context.wo.x, context.alphaY * context.wo.y, context.wo.z}) };
+			if (wh.z < 0)
+				wh = -wh;
+
+			glm::vec3 t{ (wh.z < 0.99999f) ? glm::normalize(glm::cross(glm::vec3{0.0f, 0.0f, 1.0f}, wh)) : glm::vec3{1.0f, 0.0f, 0.0f} };
+			glm::vec3 b{ glm::cross(wh, t) };
+
+			glm::vec2 p{ sampling::disk::sampleUniform2DPolar(uv) };
+
+			float h{ cuda::std::sqrtf(1.0f - p.x * p.x) };
+			p.y = glm::mix(h, p.y, (1.0f + wh.z) / 2.0f);
+
+			float pz{ cuda::std::sqrtf(cuda::std::fmax(0.0f, 1.0f - (p.x * p.x + p.y * p.y))) };
+			glm::vec3 nh{ p.x * t + p.y * b + pz * wh };
+
+			context.wm = glm::normalize(glm::vec3{context.alphaX * nh.x, context.alphaY * nh.y, cuda::std::fmax(1e-6f, nh.z)});
+		}
+		CU_DEVICE CU_INLINE void PDF(Context& context)
+		{
+			const glm::vec3& w{ context.wo };
+			const glm::vec3& wm{ context.wm };
+
+			context.mfSamplePDF = G1(context) / cuda::std::fabs(LocalTransform::cosTheta(w)) * D(context) * cuda::std::fabs(glm::dot(w, wm));
+		}
 	}
 }

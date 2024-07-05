@@ -146,17 +146,6 @@ struct SceneData
 		{  -265.0f,    0.0f,  296.0f, 0.0f  },
 		{  -423.0f,  330.0f,  247.0f, 0.0f  },
 		{  -423.0f,    0.0f,  247.0f, 0.0f  },
-
-		// Ceiling light
-		/*
-			{  -343.0f,  548.6f,  227.0f, 0.0f  },
-			{  -213.0f,  548.6f,  227.0f, 0.0f  },
-			{  -213.0f,  548.6f,  332.0f, 0.0f  },
-
-			{  -343.0f,  548.6f,  227.0f, 0.0f  },
-			{  -213.0f,  548.6f,  332.0f, 0.0f  },
-			{  -343.0f,  548.6f,  332.0f, 0.0f  }
-			*/
 	} };
 
 	std::array<uint32_t, triangleCount> SBTIndices
@@ -175,11 +164,13 @@ struct SceneData
 	struct Disk
 	{
 		const glm::vec3 pos{ -278.0f, 514.0f, 279.5f };
+		// const glm::vec3 pos{ -98.0f, 244.0f, 279.5f };
 		const float radius{ 100.0f };
 		const float area{ 2.0f * glm::pi<float>() * radius };
 		const glm::vec3 normal{ glm::normalize(glm::vec3{0.0f, -1.0f, 0.0f}) };
+		// const glm::vec3 normal{ glm::normalize(glm::vec3{1.0f, -1.0f, -0.4f}) };
 		const glm::quat frame{ genDiskFrame() };
-		const float scale{ 1.5f };
+		const float scale{ 3.8f };
 		//uint32_t pdfStructureIndex{};
 
 		glm::quat genDiskFrame() const
@@ -237,24 +228,24 @@ struct SceneData
 	const std::array<MaterialDescriptor, geometryMaterialCount + lightCount> materialDescriptors
 	{ {
 		MaterialDescriptor{.bxdfIndex = 0,
-			.baseIOR = SpectralData::SpectralDataType::C_METAL_TIO2_IOR,
-			.baseAC = SpectralData::SpectralDataType::C_METAL_TIO2_AC,
+			.baseIOR = SpectralData::SpectralDataType::C_METAL_AG_IOR,
+			.baseAC = SpectralData::SpectralDataType::C_METAL_AG_AC,
 			.baseEmission = SpectralData::SpectralDataType::DESC,
-			.roughness = 0.0f},
+			.roughness = 0.9f},
 		MaterialDescriptor{.bxdfIndex = 0,
 			.baseIOR = SpectralData::SpectralDataType::C_METAL_AU_IOR,
 			.baseAC = SpectralData::SpectralDataType::C_METAL_AU_AC,
 			.baseEmission = SpectralData::SpectralDataType::DESC,
-			.roughness = 0.0f},
+			.roughness = 0.2f},
 		MaterialDescriptor{.bxdfIndex = 0,
 			.baseIOR = SpectralData::SpectralDataType::C_METAL_CU_IOR,
 			.baseAC = SpectralData::SpectralDataType::C_METAL_CU_AC,
 			.baseEmission = SpectralData::SpectralDataType::DESC,
-			.roughness = 0.0f},
+			.roughness = 0.1f},
 		MaterialDescriptor{.bxdfIndex = 0,
-			.baseIOR = SpectralData::SpectralDataType::C_METAL_AG_IOR,
-			.baseAC = SpectralData::SpectralDataType::C_METAL_AG_AC,
+			.baseIOR = SpectralData::SpectralDataType::C_METAL_TIO2_IOR,
+			.baseAC = SpectralData::SpectralDataType::C_METAL_TIO2_AC,
 			.baseEmission = SpectralData::SpectralDataType::ILLUM_D65,
-			.roughness = 0.0f},
+			.roughness = 0.8f},
 	} };
 };
