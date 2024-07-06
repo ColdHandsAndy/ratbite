@@ -17,28 +17,41 @@
 
 namespace microfacet
 {
-	struct Context
+	struct ContextIncident
 	{
-		glm::vec3 wi{};
-		glm::vec3 wo{};
-		glm::vec3 wm{};
-		float mfSamplePDF{};
-
-		float alphaX{};
-		float alphaY{};
-		
+		float wiTan2Theta{};
+		float wiCosPhi{};
+		float wiSinPhi{};
+	};
+	CU_DEVICE CU_INLINE ContextIncident createContextIncident(const glm::vec3& wi)
+	{
+		return {.wiTan2Theta = LocalTransform::tan2Theta(wi), .wiCosPhi = LocalTransform::cosPhi(wi), .wiSinPhi = LocalTransform::sinPhi(wi)};
+	}
+	struct ContextOutgoing
+	{
+		float woTan2Theta{};
+		float woCosPhi{};
+		float woSinPhi{};
+	};
+	CU_DEVICE CU_INLINE ContextOutgoing createContextOutgoing(const glm::vec3& wo)
+	{
+		return {.woTan2Theta = LocalTransform::tan2Theta(wo), .woCosPhi = LocalTransform::cosPhi(wo), .woSinPhi = LocalTransform::sinPhi(wo)};
+	}
+	struct ContextMicronormal
+	{
 		float wmCos2Theta{};
 		float wmTan2Theta{};
 		float wmCosPhi{};
 		float wmSinPhi{};
-
-		float wiTan2Theta{};
-		float wiCosPhi{};
-		float wiSinPhi{};
-		
-		float woTan2Theta{};
-		float woCosPhi{};
-		float woSinPhi{};
+	};
+	CU_DEVICE CU_INLINE ContextMicronormal createContextMicronormal(const glm::vec3& wm)
+	{
+		return {.wmCos2Theta = LocalTransform::cos2Theta(wm), .wmTan2Theta = LocalTransform::tan2Theta(wm), .wmCosPhi = LocalTransform::cosPhi(wm), .wmSinPhi = LocalTransform::sinPhi(wm)};
+	}
+	struct Microsurface
+	{
+		float alphaX{};
+		float alphaY{};
 	};
 
 	CU_DEVICE CU_INLINE float LambdaG(const glm::vec3& w, float alphaX, float alphaY, float cosPhi, float sinPhi, float tan2Theta)
@@ -51,32 +64,32 @@ namespace microfacet
 		return (cuda::std::sqrtf(1.0f + alpha2 * tan2Theta) - 1.0f) / 2.0f;
 	}
 	//Masking function
-	CU_DEVICE CU_INLINE float G1(const Context& context)
+	CU_DEVICE CU_INLINE float G1(const glm::vec3& wo, const ContextOutgoing& context, const Microsurface& ms)
 	{
 		return 1.0f / (1.0f +
-			LambdaG(context.wo, context.alphaX, context.alphaY, context.woCosPhi, context.woSinPhi, context.woTan2Theta));
+			LambdaG(wo, ms.alphaX, ms.alphaY, context.woCosPhi, context.woSinPhi, context.woTan2Theta));
 	}
 	//Masking-Shadowing function
-	CU_DEVICE CU_INLINE float G(const Context& context)
+	CU_DEVICE CU_INLINE float G(const glm::vec3& wi, const glm::vec3& wo, const ContextIncident& ctxi, const ContextOutgoing& ctxo, const Microsurface& ms)
 	{
 		return 1.0f / (1.0f + 
-			LambdaG(context.wi, context.alphaX, context.alphaY, context.wiCosPhi, context.wiSinPhi, context.wiTan2Theta) + 
-			LambdaG(context.wo, context.alphaX, context.alphaY, context.woCosPhi, context.woSinPhi, context.woTan2Theta));
+			LambdaG(wi, ms.alphaX, ms.alphaY, ctxi.wiCosPhi, ctxi.wiSinPhi, ctxi.wiTan2Theta) + 
+			LambdaG(wo, ms.alphaX, ms.alphaY, ctxo.woCosPhi, ctxo.woSinPhi, ctxo.woTan2Theta));
 	}
 	//Microfacet distribution function
-	CU_DEVICE CU_INLINE float D(const Context& context)
+	CU_DEVICE CU_INLINE float D(const glm::vec3& wm, const ContextMicronormal& ctxm, const Microsurface& ms)
 	{
-		float tan2Theta{ context.wmTan2Theta };
+		float tan2Theta{ ctxm.wmTan2Theta };
 		if (isinf(tan2Theta))
 			return 0.0f;
-		float cos4Theta{ context.wmCos2Theta * context.wmCos2Theta };
+		float cos4Theta{ ctxm.wmCos2Theta * ctxm.wmCos2Theta };
 		if (cos4Theta < 1e-16f)
 			return 0.0f;
-		float cosPhiByAX{ context.wmCosPhi / context.alphaX };
-		float sinPhiByAY{ context.wmSinPhi / context.alphaY };
+		float cosPhiByAX{ ctxm.wmCosPhi / ms.alphaX };
+		float sinPhiByAY{ ctxm.wmSinPhi / ms.alphaY };
 		float e{ tan2Theta * (cosPhiByAX * cosPhiByAX + sinPhiByAY * sinPhiByAY) };
 		float oPe{ 1.0f + e };
-		return 1.0f / (glm::pi<float>() * context.alphaX * context.alphaY * cos4Theta * oPe * oPe);
+		return 1.0f / (glm::pi<float>() * ms.alphaX * ms.alphaY * cos4Theta * oPe * oPe);
 	}
 	//Fresnel function for conductors
 	CU_DEVICE CU_INLINE SampledSpectrum FComplex(float mfCosTheta, const SampledSpectrum& eta, const SampledSpectrum& k)
@@ -123,9 +136,9 @@ namespace microfacet
 
 	namespace VNDF
 	{
-		CU_DEVICE CU_INLINE void sample(Context& context, const glm::vec2& uv)
+		CU_DEVICE CU_INLINE glm::vec3 sample(const glm::vec3& wo, const ContextOutgoing& ctxo, const Microsurface& ms, const glm::vec2& uv)
 		{
-			glm::vec3 wh{ glm::normalize(glm::vec3{context.alphaX * context.wo.x, context.alphaY * context.wo.y, context.wo.z}) };
+			glm::vec3 wh{ glm::normalize(glm::vec3{ms.alphaX * wo.x, ms.alphaY * wo.y, wo.z}) };
 			if (wh.z < 0)
 				wh = -wh;
 
@@ -140,14 +153,11 @@ namespace microfacet
 			float pz{ cuda::std::sqrtf(cuda::std::fmax(0.0f, 1.0f - (p.x * p.x + p.y * p.y))) };
 			glm::vec3 nh{ p.x * t + p.y * b + pz * wh };
 
-			context.wm = glm::normalize(glm::vec3{context.alphaX * nh.x, context.alphaY * nh.y, cuda::std::fmax(1e-6f, nh.z)});
+			return glm::normalize(glm::vec3{ms.alphaX * nh.x, ms.alphaY * nh.y, cuda::std::fmax(1e-6f, nh.z)});
 		}
-		CU_DEVICE CU_INLINE void PDF(Context& context)
+		CU_DEVICE CU_INLINE float PDF(const glm::vec3& wo, const glm::vec3& wm, const ContextOutgoing& ctxo, const ContextMicronormal& ctxm, const Microsurface& ms)
 		{
-			const glm::vec3& w{ context.wo };
-			const glm::vec3& wm{ context.wm };
-
-			context.mfSamplePDF = G1(context) / cuda::std::fabs(LocalTransform::cosTheta(w)) * D(context) * cuda::std::fabs(glm::dot(w, wm));
+			return G1(wo, ctxo, ms) / cuda::std::fabs(LocalTransform::cosTheta(wo)) * D(wm, ctxm, ms) * cuda::std::fabs(glm::dot(wo, wm));
 		}
 	}
 }

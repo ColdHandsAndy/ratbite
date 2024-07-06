@@ -16,7 +16,7 @@
 #include "../device/quasi_random.h"
 #include "../device/spectral.h"
 #include "../device/sampling.h"
-#include "../device/bxdf.h"
+#include "../device/microfacet.h"
 #include "../device/mis.h"
 
 typedef uint32_t PathStateFlags;
@@ -169,8 +169,8 @@ extern "C" __global__ void __miss__miss()
 //{
 //
 //}
-extern "C" __device__ void __direct_callable__ConductorBxDF(const MaterialData& materialData, const DirectLightData& directLightData, const glm::vec3& rO, const glm::vec3& normal,
-	const glm::vec2& rand, SampledSpectrum& L, SampledWavelengths& wavelengths, SampledSpectrum& throughputWeight, float& bxdfPDF, glm::vec3& rD, PathStateFlags& stateFlags)
+extern "C" __device__ void __direct_callable__ConductorBxDF(const MaterialData& materialData, const DirectLightData& directLightData, const glm::vec3& rO, const glm::vec3& normal, const glm::vec2& rand,
+	SampledSpectrum& L, SampledWavelengths& wavelengths, SampledSpectrum& throughputWeight, float& bxdfPDF, glm::vec3& rD, PathStateFlags& stateFlags)
 {
 	LocalTransform local{ normal } ;
 
@@ -187,81 +187,65 @@ extern "C" __device__ void __direct_callable__ConductorBxDF(const MaterialData& 
 	SampledSpectrum eta{ parameters.spectrums[materialData.indexOfRefractSpectrumDataIndex].sample(wavelengths) };
 	SampledSpectrum k{ parameters.spectrums[materialData.absorpCoefSpectrumDataIndex].sample(wavelengths) };
 
-	//
-	microfacet::Context mfContext{};
-	mfContext.alphaX = materialData.mfRoughnessValue;
-	mfContext.alphaY = materialData.mfRoughnessValue;
-	mfContext.wo = locWo;
-	mfContext.woCosPhi = LocalTransform::cosPhi(mfContext.wo);
-	mfContext.woSinPhi = LocalTransform::sinPhi(mfContext.wo);
-	mfContext.woTan2Theta = LocalTransform::tan2Theta(mfContext.wo);
+	microfacet::Microsurface ms{ .alphaX = materialData.mfRoughnessValue, .alphaY = materialData.mfRoughnessValue };
+	glm::vec3 wo{ locWo };
+	glm::vec3 wi{};
+	glm::vec3 wm{};
+	microfacet::ContextOutgoing ctxo{ microfacet::createContextOutgoing(wo) };
 
 	if (materialData.mfRoughnessValue < 0.001f)
 	{
-		mfContext.wi = glm::vec3{-mfContext.wo.x, -mfContext.wo.y, mfContext.wo.z};
-		float absCosTheta{ cuda::std::fabs(LocalTransform::cosTheta(mfContext.wi)) };
+		wi = glm::vec3{-wo.x, -wo.y, wo.z};
+		float absCosTheta{ cuda::std::fabs(LocalTransform::cosTheta(wi)) };
 		throughputWeight *= microfacet::FComplex(absCosTheta, eta, k);
 		bxdfPDF = 1.0f;
 		stateFlags = stateFlags | PathStateFlagBit::CURRENT_HIT_SPECULAR;
-		local.fromLocal(mfContext.wi);
-		rD = mfContext.wi;
+		local.fromLocal(wi);
+		rD = wi;
 		return;
 	}
 
 	if (!directLightData.occluded)
 	{
-		mfContext.wi = locLi;
-		mfContext.wiCosPhi = LocalTransform::cosPhi(mfContext.wi);
-		mfContext.wiSinPhi = LocalTransform::sinPhi(mfContext.wi);
-		mfContext.wiTan2Theta = LocalTransform::tan2Theta(mfContext.wi);
-		mfContext.wm = glm::normalize(mfContext.wi + mfContext.wo);
-		mfContext.wmCosPhi = LocalTransform::cosPhi(mfContext.wm);
-		mfContext.wmSinPhi = LocalTransform::sinPhi(mfContext.wm);
-		mfContext.wmCos2Theta = LocalTransform::cos2Theta(mfContext.wm);
-		mfContext.wmTan2Theta = LocalTransform::tan2Theta(mfContext.wm);
-		if (mfContext.wo.z * mfContext.wi.z > 0.0f)
+		wi = locLi;
+		microfacet::ContextIncident ctxi{ microfacet::createContextIncident(wi) };
+		wm = glm::normalize(wi + wo);
+		microfacet::ContextMicronormal ctxm{ microfacet::createContextMicronormal(wm) };
+		if (wo.z * wi.z > 0.0f)
 		{
-			const float wowmAbsDot{ cuda::std::fabs(glm::dot(mfContext.wo, mfContext.wm)) };
-			SampledSpectrum f{ microfacet::D(mfContext) * microfacet::FComplex(wowmAbsDot, eta, k) * microfacet::G(mfContext) 
-							   / (4.0f * cuda::std::fabs(LocalTransform::cosTheta(mfContext.wo)) * cuda::std::fabs(LocalTransform::cosTheta(mfContext.wi))) };
-			float cosFactor{ cuda::std::fabs(LocalTransform::cosTheta(mfContext.wi)) };
-			mfContext.wm = mfContext.wm.z > 0.0f ? mfContext.wm : -mfContext.wm;
-			microfacet::VNDF::PDF(mfContext);
-			float lbxdfPDF{ mfContext.mfSamplePDF / (4.0f * wowmAbsDot) };
+			const float wowmAbsDot{ cuda::std::fabs(glm::dot(wo, wm)) };
+			SampledSpectrum f{ microfacet::D(wm, ctxm, ms) * microfacet::FComplex(wowmAbsDot, eta, k) * microfacet::G(wi, wo, ctxi, ctxo, ms) 
+							   / (4.0f * cuda::std::fabs(LocalTransform::cosTheta(wo)) * cuda::std::fabs(LocalTransform::cosTheta(wi))) };
+			float cosFactor{ cuda::std::fabs(LocalTransform::cosTheta(wi)) };
+			wm = wm.z > 0.0f ? wm : -wm;
+			float lbxdfPDF{ microfacet::VNDF::PDF(wo, wm, ctxo, ctxm, ms) / (4.0f * wowmAbsDot) };
 			L += directLightData.spectrumSample * f * cosFactor * throughputWeight
 				* MIS::powerHeuristic(1, directLightData.lightSamplePDF, 1, lbxdfPDF)
 				/ directLightData.lightSamplePDF;
 		}
 	}
 
-	microfacet::VNDF::sample(mfContext, rand);
-	mfContext.wmCosPhi = LocalTransform::cosPhi(mfContext.wm);
-	mfContext.wmSinPhi = LocalTransform::sinPhi(mfContext.wm);
-	mfContext.wmCos2Theta = LocalTransform::cos2Theta(mfContext.wm);
-	mfContext.wmTan2Theta = LocalTransform::tan2Theta(mfContext.wm);
-	microfacet::VNDF::PDF(mfContext);
+	wm = microfacet::VNDF::sample(wo, ctxo, ms, rand);
+	microfacet::ContextMicronormal ctxm{ microfacet::createContextMicronormal(wm) };
 
-	mfContext.wi = utility::reflect(mfContext.wo, mfContext.wm);
-	mfContext.wiCosPhi = LocalTransform::cosPhi(mfContext.wi);
-	mfContext.wiSinPhi = LocalTransform::sinPhi(mfContext.wi);
-	mfContext.wiTan2Theta = LocalTransform::tan2Theta(mfContext.wi);
+	wi = utility::reflect(wo, wm);
+	microfacet::ContextIncident ctxi{ microfacet::createContextIncident(wi) };
 
-	if (mfContext.wo.z * mfContext.wi.z <= 0.0f)
+	if (wo.z * wi.z <= 0.0f)
 	{
 		stateFlags = stateFlags | PathStateFlagBit::PATH_TERMINATED;
 		return;
 	}
 
-	const float wowmAbsDot{ cuda::std::fabs(glm::dot(mfContext.wo, mfContext.wm)) };
+	const float wowmAbsDot{ cuda::std::fabs(glm::dot(wo, wm)) };
 
-	SampledSpectrum f{ microfacet::D(mfContext) * microfacet::FComplex(wowmAbsDot, eta, k) * microfacet::G(mfContext) 
-					   / (4.0f * cuda::std::fabs(LocalTransform::cosTheta(mfContext.wo)) * cuda::std::fabs(LocalTransform::cosTheta(mfContext.wi))) };
-	float cosFactor{ cuda::std::fabs(LocalTransform::cosTheta(mfContext.wi)) };
-	bxdfPDF = mfContext.mfSamplePDF / (4.0f * wowmAbsDot);
+	SampledSpectrum f{ microfacet::D(wm, ctxm, ms) * microfacet::FComplex(wowmAbsDot, eta, k) * microfacet::G(wi, wo, ctxi, ctxo, ms) 
+					   / (4.0f * cuda::std::fabs(LocalTransform::cosTheta(wo)) * cuda::std::fabs(LocalTransform::cosTheta(wi))) };
+	float cosFactor{ cuda::std::fabs(LocalTransform::cosTheta(wi)) };
+	bxdfPDF = microfacet::VNDF::PDF(wo, wm, ctxo, ctxm, ms) / (4.0f * wowmAbsDot);
 	throughputWeight *= f * cosFactor / bxdfPDF;
-	//
 
-	glm::vec3 locWi{ mfContext.wi };
+	glm::vec3 locWi{ wi };
 	local.fromLocal(locWi);
 	rD = locWi;
 }
