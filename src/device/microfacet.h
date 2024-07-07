@@ -52,6 +52,13 @@ namespace microfacet
 	{
 		float alphaX{};
 		float alphaY{};
+		CU_DEVICE CU_INLINE void regularize()
+		{
+			if (alphaX < 0.3f)
+				alphaX = glm::clamp(2.0f * alphaX, 0.1f, 0.3f);
+			if (alphaY < 0.3f)
+				alphaY = glm::clamp(2.0f * alphaY, 0.1f, 0.3f);
+		}
 	};
 
 	CU_DEVICE CU_INLINE float LambdaG(const glm::vec3& w, float alphaX, float alphaY, float cosPhi, float sinPhi, float tan2Theta)

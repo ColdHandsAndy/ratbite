@@ -1288,8 +1288,6 @@ PiecewiseLinearSpectrum::PiecewiseLinearSpectrum(const float* lambda, const floa
 }
 PiecewiseLinearSpectrum::PiecewiseLinearSpectrum(const float* interleavedData, const uint32_t count, bool normalize)
 {
-    m_lambda = new float[count / 2];
-    m_values = new float[count / 2];
     uint32_t c{ count / 2 };
     uint32_t o{ 0 };
     bool leftBound{ interleavedData[0] > SpectralSettings::KMinSampledLambda };
@@ -1316,7 +1314,7 @@ PiecewiseLinearSpectrum::PiecewiseLinearSpectrum(const float* interleavedData, c
         m_lambda[c - 1] = SpectralSettings::KMaxSampledLambda + 1;
         m_values[c - 1] = interleavedData[count - 1];
     }
-    for (int i{ 0 }; i < m_count; ++i)
+    for (int i{ 0 }; i < count / 2; ++i)
     {
         m_lambda[i + o] = interleavedData[2 * i + 0];
         m_values[i + o] = interleavedData[2 * i + 1];

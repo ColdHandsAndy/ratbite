@@ -33,7 +33,6 @@ void draw(Window* window, const RenderingInterface* rInterface)
 int main(int argc, char** argv)
 {
 	// TODO:
-	// BxDFs
 	// Camera interface in pt kernel
 	// Explicit cleanup
 	// Sample count heuristic
@@ -46,11 +45,12 @@ int main(int argc, char** argv)
 	constexpr uint32_t windowHeight{ 720 };
 	constexpr uint32_t renderWidth{ 256 };
 	constexpr uint32_t renderHeight{ 256 };
-	const int samplesToRender{ 512 };
-	const int pathLength{ 4 };
+	const int samplesToRender{ 1024 };
+	const int pathLength{ 5 };
 	
 	Window window{ windowWidth, windowHeight };
-	Camera camera{ {-278.0, 273.0, -800.0}, {0.0, 0.0, 1.0}, {0.0, 1.0, 0.0} };	
+	// Camera camera{ {-278.0f, 273.0f, -800.0f}, {0.0f, 0.0f, 1.0f}, {0.0f, 1.0f, 0.0f} };	
+	Camera camera{ {-278.0f + 140.0f, 273.0f + 90.0f, -800.0f + 160.0f}, {-0.2f, -0.15f, 1.0f}, {0.0f, 1.0f, 0.0f} };	
 	SceneData scene{};
 	RenderContext rContext{ renderWidth, renderHeight, pathLength, samplesToRender, Color::RGBColorspace::sRGB };
 	RenderingInterface rInterface{ camera, rContext, scene };

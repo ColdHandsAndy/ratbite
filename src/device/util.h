@@ -23,13 +23,44 @@ namespace utility
 						   __int_as_float(__float_as_int(p.y) + ((p.y < 0.0f) ? -intOff.y : intOff.y)),
 						   __int_as_float(__float_as_int(p.z) + ((p.z < 0.0f) ? -intOff.z : intOff.z)) };
 
-		return glm::vec3{ fabsf(p.x) < originInterval ? p.x + floatScale * n.x : pIntOff.x,
-						  fabsf(p.y) < originInterval ? p.y + floatScale * n.y : pIntOff.y,
-						  fabsf(p.z) < originInterval ? p.z + floatScale * n.z : pIntOff.z };
+		return glm::vec3{ cuda::std::fabs(p.x) < originInterval ? p.x + floatScale * n.x : pIntOff.x,
+						  cuda::std::fabs(p.y) < originInterval ? p.y + floatScale * n.y : pIntOff.y,
+						  cuda::std::fabs(p.z) < originInterval ? p.z + floatScale * n.z : pIntOff.z };
 	}
 
 	CU_DEVICE CU_INLINE glm::vec3 reflect(const glm::vec3& v, const glm::vec3& n)
 	{
 		return -v + 2.0f * glm::dot(v, n) * n;
+	}
+	CU_DEVICE CU_INLINE glm::vec3 refract(const glm::vec3& v, glm::vec3 n, float eta, bool& valid, float* etaRel)
+	{
+		float cosThetaI{ glm::dot(v, n) };
+		if (cosThetaI < 0.0f)
+		{
+			eta = 1.0f / eta;
+			cosThetaI = -cosThetaI;
+			n = -n;
+		}
+
+		float sin2ThetaI{ cuda::std::fmax(0.0f, 1.0f - cosThetaI * cosThetaI) };
+		float sin2ThetaT{ sin2ThetaI / (eta * eta) };
+
+		if (sin2ThetaT >= 1.0f)
+		{
+			valid = false;
+			return {};
+		}
+		valid = true;
+
+		if (etaRel)
+			*etaRel = eta;
+
+		glm::vec3 r{ -v / eta + (cosThetaI / eta - cuda::std::sqrtf(1.0f - sin2ThetaT)) * n };
+		return r;
+	}
+
+	CU_DEVICE CU_INLINE float roughnessToAlpha(float roughness)
+	{
+		return cuda::std::sqrtf(roughness);
 	}
 }

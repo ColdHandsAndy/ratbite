@@ -277,4 +277,10 @@ public:
 		}
 		return t;
 	}
+	CU_DEVICE CU_INLINE float sample(float wavelength) const
+	{
+		float t{};
+		t = spectrum[lroundf(wavelength) - SpectralSettings::KMinSampledLambda];
+		return t;
+	}
 };

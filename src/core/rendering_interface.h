@@ -32,7 +32,8 @@ private:
 		MISS,
 		TRIANGLE,
 		DISK,
-		CALLABLE,
+		CALLABLE_CONDUCTOR_BXDF,
+		CALLABLE_DIELECTRIC_BXDF,
 		ALL_GROUPS
 	};
 	static constexpr uint32_t m_ptProgramGroupCount{ ALL_GROUPS };

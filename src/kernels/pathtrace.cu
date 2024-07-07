@@ -60,7 +60,7 @@ CU_DEVICE CU_INLINE void updateStateFlags(uint32_t& stateFlags)
 {
 	PathStateFlags excludeFlags{ PathStateFlagBit::EMISSIVE_OBJECT_HIT | PathStateFlagBit::CURRENT_HIT_SPECULAR };
 	PathStateFlags includeFlags{ (stateFlags & PathStateFlagBit::CURRENT_HIT_SPECULAR) ?
-		static_cast<PathStateFlags>(PathStateFlagBit::PREVIOUS_HIT_SPECULAR) : static_cast<PathStateFlags>(PathStateFlagBit::NO_FLAGS) };
+		static_cast<PathStateFlags>(PathStateFlagBit::PREVIOUS_HIT_SPECULAR) : static_cast<PathStateFlags>(PathStateFlagBit::REGULARIZED) };
 
 	stateFlags = (stateFlags & (~excludeFlags)) | includeFlags;
 }
@@ -164,12 +164,166 @@ extern "C" __global__ void __miss__miss()
 	optixSetPayload_6(PathStateFlags(PathStateFlagBit::MISS) << 16);
 }
 
-//extern "C" __device__ void __direct_callable__DielectricBxDF(const DirectLightData& directLightData, const glm::vec3& normal,
-//	SampledSpectrum& L, SampledWavelengths& wavelengths, SampledSpectrum& throughputWeight, float& bxdfPDF, glm::vec3& rD, PathStateFlags& stateFlags)
-//{
-//
-//}
-extern "C" __device__ void __direct_callable__ConductorBxDF(const MaterialData& materialData, const DirectLightData& directLightData, const glm::vec3& rO, const glm::vec3& normal, const glm::vec2& rand,
+extern "C" __device__ void __direct_callable__DielectricBxDF(const MaterialData& materialData, const DirectLightData& directLightData, const QRNG::State& qrngState, const glm::vec3& normal,
+	SampledSpectrum& L, SampledWavelengths& wavelengths, SampledSpectrum& throughputWeight, float& bxdfPDF, glm::vec3& rD, PathStateFlags& stateFlags)
+{
+	LocalTransform local{ normal } ;
+
+	glm::vec3 locWo{ -rD };
+	glm::vec3 locLi{ directLightData.lightDir };
+	local.toLocal(locWo, locLi);
+
+	glm::vec3 rand{ QRNG::Sobol::sample3D(qrngState, QRNG::DimensionOffset::SURFACE_BXDF) };
+	
+	wavelengths.terminateSecondary();
+
+	float eta{ parameters.spectrums[materialData.indexOfRefractSpectrumDataIndex].sample(wavelengths[0]) };
+
+	float alpha{ utility::roughnessToAlpha(materialData.mfRoughnessValue) };
+	microfacet::Microsurface ms{ .alphaX = alpha, .alphaY = alpha };
+	if (stateFlags & PathStateFlagBit::REGULARIZED)
+		ms.regularize();
+	glm::vec3 wo{ locWo };
+	const float cosThetaO{ LocalTransform::cosTheta(wo) };
+	glm::vec3 wi{};
+	glm::vec3 wm{};
+	microfacet::ContextOutgoing ctxo{ microfacet::createContextOutgoing(wo) };
+
+	if (alpha < 0.001f || eta == 1.0f)
+	{
+		float R{ microfacet::FReal(cosThetaO, eta) };
+		float T{ glm::clamp(1.0f - R, 0.0f, 1.0f) };
+		float p{ R / (R + T) };
+		if (rand.z < p)
+		{
+			wi = {-wo.x, -wo.y, wo.z};
+			bxdfPDF = p;
+			throughputWeight *= R / bxdfPDF;
+		}
+		else
+		{
+			bool valid;
+			float etaRel;
+			wi = utility::refract(wo, glm::vec3{0.0f, 0.0f, 1.0f}, eta, valid, &etaRel);
+			if (!valid)
+			{
+				stateFlags = stateFlags | PathStateFlagBit::PATH_TERMINATED;
+				return;
+			}
+			stateFlags = (stateFlags & PathStateFlagBit::TRANSMISSION) ? stateFlags & (~static_cast<PathStateFlags>(PathStateFlagBit::TRANSMISSION)) : stateFlags | PathStateFlagBit::TRANSMISSION;
+			bxdfPDF = cuda::std::fmax(0.0f, 1.0f - p);
+			throughputWeight *= T / (etaRel * etaRel) / bxdfPDF;
+		}
+		stateFlags = stateFlags | PathStateFlagBit::CURRENT_HIT_SPECULAR;
+		local.fromLocal(wi);
+		rD = wi;
+		return;
+	}
+
+	if (!directLightData.occluded)
+	{
+		wi = locLi;
+		float cosThetaI{ LocalTransform::cosTheta(wi) };
+		float t{ cosThetaO * cosThetaI };
+		bool reflect{ t > 0.0f };
+		float etaRel{ 1.0f };
+		if (!reflect)
+			etaRel = cosThetaO > 0.0f ? eta : 1.0f / eta;
+		wm = wi * etaRel + wo;
+		wm = glm::normalize(wm);
+		wm = wm.z > 0.0f ? wm : -wm;
+		float dotWmWo{ glm::dot(wm, wo) };
+		float dotWmWi{ glm::dot(wm, wi) };
+		if (t != 0.0f && !(dotWmWo * cosThetaO < 0.0f || dotWmWi * cosThetaI < 0.0f))
+		{
+			microfacet::ContextIncident ctxi{ microfacet::createContextIncident(wi) };
+			microfacet::ContextMicronormal ctxm{ microfacet::createContextMicronormal(wm) };
+			const float R{ microfacet::FReal(glm::dot(wo, wm), eta) };
+			const float T{ glm::clamp(1.0f - R, 0.0f, 1.0f) };
+			const float pR{ R / (R + T) };
+			const float pT{ cuda::std::fmax(0.0f, 1.0f - pR) };
+			const float cosFactor{ cuda::std::fabs(cosThetaI) };
+			const float wowmAbsDot{ cuda::std::fabs(dotWmWo) };
+
+			SampledSpectrum f;
+			float lbxdfPDF;
+			if (reflect)
+			{
+				f = microfacet::D(wm, ctxm, ms) * R * microfacet::G(wi, wo, ctxi, ctxo, ms)
+				    / (4.0f * cosThetaO * cosThetaI);
+				lbxdfPDF = microfacet::VNDF::PDF(wo, wm, ctxo, ctxm, ms) / (4.0f * wowmAbsDot) * pR;
+			}
+			else
+			{
+				float t{ dotWmWi + dotWmWo / etaRel };
+				float denom{ t * t };
+				float dwmdwi{ cuda::std::fabs(dotWmWi) / denom };
+				f = microfacet::D(wm, ctxm, ms) * T * microfacet::G(wi, wo, ctxi, ctxo, ms)
+					* cuda::std::fabs(dotWmWo * dotWmWi / (cosThetaO * cosThetaI * denom))
+					/ (etaRel * etaRel);
+				lbxdfPDF = microfacet::VNDF::PDF(wo, wm, ctxo, ctxm, ms) * dwmdwi * pT;
+			}
+			L += directLightData.spectrumSample * f * cosFactor * throughputWeight
+				 * MIS::powerHeuristic(1, directLightData.lightSamplePDF, 1, lbxdfPDF)
+				 / directLightData.lightSamplePDF;
+		}
+	}
+
+	wm = microfacet::VNDF::sample(wo, ctxo, ms, glm::vec2{rand.x, rand.y});
+	microfacet::ContextMicronormal ctxm{ microfacet::createContextMicronormal(wm) };
+
+	const float dotWmWo{ glm::dot(wo, wm) };
+	const float R{ microfacet::FReal(dotWmWo, eta) };
+	const float T{ glm::clamp(1.0f - R, 0.0f, 1.0f) };
+	const float pR{ R / (R + T) };
+
+	SampledSpectrum f;
+	float cosFactor;
+	if (rand.z < pR)
+	{
+		wi = utility::reflect(wo, wm);
+		if (wo.z * wi.z <= 0.0f)
+		{
+			stateFlags = stateFlags | PathStateFlagBit::PATH_TERMINATED;
+			return;
+		}
+		microfacet::ContextIncident ctxi{ microfacet::createContextIncident(wi) };
+		const float cosThetaI{ LocalTransform::cosTheta(wi) };
+		f = microfacet::D(wm, ctxm, ms) * R * microfacet::G(wi, wo, ctxi, ctxo, ms) 
+			/ (4.0f * cosThetaO * cosThetaI);
+		bxdfPDF = microfacet::VNDF::PDF(wo, wm, ctxo, ctxm, ms) / (4.0f * cuda::std::fabs(dotWmWo)) * pR;
+		cosFactor = cuda::std::fabs(cosThetaI);
+	}
+	else
+	{
+		bool valid;
+		float etaRel;
+		wi = utility::refract(wo, wm, eta, valid, &etaRel);
+		if (wo.z * wi.z >= 0.0f || !valid)
+		{
+			stateFlags = stateFlags | PathStateFlagBit::PATH_TERMINATED;
+			return;
+		}
+		microfacet::ContextIncident ctxi{ microfacet::createContextIncident(wi) };
+		const float cosThetaI{ LocalTransform::cosTheta(wi) };
+		const float dotWmWi{ glm::dot(wo, wi) };
+		const float t{ dotWmWi + dotWmWo / etaRel };
+		const float denom{ t * t };
+		const float dwmdwi{ cuda::std::fabs(dotWmWi) / denom };
+		f = microfacet::D(wm, ctxm, ms) * T * microfacet::G(wi, wo, ctxi, ctxo, ms)
+			* cuda::std::fabs(dotWmWo * dotWmWi / (cosThetaO * cosThetaI * denom));
+		const float pT{ cuda::std::fmax(0.0f, 1.0f - pR) };
+		bxdfPDF = microfacet::VNDF::PDF(wo, wm, ctxo, ctxm, ms) * dwmdwi * pT;
+		stateFlags = (stateFlags & PathStateFlagBit::TRANSMISSION) ? stateFlags & (~static_cast<PathStateFlags>(PathStateFlagBit::TRANSMISSION)) : stateFlags | PathStateFlagBit::TRANSMISSION;
+		cosFactor = cuda::std::fabs(cosThetaI);
+	}
+	throughputWeight *= f * cosFactor / bxdfPDF;
+
+	glm::vec3 locWi{ wi };
+	local.fromLocal(locWi);
+	rD = locWi;
+}
+extern "C" __device__ void __direct_callable__ConductorBxDF(const MaterialData& materialData, const DirectLightData& directLightData, const QRNG::State& qrngState, const glm::vec3& normal,
 	SampledSpectrum& L, SampledWavelengths& wavelengths, SampledSpectrum& throughputWeight, float& bxdfPDF, glm::vec3& rD, PathStateFlags& stateFlags)
 {
 	LocalTransform local{ normal } ;
@@ -187,13 +341,16 @@ extern "C" __device__ void __direct_callable__ConductorBxDF(const MaterialData& 
 	SampledSpectrum eta{ parameters.spectrums[materialData.indexOfRefractSpectrumDataIndex].sample(wavelengths) };
 	SampledSpectrum k{ parameters.spectrums[materialData.absorpCoefSpectrumDataIndex].sample(wavelengths) };
 
-	microfacet::Microsurface ms{ .alphaX = materialData.mfRoughnessValue, .alphaY = materialData.mfRoughnessValue };
+	float alpha{ utility::roughnessToAlpha(materialData.mfRoughnessValue) };
+	microfacet::Microsurface ms{ .alphaX = alpha, .alphaY = alpha };
+	if (stateFlags & PathStateFlagBit::REGULARIZED)
+		ms.regularize();
 	glm::vec3 wo{ locWo };
 	glm::vec3 wi{};
 	glm::vec3 wm{};
 	microfacet::ContextOutgoing ctxo{ microfacet::createContextOutgoing(wo) };
 
-	if (materialData.mfRoughnessValue < 0.001f)
+	if (alpha < 0.001f)
 	{
 		wi = glm::vec3{-wo.x, -wo.y, wo.z};
 		float absCosTheta{ cuda::std::fabs(LocalTransform::cosTheta(wi)) };
@@ -208,14 +365,15 @@ extern "C" __device__ void __direct_callable__ConductorBxDF(const MaterialData& 
 	if (!directLightData.occluded)
 	{
 		wi = locLi;
-		microfacet::ContextIncident ctxi{ microfacet::createContextIncident(wi) };
-		wm = glm::normalize(wi + wo);
-		microfacet::ContextMicronormal ctxm{ microfacet::createContextMicronormal(wm) };
 		if (wo.z * wi.z > 0.0f)
 		{
+			microfacet::ContextIncident ctxi{ microfacet::createContextIncident(wi) };
+			wm = glm::normalize(wi + wo);
+			microfacet::ContextMicronormal ctxm{ microfacet::createContextMicronormal(wm) };
+
 			const float wowmAbsDot{ cuda::std::fabs(glm::dot(wo, wm)) };
 			SampledSpectrum f{ microfacet::D(wm, ctxm, ms) * microfacet::FComplex(wowmAbsDot, eta, k) * microfacet::G(wi, wo, ctxi, ctxo, ms) 
-							   / (4.0f * cuda::std::fabs(LocalTransform::cosTheta(wo)) * cuda::std::fabs(LocalTransform::cosTheta(wi))) };
+							   / cuda::std::fabs(4.0f * LocalTransform::cosTheta(wo) * LocalTransform::cosTheta(wi)) };
 			float cosFactor{ cuda::std::fabs(LocalTransform::cosTheta(wi)) };
 			wm = wm.z > 0.0f ? wm : -wm;
 			float lbxdfPDF{ microfacet::VNDF::PDF(wo, wm, ctxo, ctxm, ms) / (4.0f * wowmAbsDot) };
@@ -225,6 +383,7 @@ extern "C" __device__ void __direct_callable__ConductorBxDF(const MaterialData& 
 		}
 	}
 
+	glm::vec2 rand{ QRNG::Sobol::sample2D(qrngState, QRNG::DimensionOffset::SURFACE_BXDF) };
 	wm = microfacet::VNDF::sample(wo, ctxo, ms, rand);
 	microfacet::ContextMicronormal ctxm{ microfacet::createContextMicronormal(wm) };
 
@@ -240,7 +399,7 @@ extern "C" __device__ void __direct_callable__ConductorBxDF(const MaterialData& 
 	const float wowmAbsDot{ cuda::std::fabs(glm::dot(wo, wm)) };
 
 	SampledSpectrum f{ microfacet::D(wm, ctxm, ms) * microfacet::FComplex(wowmAbsDot, eta, k) * microfacet::G(wi, wo, ctxi, ctxo, ms) 
-					   / (4.0f * cuda::std::fabs(LocalTransform::cosTheta(wo)) * cuda::std::fabs(LocalTransform::cosTheta(wi))) };
+					   / cuda::std::fabs(4.0f * LocalTransform::cosTheta(wo) * LocalTransform::cosTheta(wi)) };
 	float cosFactor{ cuda::std::fabs(LocalTransform::cosTheta(wi)) };
 	bxdfPDF = microfacet::VNDF::PDF(wo, wm, ctxo, ctxm, ms) / (4.0f * wowmAbsDot);
 	throughputWeight *= f * cosFactor / bxdfPDF;
@@ -263,6 +422,7 @@ extern "C" __global__ void __raygen__main()
 
 	glm::dvec4 result{ parameters.renderingData[li.y * parameters.filmWidth + li.x] };
 	uint32_t sample{ 0 };
+	bool terminated{ false };
 	do
 	{
 		const glm::vec2 subsampleOffset{ QRNG::Sobol::sample2D(qrngState, QRNG::DimensionOffset::FILTER) };
@@ -367,29 +527,34 @@ extern "C" __global__ void __raygen__main()
 			else
 				directLightData.occluded = true;
 
-			// Generate quasi-random values
-			glm::vec2 u{ QRNG::Sobol::sample2D(qrngState, QRNG::DimensionOffset::SURFACE_BXDF) };
 			// Launch BxDF evaluation
 			optixDirectCall<void, 
-				const MaterialData&, const DirectLightData&,
-				const glm::vec3&, const glm::vec3&, const glm::vec2&,
+				const MaterialData&, const DirectLightData&, const QRNG::State&,
+				const glm::vec3&,
 				SampledSpectrum&, SampledWavelengths&, SampledSpectrum&,
 				float&, glm::vec3&, PathStateFlags&>
 				(material->bxdfIndexSBT,
-				 *material,directLightData,
-				 rO, hN, u,
+				 *material, directLightData, qrngState,
+				 hN,
 				 L, wavelengths, throughputWeight,
 				 bxdfPDF, rD, stateFlags);
 
+			if (stateFlags & PathStateFlagBit::TRANSMISSION)
+				rO = utility::offsetRay(hP, -hN);
+
 			qrngState.advanceBounce();
 			updateStateFlags(stateFlags);
-		} while (++depth < parameters.maxPathDepth && !(stateFlags & PathStateFlagBit::PATH_TERMINATED));
+			terminated = stateFlags & PathStateFlagBit::PATH_TERMINATED;
+		} while (++depth < parameters.maxPathDepth && !terminated);
 	breakPath:
 		qrngState.advanceSample();
-		resolveSample(L, wavelengths.getPDF());
 
-		result += glm::dvec4{color::toRGB(*parameters.sensorSpectralCurveA, *parameters.sensorSpectralCurveB, *parameters.sensorSpectralCurveC,
-										  wavelengths, L), filter::computeFilterWeight(subsampleOffset)};
+		if (!terminated)
+		{
+			resolveSample(L, wavelengths.getPDF());
+			result += glm::dvec4{color::toRGB(*parameters.sensorSpectralCurveA, *parameters.sensorSpectralCurveB, *parameters.sensorSpectralCurveC,
+					wavelengths, L), filter::computeFilterWeight(subsampleOffset)};
+		}
 	} while (++sample < parameters.samplingState.count);
 	//result = glm::dvec4{ deb, 1.0f };
 	parameters.renderingData[li.y * parameters.filmWidth + li.x] = result;

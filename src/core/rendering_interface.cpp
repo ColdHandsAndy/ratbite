@@ -248,7 +248,8 @@ void RenderingInterface::createModulesProgramGroupsPipeline()
 		descs[RenderingInterface::MISS] = OptixProgramGroupDesc{ .kind = OPTIX_PROGRAM_GROUP_KIND_MISS, .raygen = {.module = optixModule, .entryFunctionName = Program::missName} };
 		descs[RenderingInterface::TRIANGLE] = OptixProgramGroupDesc{ .kind = OPTIX_PROGRAM_GROUP_KIND_HITGROUP, .hitgroup = {.moduleCH = optixModule, .entryFunctionNameCH = Program::closehitTriangleName} };
 		descs[RenderingInterface::DISK] = OptixProgramGroupDesc{ .kind = OPTIX_PROGRAM_GROUP_KIND_HITGROUP, .hitgroup = {.moduleCH = optixModule, .entryFunctionNameCH = Program::closehitDiskName, .moduleIS = optixModule, .entryFunctionNameIS = Program::intersectionDiskName} };
-		descs[RenderingInterface::CALLABLE] = OptixProgramGroupDesc{ .kind = OPTIX_PROGRAM_GROUP_KIND_CALLABLES, .callables = {.moduleDC = optixModule, .entryFunctionNameDC = Program::callableName} };
+		descs[RenderingInterface::CALLABLE_CONDUCTOR_BXDF] = OptixProgramGroupDesc{ .kind = OPTIX_PROGRAM_GROUP_KIND_CALLABLES, .callables = {.moduleDC = optixModule, .entryFunctionNameDC = Program::conductorBxDFName} };
+		descs[RenderingInterface::CALLABLE_DIELECTRIC_BXDF] = OptixProgramGroupDesc{ .kind = OPTIX_PROGRAM_GROUP_KIND_CALLABLES, .callables = {.moduleDC = optixModule, .entryFunctionNameDC = Program::dielectricBxDFName} };
 		OPTIX_CHECK_LOG(optixProgramGroupCreate(m_context, descs, ARRAYSIZE(descs),
 					&programGroupOptions,
 					OPTIX_LOG, &OPTIX_LOG_SIZE,
@@ -331,7 +332,7 @@ void RenderingInterface::fillMaterials(const SceneData& scene)
 		matData[i].mfRoughnessValue = scene.materialDescriptors[i].roughness;
 	}
 	//
-	lightEmissionSpectrumIndex = matData[3].emissionSpectrumDataIndex;
+	lightEmissionSpectrumIndex = matData[scene.geometryMaterialCount].emissionSpectrumDataIndex;
 	//
 	CUDA_CHECK(cudaMalloc(reinterpret_cast<void**>(&m_materialData), sizeof(MaterialData) * matData.size()));
 	CUDA_CHECK(cudaMemcpy(reinterpret_cast<void*>(m_materialData), matData.data(), sizeof(MaterialData) * matData.size(), cudaMemcpyHostToDevice));
@@ -358,12 +359,13 @@ void RenderingInterface::createSBT(const SceneData& scene)
 	CUDA_CHECK(cudaMemcpy(reinterpret_cast<void*>(m_sbt.missRecordBase), &missRecord, m_sbt.missRecordStrideInBytes * m_sbt.missRecordCount, cudaMemcpyHostToDevice));
 
 	//Fill callable records (bxdfs)
-	m_sbt.callablesRecordCount = 1;
+	m_sbt.callablesRecordCount = 2;
 	m_sbt.callablesRecordStrideInBytes = sizeof(OptixRecordCallable);
 	CUDA_CHECK(cudaMalloc(reinterpret_cast<void**>(&m_sbt.callablesRecordBase), m_sbt.callablesRecordStrideInBytes * m_sbt.callablesRecordCount));
-	OptixRecordCallable callableRecord{};
-	OPTIX_CHECK(optixSbtRecordPackHeader(m_ptProgramGroups[RenderingInterface::CALLABLE], &callableRecord));
-	CUDA_CHECK(cudaMemcpy(reinterpret_cast<void*>(m_sbt.callablesRecordBase), &callableRecord, m_sbt.callablesRecordStrideInBytes * m_sbt.callablesRecordCount, cudaMemcpyHostToDevice));
+	OptixRecordCallable callableRecords[2]{};
+	OPTIX_CHECK(optixSbtRecordPackHeader(m_ptProgramGroups[RenderingInterface::CALLABLE_CONDUCTOR_BXDF], callableRecords + 0));
+	OPTIX_CHECK(optixSbtRecordPackHeader(m_ptProgramGroups[RenderingInterface::CALLABLE_DIELECTRIC_BXDF], callableRecords + 1));
+	CUDA_CHECK(cudaMemcpy(reinterpret_cast<void*>(m_sbt.callablesRecordBase), callableRecords, m_sbt.callablesRecordStrideInBytes * m_sbt.callablesRecordCount, cudaMemcpyHostToDevice));
 
 	uint32_t hitgroupCount{ 0 };
 	//Fill hitgroup records for ordinary geometry (material data) | Trace stride, trace offset and instance offset affects these
@@ -566,7 +568,8 @@ RenderingInterface::~RenderingInterface()
 	OPTIX_CHECK(optixProgramGroupDestroy(m_ptProgramGroups[MISS]));
 	OPTIX_CHECK(optixProgramGroupDestroy(m_ptProgramGroups[TRIANGLE]));
 	OPTIX_CHECK(optixProgramGroupDestroy(m_ptProgramGroups[DISK]));
-	OPTIX_CHECK(optixProgramGroupDestroy(m_ptProgramGroups[CALLABLE]));
+	OPTIX_CHECK(optixProgramGroupDestroy(m_ptProgramGroups[CALLABLE_CONDUCTOR_BXDF]));
+	OPTIX_CHECK(optixProgramGroupDestroy(m_ptProgramGroups[CALLABLE_DIELECTRIC_BXDF]));
 	OPTIX_CHECK(optixModuleDestroy(m_ptModule));
 	OPTIX_CHECK(optixDeviceContextDestroy(m_context));
 

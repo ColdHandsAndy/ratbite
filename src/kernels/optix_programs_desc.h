@@ -62,5 +62,6 @@ namespace Program
     static constexpr char closehitTriangleName[]{ "__closesthit__triangle" };
     static constexpr char intersectionDiskName[]{ "__intersection__disk" };
     static constexpr char closehitDiskName[]{ "__closesthit__disk" };
-    static constexpr char callableName[]{ "__direct_callable__ConductorBxDF" };
+    static constexpr char conductorBxDFName[]{ "__direct_callable__ConductorBxDF" };
+    static constexpr char dielectricBxDFName[]{  "__direct_callable__DielectricBxDF" };
 }
