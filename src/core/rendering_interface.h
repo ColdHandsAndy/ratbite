@@ -61,6 +61,7 @@ private:
 	int m_launchWidth{};
 	int m_launchHeight{};
 	int m_sampleCount{};
+	int m_pathLength{};
 
 	int m_currentSampleOffset{ 0 };
 	int m_currentSampleCount{ 1 };
@@ -92,6 +93,7 @@ private:
 	void prepareDataForPreviewDrawing();
 	
 	void resolveRender(const glm::mat3& colorspaceTransform);
+	void processChanges(RenderContext& renderContext);
 	void updateSubLaunchData();
 	void updateSamplingState();
 	void launch();
@@ -102,11 +104,12 @@ public:
 	RenderingInterface(const RenderingInterface&) = delete;
 	RenderingInterface& operator=(RenderingInterface&&) = delete;
 	RenderingInterface& operator=(const RenderingInterface&) = delete;
-	~RenderingInterface();
+	~RenderingInterface() = default;
 
-	void render(const glm::mat3& colorspaceTransform);
+	void render(RenderContext& renderContext);
 	void drawPreview(int winWidth, int winHeight) const;
 	bool renderingIsFinished() const { return m_renderingIsFinished; }
 	bool sublaunchIsFinished() const { return m_sublaunchIsFinished; }
 	int getProcessedSampleCount() const { return m_processedSampleCount; }
+	void cleanup();
 };

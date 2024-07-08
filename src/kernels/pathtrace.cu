@@ -414,23 +414,21 @@ extern "C" __global__ void __raygen__main()
 	uint3 li{ optixGetLaunchIndex() };
 	glm::vec2 pixelCoordinate{ static_cast<float>(li.x), static_cast<float>(li.y) };
 
-	//
-	glm::vec3 deb{};
-	//
-
 	QRNG::State qrngState{ parameters.samplingState.offset, QRNG::getPixelHash(li.x, li.y) };
 
-	glm::dvec4 result{ parameters.renderingData[li.y * parameters.filmWidth + li.x] };
+	LaunchParameters::ResolutionState& resState{ parameters.resolutionState };
+
+	glm::dvec4 result{ parameters.samplingState.offset != 0 ? parameters.renderData[li.y * resState.filmWidth + li.x] : glm::dvec4{0.0} };
 	uint32_t sample{ 0 };
 	bool terminated{ false };
 	do
 	{
 		const glm::vec2 subsampleOffset{ QRNG::Sobol::sample2D(qrngState, QRNG::DimensionOffset::FILTER) };
-		const float xScale{ 2.0f * ((pixelCoordinate.x + subsampleOffset.x) * parameters.invFilmWidth) - 1.0f };
-		const float yScale{ 2.0f * ((pixelCoordinate.y + subsampleOffset.y) * parameters.invFilmHeight) - 1.0f };
+		const float xScale{ 2.0f * ((pixelCoordinate.x + subsampleOffset.x) * resState.invFilmWidth) - 1.0f };
+		const float yScale{ 2.0f * ((pixelCoordinate.y + subsampleOffset.y) * resState.invFilmHeight) - 1.0f };
 		glm::vec3 rD{ glm::normalize(parameters.camW
-		+ parameters.camU * xScale * parameters.camPerspectiveScaleW
-		+ parameters.camV * yScale * parameters.camPerspectiveScaleH) };
+		+ parameters.camU * xScale * resState.camPerspectiveScaleW
+		+ parameters.camV * yScale * resState.camPerspectiveScaleH) };
 		glm::vec3 rO{ 0.0 };
 
 		SampledWavelengths wavelengths{ SampledWavelengths::sampleVisible(QRNG::Sobol::sample1D(qrngState, QRNG::DimensionOffset::WAVELENGTH)) };
@@ -545,7 +543,7 @@ extern "C" __global__ void __raygen__main()
 			qrngState.advanceBounce();
 			updateStateFlags(stateFlags);
 			terminated = stateFlags & PathStateFlagBit::PATH_TERMINATED;
-		} while (++depth < parameters.maxPathDepth && !terminated);
+		} while (++depth < parameters.maxPathLength && !terminated);
 	breakPath:
 		qrngState.advanceSample();
 
@@ -556,6 +554,5 @@ extern "C" __global__ void __raygen__main()
 					wavelengths, L), filter::computeFilterWeight(subsampleOffset)};
 		}
 	} while (++sample < parameters.samplingState.count);
-	//result = glm::dvec4{ deb, 1.0f };
-	parameters.renderingData[li.y * parameters.filmWidth + li.x] = result;
+	parameters.renderData[li.y * resState.filmWidth + li.x] = result;
 }

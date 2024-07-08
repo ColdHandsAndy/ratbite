@@ -15,6 +15,7 @@
 #include "../core/scene.h"
 #include "../core/render_context.h"
 #include "../core/rendering_interface.h"
+#include "../core/ui.h"
 
 void initialize()
 {
@@ -23,52 +24,155 @@ void initialize()
 	CUDA_CHECK(cudaSetDeviceFlags(cudaDeviceMapHost));
 	OPTIX_CHECK(optixInit());
 }
-void draw(Window* window, const RenderingInterface* rInterface)
+void draw(Window* window, const RenderingInterface* rInterface, UI* ui)
 {
 	rInterface->drawPreview(window->getWidth(), window->getHeight());
 
+	ui->renderImGui();
+
 	glfwSwapBuffers(window->getGLFWwindow());
+}
+void menu(UI& ui, Camera& camera, RenderContext& rContext, SceneData& scene, int currentSampleCount)
+{
+	ui.startImGuiRecording();
+
+	bool changed{ false };
+	static bool pause{ false };
+	ImGui::Begin("Menu");
+	static RenderContext::Mode mode{ RenderContext::Mode::IMMEDIATE };
+	const char* modeNames[]{ "Intermediate", "Render" };
+	const char* modeName{ modeNames[static_cast<int>(mode)] };
+	ImGui::SeparatorText("Mode");
+	changed = ImGui::SliderInt("##", reinterpret_cast<int*>(&mode), static_cast<int>(RenderContext::Mode::IMMEDIATE), static_cast<int>(RenderContext::Mode::RENDER), modeName);
+	if (changed)
+	{
+		rContext.setRenderMode(mode);
+		if (mode == RenderContext::Mode::IMMEDIATE)
+			pause = false;
+		else
+			pause = true;
+	}
+
+	if (mode == RenderContext::Mode::IMMEDIATE)
+	{
+		ImGui::SeparatorText("Render settings");
+
+		static int sampleCount{ rContext.getSampleCount() };
+		changed = ImGui::InputInt("Sample count", &sampleCount);
+		sampleCount = std::max(1, std::min(65535, sampleCount));
+		if (changed) rContext.setSampleCount(sampleCount);
+
+		static int pathLength{ rContext.getPathLength() };
+		changed = ImGui::InputInt("Path length", &pathLength);
+		pathLength = std::max(1, std::min(65535, pathLength));
+		if (changed) rContext.setPathLength(pathLength);
+
+		static int renderWidth{ rContext.getRenderWidth() };
+		ImGui::DragInt("Render width", &renderWidth, 8, 1, 2048, "%d", ImGuiSliderFlags_AlwaysClamp);
+		if ((renderWidth != rContext.getRenderWidth()) && !ui.keyboardIsCaptured())
+			rContext.setRenderWidth(renderWidth);
+
+		static int renderHeight{ rContext.getRenderHeight() };
+		ImGui::DragInt("Render height", &renderHeight, 8, 1, 2048, "%d", ImGuiSliderFlags_AlwaysClamp);
+		if ((renderHeight != rContext.getRenderHeight()) && !ui.keyboardIsCaptured())
+			rContext.setRenderHeight(renderHeight);
+	}
+	else
+	{
+		const char* names[]{ "Rendering", "Paused" };
+		const float hues[]{ 0.38f, 0.14f };
+		const int index{ pause ? 1 : 0 };
+		ImGui::PushID(0);
+		ImGui::PushStyleColor(ImGuiCol_Button, static_cast<ImVec4>(ImColor::HSV(hues[index], 0.6f, 0.6f)));
+		ImGui::PushStyleColor(ImGuiCol_ButtonHovered, static_cast<ImVec4>(ImColor::HSV(hues[index], 0.7f, 0.7f)));
+		ImGui::PushStyleColor(ImGuiCol_ButtonActive, static_cast<ImVec4>(ImColor::HSV(hues[index], 0.8f, 0.8f)));
+		pause = ImGui::Button(names[index], ImVec2{80.0f, 30.0f}) ? !pause : pause;
+		ImGui::PopStyleColor(3);
+		ImGui::PopID();
+
+		if (pause)
+		{
+			ImGui::SeparatorText("Render settings");
+
+			static int sampleCount{ rContext.getSampleCount() };
+			changed = ImGui::InputInt("Sample count", &sampleCount);
+			sampleCount = std::max(1, std::min(65535, sampleCount));
+			if (changed) rContext.setSampleCount(sampleCount);
+
+			static int pathLength{ rContext.getPathLength() };
+			changed = ImGui::InputInt("Path length", &pathLength);
+			pathLength = std::max(1, std::min(65535, pathLength));
+			if (changed) rContext.setPathLength(pathLength);
+
+			static int renderWidth{ rContext.getRenderWidth() };
+			ImGui::DragInt("Render width", &renderWidth, 8, 1, 2048, "%d", ImGuiSliderFlags_AlwaysClamp);
+			if ((renderWidth != rContext.getRenderWidth()) && !ui.keyboardIsCaptured())
+				rContext.setRenderWidth(renderWidth);
+
+			static int renderHeight{ rContext.getRenderHeight() };
+			ImGui::DragInt("Render height", &renderHeight, 8, 1, 2048, "%d", ImGuiSliderFlags_AlwaysClamp);
+			if ((renderHeight != rContext.getRenderHeight()) && !ui.keyboardIsCaptured())
+				rContext.setRenderHeight(renderHeight);
+		}
+	}
+
+	if (ImGui::TreeNode("Info"))
+	{
+		ImGui::Text("Sample count: %d", currentSampleCount);
+
+		ImGui::TreePop();
+	}
+
+	ImGui::TextColored(ImColor(0.99f, 0.33f, 0.29f), "Press \"Space\" to hide this menu.");
+	ImGui::End();
+
+	rContext.setPause(pause);
 }
 
 int main(int argc, char** argv)
 {
 	// TODO:
+	// Immediate mode
+		// Changing camera settings
+		// Changing light and material settings
 	// Camera interface in pt kernel
-	// Explicit cleanup
 	// Sample count heuristic
-	// Window focus (scissors)
+	// OBJ loading
 	// GLTF loading
 
 	initialize();
 
 	constexpr uint32_t windowWidth{ 1280 };
 	constexpr uint32_t windowHeight{ 720 };
-	constexpr uint32_t renderWidth{ 256 };
-	constexpr uint32_t renderHeight{ 256 };
+	constexpr uint32_t renderWidth{ 128 };
+	constexpr uint32_t renderHeight{ 128 };
 	const int samplesToRender{ 1024 };
-	const int pathLength{ 5 };
+	const int pathLength{ 3 };
 	
 	Window window{ windowWidth, windowHeight };
-	// Camera camera{ {-278.0f, 273.0f, -800.0f}, {0.0f, 0.0f, 1.0f}, {0.0f, 1.0f, 0.0f} };	
-	Camera camera{ {-278.0f + 140.0f, 273.0f + 90.0f, -800.0f + 160.0f}, {-0.2f, -0.15f, 1.0f}, {0.0f, 1.0f, 0.0f} };	
+	Camera camera{ {-278.0f, 273.0f, -800.0f}, {0.0f, 0.0f, 1.0f}, {0.0f, 1.0f, 0.0f} };
 	SceneData scene{};
 	RenderContext rContext{ renderWidth, renderHeight, pathLength, samplesToRender, Color::RGBColorspace::sRGB };
 	RenderingInterface rInterface{ camera, rContext, scene };
+	UI ui{ window.getGLFWwindow() };
 
 	window.attachRenderingInterface(&rInterface);
+	window.attachUI(&ui);
 
 	while (!glfwWindowShouldClose(window.getGLFWwindow()))
 	{
-		if (!rInterface.renderingIsFinished())
-			rInterface.render(rContext.getColorspaceTransform());
-
-		std::cout << "Samples processed: " << rInterface.getProcessedSampleCount() << std::endl;
-
-		draw(&window, &rInterface);
-
 		glfwPollEvents();
+
+		if ((!rInterface.renderingIsFinished() || rContext.changesMade()) && !rContext.paused())
+			rInterface.render(rContext);
+
+		menu(ui, camera, rContext, scene, rInterface.getProcessedSampleCount());
+
+		draw(&window, &rInterface, &ui);
 	}
 
+	ui.cleanup();
+	rInterface.cleanup();
 	glfwTerminate();
 	return 0;
 }

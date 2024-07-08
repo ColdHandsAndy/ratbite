@@ -15,24 +15,27 @@
 
 struct LaunchParameters
 {
-	uint32_t filmWidth{};
-	uint32_t filmHeight{};
-	float invFilmWidth{};
-	float invFilmHeight{};
-	uint32_t maxPathDepth{};
+	struct ResolutionState
+	{
+		uint32_t filmWidth{};
+		uint32_t filmHeight{};
+		float invFilmWidth{};
+		float invFilmHeight{};
+		float camPerspectiveScaleW{};
+		float camPerspectiveScaleH{};
+	} resolutionState{};
+	uint32_t maxPathLength{};
 	struct SamplingState
 	{
 		uint32_t offset{};
 		uint32_t count{};
 	} samplingState{};
 
-	CUPTR(glm::dvec4) renderingData{};
+	CUPTR(glm::dvec4) renderData{};
 
 	glm::vec3 camU{};
 	glm::vec3 camV{};
 	glm::vec3 camW{};
-	float camPerspectiveScaleW{};
-	float camPerspectiveScaleH{};
 
 	uint32_t illuminantSpectralDistributionIndex{};
 	glm::vec3 diskLightPosition{};

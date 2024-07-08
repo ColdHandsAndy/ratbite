@@ -404,23 +404,27 @@ void RenderingInterface::fillSpectralCurvesData()
 void RenderingInterface::prepareDataForRendering(const Camera& camera, const RenderContext& renderContext, const SceneData& scene)
 {
 	m_sampleCount = renderContext.getSampleCount();
+	m_pathLength = renderContext.getPathLength();
 	m_launchWidth = renderContext.getRenderWidth();
 	m_launchHeight = renderContext.getRenderHeight();
 	CUDA_CHECK(cudaMalloc(reinterpret_cast<void**>(&m_renderData),
 				m_rDataComponentSize * m_rDataComponentCount * renderContext.getRenderWidth() * renderContext.getRenderHeight()));
 	LaunchParameters launchParameters{
-			.filmWidth = static_cast<uint32_t>(renderContext.getRenderWidth()),
-			.filmHeight = static_cast<uint32_t>(renderContext.getRenderHeight()),
-			.invFilmWidth = renderContext.getRenderInvWidth(),
-			.invFilmHeight = renderContext.getRenderInvHeight(),
-			.maxPathDepth = static_cast<uint32_t>(renderContext.getPathLength()),
-			.samplingState = { .offset = static_cast<uint32_t>(m_currentSampleOffset), .count = static_cast<uint32_t>(m_currentSampleCount) },
-			.renderingData = m_renderData,
+			.resolutionState = {
+				.filmWidth = static_cast<uint32_t>(renderContext.getRenderWidth()),
+				.filmHeight = static_cast<uint32_t>(renderContext.getRenderHeight()),
+				.invFilmWidth = renderContext.getRenderInvWidth(),
+				.invFilmHeight = renderContext.getRenderInvHeight(),
+				.camPerspectiveScaleW = static_cast<float>(glm::tan((glm::radians(45.0) * 0.5))) * (static_cast<float>(renderContext.getRenderWidth()) / static_cast<float>(renderContext.getRenderHeight())),
+				.camPerspectiveScaleH = static_cast<float>(glm::tan((glm::radians(45.0) * 0.5))) },
+			.maxPathLength = static_cast<uint32_t>(renderContext.getPathLength()),
+			.samplingState = {
+				.offset = static_cast<uint32_t>(m_currentSampleOffset),
+				.count = static_cast<uint32_t>(m_currentSampleCount) },
+			.renderData = m_renderData,
 			.camU = camera.getU(),
 			.camV = camera.getV(),
 			.camW = camera.getW(),
-			.camPerspectiveScaleW = static_cast<float>(glm::tan((glm::radians(45.0) * 0.5))) * (static_cast<float>(renderContext.getRenderWidth()) / static_cast<float>(renderContext.getRenderHeight())),
-			.camPerspectiveScaleH = static_cast<float>(glm::tan((glm::radians(45.0) * 0.5))),
 			.illuminantSpectralDistributionIndex = lightEmissionSpectrumIndex, //Change
 			.diskLightPosition = scene.diskLight.pos - camera.getPosition(), //Change
 			.diskLightRadius = scene.diskLight.radius, //Change
@@ -476,7 +480,9 @@ void RenderingInterface::prepareDataForPreviewDrawing()
 
 		"void main()\n"
 		"{\n"
-			"vec3 color = texture(tex, uv * uvScale + uvOffset).xyz;\n"
+			"vec2 fitUV = uv * uvScale + uvOffset;\n"
+			"vec3 color = texture(tex, fitUV).xyz;\n"
+			"if (fitUV.x < 0.0f || fitUV.x > 1.0f || fitUV.y < 0.0f || fitUV.y > 1.0f) color.xyz = vec3(0.0f);\n"
 			"FragColor = vec4(color, 1.0f);\n"
 		"}\0"
 	};
@@ -519,6 +525,65 @@ void RenderingInterface::resolveRender(const glm::mat3& colorspaceTransform)
 
 	CUDA_CHECK(cudaGraphicsUnmapResources(1, &m_graphicsResource, m_streams[0]));
 }
+void RenderingInterface::processChanges(RenderContext& renderContext)
+{
+	if (m_sampleCount != renderContext.getSampleCount())
+	{
+		m_sampleCount = renderContext.getSampleCount();
+	}	
+	if (m_pathLength != renderContext.getPathLength())
+	{
+		m_pathLength = renderContext.getPathLength();
+		CUDA_CHECK(cudaMemcpyAsync(
+					reinterpret_cast<void*>(m_lpBuffer + offsetof(LaunchParameters, maxPathLength)),
+					reinterpret_cast<void*>(&m_pathLength),
+					sizeof(m_pathLength),
+					cudaMemcpyHostToDevice,
+					m_streams[1]));
+	}	
+	if (m_launchWidth != renderContext.getRenderWidth() || m_launchHeight != renderContext.getRenderHeight())
+	{
+		m_launchWidth = renderContext.getRenderWidth();
+		m_launchHeight = renderContext.getRenderHeight();
+		LaunchParameters::ResolutionState newResolutionState{
+			.filmWidth = static_cast<uint32_t>(renderContext.getRenderWidth()),
+			.filmHeight = static_cast<uint32_t>(renderContext.getRenderHeight()),
+			.invFilmWidth = renderContext.getRenderInvWidth(),
+			.invFilmHeight = renderContext.getRenderInvHeight(),
+			.camPerspectiveScaleW = static_cast<float>(glm::tan((glm::radians(45.0) * 0.5))) * (static_cast<float>(renderContext.getRenderWidth()) / static_cast<float>(renderContext.getRenderHeight())),
+			.camPerspectiveScaleH = static_cast<float>(glm::tan((glm::radians(45.0) * 0.5))) };
+
+		CUDA_CHECK(cudaMemcpyAsync(
+					reinterpret_cast<void*>(m_lpBuffer + offsetof(LaunchParameters, resolutionState)),
+					reinterpret_cast<void*>(&newResolutionState),
+					sizeof(newResolutionState),
+					cudaMemcpyHostToDevice,
+					m_streams[1]));
+
+		CUDA_CHECK(cudaFree(reinterpret_cast<void*>(m_renderData)));
+		CUDA_CHECK(cudaMalloc(reinterpret_cast<void**>(&m_renderData),
+					m_rDataComponentSize * m_rDataComponentCount * renderContext.getRenderWidth() * renderContext.getRenderHeight()));
+
+		CUDA_CHECK(cudaMemcpyAsync(
+					reinterpret_cast<void*>(m_lpBuffer + offsetof(LaunchParameters, renderData)),
+					reinterpret_cast<void*>(&m_renderData),
+					sizeof(m_renderData),
+					cudaMemcpyHostToDevice,
+					m_streams[1]));
+
+		CUDA_CHECK(cudaGraphicsUnregisterResource(m_graphicsResource));
+		glBindTexture(GL_TEXTURE_2D, m_glTexture);
+		glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, m_launchWidth, m_launchHeight, 0, GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
+		CUDA_CHECK(cudaGraphicsGLRegisterImage(&m_graphicsResource, m_glTexture, GL_TEXTURE_2D, cudaGraphicsRegisterFlagsSurfaceLoadStore));
+		glBindTexture(GL_TEXTURE_2D, 0);
+	}	
+	m_currentSampleCount = 1;
+	m_currentSampleOffset = 0;
+	m_processedSampleCount = 0;
+
+	renderContext.acceptChanges();
+	m_renderingIsFinished = false;
+}
 void RenderingInterface::updateSubLaunchData()
 {
 	LaunchParameters::SamplingState currentSamplingState{
@@ -536,32 +601,13 @@ void RenderingInterface::updateSamplingState()
 {
 	m_processedSampleCount = m_currentSampleOffset;
 	m_currentSampleOffset += m_currentSampleCount;
-	m_currentSampleCount = std::min(std::max(0, m_sampleCount - static_cast<int>(m_currentSampleOffset)), 8);
+	m_currentSampleCount = std::min(std::max(0, m_sampleCount - static_cast<int>(m_currentSampleOffset)), 1);
 }
 void RenderingInterface::launch()
 {
 	OPTIX_CHECK(optixLaunch(m_pipeline, m_streams[1], m_lpBuffer, sizeof(LaunchParameters), &m_sbt, m_launchWidth, m_launchHeight, 1));
 }
-
-RenderingInterface::RenderingInterface(const Camera& camera, const RenderContext& renderContext, const SceneData& scene)
-{
-	createOptixContext();
-	createRenderResolveProgram();
-	createAccelerationStructures(scene, camera.getPosition());
-	createModulesProgramGroupsPipeline();
-	fillMaterials(scene);
-	createSBT(scene);
-	fillSpectralCurvesData();
-	prepareDataForRendering(camera, renderContext, scene);
-	prepareDataForPreviewDrawing();
-
-	CUDA_CHECK(cudaEventCreateWithFlags(&m_exexEvent, cudaEventDisableTiming));
-	for(auto& stream : m_streams)
-	{
-		cudaStreamCreate(&stream);
-	}
-}
-RenderingInterface::~RenderingInterface()
+void RenderingInterface::cleanup()
 {
 	OPTIX_CHECK(optixPipelineDestroy(m_pipeline));
 	OPTIX_CHECK(optixProgramGroupDestroy(m_ptProgramGroups[RAYGEN]));
@@ -592,7 +638,27 @@ RenderingInterface::~RenderingInterface()
 	CUDA_CHECK(cudaFree(reinterpret_cast<void*>(m_renderData)));
 }
 
-void RenderingInterface::render(const glm::mat3& colorspaceTransform)
+RenderingInterface::RenderingInterface(const Camera& camera, const RenderContext& renderContext, const SceneData& scene)
+{
+	createOptixContext();
+	createRenderResolveProgram();
+	createAccelerationStructures(scene, camera.getPosition());
+	createModulesProgramGroupsPipeline();
+	fillMaterials(scene);
+	createSBT(scene);
+	fillSpectralCurvesData();
+	prepareDataForRendering(camera, renderContext, scene);
+	prepareDataForPreviewDrawing();
+
+	CUDA_CHECK(cudaEventCreateWithFlags(&m_exexEvent, cudaEventDisableTiming));
+	int lowP;
+	int highP;
+	CUDA_CHECK(cudaDeviceGetStreamPriorityRange(&lowP, &highP));
+	CUDA_CHECK(cudaStreamCreateWithPriority(m_streams + 0, cudaStreamNonBlocking, highP));
+	CUDA_CHECK(cudaStreamCreateWithPriority(m_streams + 1, cudaStreamNonBlocking, lowP));
+}
+
+void RenderingInterface::render(RenderContext& renderContext)
 {
 	if (cudaEventQuery(m_exexEvent) != cudaSuccess)
 		return;
@@ -601,14 +667,16 @@ void RenderingInterface::render(const glm::mat3& colorspaceTransform)
 	if (first) [[unlikely]]
 		first = false;
 	else
-		resolveRender(colorspaceTransform);
+		resolveRender(renderContext.getColorspaceTransform());
+	CUDA_SYNC_CHECK();
+	if (renderContext.changesMade())
+		processChanges(renderContext);
 	if (m_currentSampleCount == 0)
 	{
 		m_processedSampleCount = m_currentSampleOffset;
 		m_renderingIsFinished = true;
 		return;
 	}
-	CUDA_SYNC_CHECK();
 	updateSubLaunchData();
 	updateSamplingState();
 	launch();

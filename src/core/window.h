@@ -8,7 +8,8 @@
 
 class Window;
 class RenderingInterface;
-void draw(Window* window, const RenderingInterface* rInterface);
+class UI;
+void draw(Window* window, const RenderingInterface* rInterface, UI* ui);
 
 class Window
 {
@@ -26,7 +27,8 @@ private:
 	{
 		Window* window{};
 		const RenderingInterface* rInterface{};
-		void (*draw)(Window* window, const RenderingInterface* rInterface){};
+		UI* ui{};
+		void (*draw)(Window* window, const RenderingInterface* rInterface, UI* ui){};
 	} m_userPointer{};
 public:
 	Window(int width, int height) : m_width{ width }, m_height{ height }, m_invWidth{ 1.0f / width }, m_invHeight{ 1.0f / height } 
@@ -66,6 +68,10 @@ public:
 	{
 		m_userPointer.rInterface = renderingInterface;
 	}
+	void attachUI(UI* ui)
+	{
+		m_userPointer.ui = ui;
+	}
 
 	void resize(int newWidth, int newHeight)
 	{
@@ -87,7 +93,7 @@ private:
 	static void glfwWindowRefreshCallback(GLFWwindow* window)
 	{
 		UserDataGLFW* userData{ reinterpret_cast<UserDataGLFW*>(glfwGetWindowUserPointer(window)) };
-		userData->draw(userData->window, userData->rInterface);
+		userData->draw(userData->window, userData->rInterface, userData->ui);
 	}
 	static void glfwFramebufferSizeCallback(GLFWwindow* window, int width, int height)
 	{
