@@ -251,7 +251,7 @@ extern "C" __device__ void __direct_callable__DielectricBxDF(const MaterialData&
 			{
 				f = microfacet::D(wm, ctxm, ms) * R * microfacet::G(wi, wo, ctxi, ctxo, ms)
 				    / (4.0f * cosThetaO * cosThetaI);
-				lbxdfPDF = microfacet::VNDF::PDF(wo, wm, ctxo, ctxm, ms) / (4.0f * wowmAbsDot) * pR;
+				lbxdfPDF = microfacet::VNDF::PDF<microfacet::VNDF::SPHERICAL_CAP>(wo, wm, wowmAbsDot, ctxo, ctxm, ms) / (4.0f * wowmAbsDot) * pR;
 			}
 			else
 			{
@@ -261,7 +261,7 @@ extern "C" __device__ void __direct_callable__DielectricBxDF(const MaterialData&
 				f = microfacet::D(wm, ctxm, ms) * T * microfacet::G(wi, wo, ctxi, ctxo, ms)
 					* cuda::std::fabs(dotWmWo * dotWmWi / (cosThetaO * cosThetaI * denom))
 					/ (etaRel * etaRel);
-				lbxdfPDF = microfacet::VNDF::PDF(wo, wm, ctxo, ctxm, ms) * dwmdwi * pT;
+				lbxdfPDF = microfacet::VNDF::PDF<microfacet::VNDF::SPHERICAL_CAP>(wo, wm, wowmAbsDot, ctxo, ctxm, ms) * dwmdwi * pT;
 			}
 			L += directLightData.spectrumSample * f * cosFactor * throughputWeight
 				 * MIS::powerHeuristic(1, directLightData.lightSamplePDF, 1, lbxdfPDF)
@@ -269,10 +269,11 @@ extern "C" __device__ void __direct_callable__DielectricBxDF(const MaterialData&
 		}
 	}
 
-	wm = microfacet::VNDF::sample(wo, ctxo, ms, glm::vec2{rand.x, rand.y});
+	wm = microfacet::VNDF::sample<microfacet::VNDF::SPHERICAL_CAP>(wo, ctxo, ms, glm::vec2{rand.x, rand.y});
 	microfacet::ContextMicronormal ctxm{ microfacet::createContextMicronormal(wm) };
 
 	const float dotWmWo{ glm::dot(wo, wm) };
+	const float absDotWmWo{ cuda::std::fabs(dotWmWo) };
 	const float R{ microfacet::FReal(dotWmWo, eta) };
 	const float T{ glm::clamp(1.0f - R, 0.0f, 1.0f) };
 	const float pR{ R / (R + T) };
@@ -291,7 +292,7 @@ extern "C" __device__ void __direct_callable__DielectricBxDF(const MaterialData&
 		const float cosThetaI{ LocalTransform::cosTheta(wi) };
 		f = microfacet::D(wm, ctxm, ms) * R * microfacet::G(wi, wo, ctxi, ctxo, ms) 
 			/ (4.0f * cosThetaO * cosThetaI);
-		bxdfPDF = microfacet::VNDF::PDF(wo, wm, ctxo, ctxm, ms) / (4.0f * cuda::std::fabs(dotWmWo)) * pR;
+		bxdfPDF = microfacet::VNDF::PDF<microfacet::VNDF::SPHERICAL_CAP>(wo, wm, absDotWmWo, ctxo, ctxm, ms) / (4.0f * absDotWmWo) * pR;
 		cosFactor = cuda::std::fabs(cosThetaI);
 	}
 	else
@@ -313,10 +314,17 @@ extern "C" __device__ void __direct_callable__DielectricBxDF(const MaterialData&
 		f = microfacet::D(wm, ctxm, ms) * T * microfacet::G(wi, wo, ctxi, ctxo, ms)
 			* cuda::std::fabs(dotWmWo * dotWmWi / (cosThetaO * cosThetaI * denom));
 		const float pT{ cuda::std::fmax(0.0f, 1.0f - pR) };
-		bxdfPDF = microfacet::VNDF::PDF(wo, wm, ctxo, ctxm, ms) * dwmdwi * pT;
+		bxdfPDF = microfacet::VNDF::PDF<microfacet::VNDF::SPHERICAL_CAP>(wo, wm, absDotWmWo, ctxo, ctxm, ms) * dwmdwi * pT;
 		stateFlags = (stateFlags & PathStateFlagBit::TRANSMISSION) ? stateFlags & (~static_cast<PathStateFlags>(PathStateFlagBit::TRANSMISSION)) : stateFlags | PathStateFlagBit::TRANSMISSION;
 		cosFactor = cuda::std::fabs(cosThetaI);
 	}
+
+	if (bxdfPDF == 0.0f)
+	{
+		stateFlags = stateFlags | PathStateFlagBit::PATH_TERMINATED;
+		return;
+	}
+
 	throughputWeight *= f * cosFactor / bxdfPDF;
 
 	glm::vec3 locWi{ wi };
@@ -376,7 +384,7 @@ extern "C" __device__ void __direct_callable__ConductorBxDF(const MaterialData& 
 							   / cuda::std::fabs(4.0f * LocalTransform::cosTheta(wo) * LocalTransform::cosTheta(wi)) };
 			float cosFactor{ cuda::std::fabs(LocalTransform::cosTheta(wi)) };
 			wm = wm.z > 0.0f ? wm : -wm;
-			float lbxdfPDF{ microfacet::VNDF::PDF(wo, wm, ctxo, ctxm, ms) / (4.0f * wowmAbsDot) };
+			float lbxdfPDF{ microfacet::VNDF::PDF<microfacet::VNDF::BOUNDED_SPHERICAL_CAP>(wo, wm, wowmAbsDot, ctxo, ctxm, ms) / (4.0f * wowmAbsDot) };
 			L += directLightData.spectrumSample * f * cosFactor * throughputWeight
 				* MIS::powerHeuristic(1, directLightData.lightSamplePDF, 1, lbxdfPDF)
 				/ directLightData.lightSamplePDF;
@@ -384,7 +392,7 @@ extern "C" __device__ void __direct_callable__ConductorBxDF(const MaterialData& 
 	}
 
 	glm::vec2 rand{ QRNG::Sobol::sample2D(qrngState, QRNG::DimensionOffset::SURFACE_BXDF) };
-	wm = microfacet::VNDF::sample(wo, ctxo, ms, rand);
+	wm = microfacet::VNDF::sample<microfacet::VNDF::BOUNDED_SPHERICAL_CAP>(wo, ctxo, ms, rand);
 	microfacet::ContextMicronormal ctxm{ microfacet::createContextMicronormal(wm) };
 
 	wi = utility::reflect(wo, wm);
@@ -401,7 +409,7 @@ extern "C" __device__ void __direct_callable__ConductorBxDF(const MaterialData& 
 	SampledSpectrum f{ microfacet::D(wm, ctxm, ms) * microfacet::FComplex(wowmAbsDot, eta, k) * microfacet::G(wi, wo, ctxi, ctxo, ms) 
 					   / cuda::std::fabs(4.0f * LocalTransform::cosTheta(wo) * LocalTransform::cosTheta(wi)) };
 	float cosFactor{ cuda::std::fabs(LocalTransform::cosTheta(wi)) };
-	bxdfPDF = microfacet::VNDF::PDF(wo, wm, ctxo, ctxm, ms) / (4.0f * wowmAbsDot);
+	bxdfPDF = microfacet::VNDF::PDF<microfacet::VNDF::BOUNDED_SPHERICAL_CAP>(wo, wm, wowmAbsDot, ctxo, ctxm, ms) / (4.0f * wowmAbsDot);
 	throughputWeight *= f * cosFactor / bxdfPDF;
 
 	glm::vec3 locWi{ wi };

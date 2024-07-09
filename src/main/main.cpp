@@ -40,7 +40,7 @@ void menu(UI& ui, Camera& camera, RenderContext& rContext, SceneData& scene, int
 	static bool pause{ false };
 	ImGui::Begin("Menu");
 	static RenderContext::Mode mode{ RenderContext::Mode::IMMEDIATE };
-	const char* modeNames[]{ "Intermediate", "Render" };
+	const char* modeNames[]{ "Immediate", "Render" };
 	const char* modeName{ modeNames[static_cast<int>(mode)] };
 	ImGui::SeparatorText("Mode");
 	changed = ImGui::SliderInt("##", reinterpret_cast<int*>(&mode), static_cast<int>(RenderContext::Mode::IMMEDIATE), static_cast<int>(RenderContext::Mode::RENDER), modeName);
@@ -116,7 +116,7 @@ void menu(UI& ui, Camera& camera, RenderContext& rContext, SceneData& scene, int
 		}
 	}
 
-	if (ImGui::TreeNode("Info"))
+	if (ImGui::TreeNodeEx("Info", ImGuiTreeNodeFlags_DefaultOpen))
 	{
 		ImGui::Text("Sample count: %d", currentSampleCount);
 

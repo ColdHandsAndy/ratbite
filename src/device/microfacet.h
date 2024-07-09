@@ -7,7 +7,7 @@
 #include <glm/vec2.hpp>
 #include <glm/vec3.hpp>
 #include <glm/common.hpp>
-#include "glm/geometric.hpp"
+#include <glm/geometric.hpp>
 #include <glm/gtc/constants.hpp>
 
 #include "../core/util_macros.h"
@@ -143,28 +143,81 @@ namespace microfacet
 
 	namespace VNDF
 	{
+		enum SamplingMethod
+		{
+			// "Sampling Visible GGX Normals with Spherical Caps" - Jonathan Dupuy, Anis Benyoub.
+			// https://arxiv.org/pdf/2306.05044
+			SPHERICAL_CAP,
+			// "Bounded VNDF Sampling for Smith–GGX Reflections" - Kenta Eto, Yusuke Tokuyoshi.
+			// https://gpuopen.com/download/publications/Bounded_VNDF_Sampling_for_Smith-GGX_Reflections.pdf
+			BOUNDED_SPHERICAL_CAP,
+			DESC
+		};
+		template<SamplingMethod Method>
 		CU_DEVICE CU_INLINE glm::vec3 sample(const glm::vec3& wo, const ContextOutgoing& ctxo, const Microsurface& ms, const glm::vec2& uv)
 		{
-			glm::vec3 wh{ glm::normalize(glm::vec3{ms.alphaX * wo.x, ms.alphaY * wo.y, wo.z}) };
-			if (wh.z < 0)
-				wh = -wh;
+			if constexpr (Method == SPHERICAL_CAP)
+			{
+				glm::vec3 woStd{ glm::normalize(glm::vec3{wo.x * ms.alphaX, wo.y * ms.alphaY, wo.z}) };
 
-			glm::vec3 t{ (wh.z < 0.99999f) ? glm::normalize(glm::cross(glm::vec3{0.0f, 0.0f, 1.0f}, wh)) : glm::vec3{1.0f, 0.0f, 0.0f} };
-			glm::vec3 b{ glm::cross(wh, t) };
+				float phi{ 2.0f * glm::pi<float>() * uv.x };
+				float b{ woStd.z };
+				float z{ __fmaf_rd(1.0f - uv.y, 1.0f + b, -b) };
+				float sinTheta{ cuda::std::sqrtf(glm::clamp(1.0f - z * z, 0.0f, 1.0f)) };
+				glm::vec3 wiStd{ sinTheta * cuda::std::cos(phi), sinTheta * cuda::std::sin(phi), z };
+				glm::vec3 wmStd{ woStd + wiStd };
+				glm::vec3 wm{ glm::normalize(glm::vec3{wmStd.x * ms.alphaX, wmStd.y * ms.alphaY, wmStd.z}) };
+				return wm;
+			}
+			else if constexpr (Method == BOUNDED_SPHERICAL_CAP)
+			{
+				glm::vec3 woStd{ glm::normalize(glm::vec3{wo.x * ms.alphaX, wo.y * ms.alphaY, wo.z}) };
 
-			glm::vec2 p{ sampling::disk::sampleUniform2DPolar(uv) };
-
-			float h{ cuda::std::sqrtf(1.0f - p.x * p.x) };
-			p.y = glm::mix(h, p.y, (1.0f + wh.z) / 2.0f);
-
-			float pz{ cuda::std::sqrtf(cuda::std::fmax(0.0f, 1.0f - (p.x * p.x + p.y * p.y))) };
-			glm::vec3 nh{ p.x * t + p.y * b + pz * wh };
-
-			return glm::normalize(glm::vec3{ms.alphaX * nh.x, ms.alphaY * nh.y, cuda::std::fmax(1e-6f, nh.z)});
+				float phi{ 2.0f * glm::pi<float>() * uv.x };
+				float a{ cuda::std::fmin(ms.alphaX, ms.alphaY) };
+				float s{ 1.0f + glm::length(glm::vec2{wo.x, wo.y}) };
+				float a2{ a * a };
+				float s2{ s * s };
+				float k{ (1.0f - a2) * s2 / (s2 * a2 * wo.z * wo.z) };
+				float b{ wo.z > 0.0f ? k * woStd.z : woStd.z };
+				float z{ __fmaf_rd(1.0f - uv.y, 1.0f + b, -b) };
+				float sinTheta{ cuda::std::sqrtf(glm::clamp(1.0f - z * z, 0.0f, 1.0f)) };
+				glm::vec3 wiStd{ sinTheta * cuda::std::cos(phi), sinTheta * cuda::std::sin(phi), z };
+				glm::vec3 wmStd{ woStd + wiStd };
+				glm::vec3 wm{ glm::normalize(glm::vec3{wmStd.x * ms.alphaX, wmStd.y * ms.alphaY, wmStd.z}) };
+				return wm;
+			}
+			else
+				static_assert(false);
+			return {};
 		}
-		CU_DEVICE CU_INLINE float PDF(const glm::vec3& wo, const glm::vec3& wm, const ContextOutgoing& ctxo, const ContextMicronormal& ctxm, const Microsurface& ms)
+		template<SamplingMethod Method>
+		CU_DEVICE CU_INLINE float PDF(const glm::vec3& wo, const glm::vec3& wm, const float absDotWoWm, const ContextOutgoing& ctxo, const ContextMicronormal& ctxm, const Microsurface& ms)
 		{
-			return G1(wo, ctxo, ms) / cuda::std::fabs(LocalTransform::cosTheta(wo)) * D(wm, ctxm, ms) * cuda::std::fabs(glm::dot(wo, wm));
+			if constexpr (Method == SPHERICAL_CAP)
+			{
+				return G1(wo, ctxo, ms) / cuda::std::fabs(LocalTransform::cosTheta(wo)) * D(wm, ctxm, ms) * absDotWoWm;
+			}
+			else if constexpr (Method == BOUNDED_SPHERICAL_CAP)
+			{
+				float ndf{ D(wm, ctxm, ms) };
+				glm::vec2 ao{ glm::vec2{wo.x, wo.y} * glm::vec2{ms.alphaX, ms.alphaY} };
+				float len2{ glm::dot(ao, ao) };
+				float t{ cuda::std::sqrt(len2 + wo.z * wo.z) };
+				if (wo.z >= 0.0f)
+				{
+					float a{ glm::clamp(cuda::std::fmin(ms.alphaX, ms.alphaY), 0.0f, 1.0f) };
+					float s{ 1.0f + glm::length(glm::vec2{wo.x, wo.y}) };
+					float a2{ a * a };
+					float s2{ s * s };
+					float k{ (1.0f - a2) * s2 / (s2 + a2 * wo.z * wo.z) };
+					return ndf * 2.0f * absDotWoWm / (k * wo.z + t); // Jacobian is applied outside of this function, therfore different formula
+				}
+				return ndf * (t - wo.z) * 2.0f * absDotWoWm / len2; // Jacobian is applied outside of this function, therfore different formula
+			}
+			else
+				static_assert(false);
+			return {};
 		}
 	}
 }
