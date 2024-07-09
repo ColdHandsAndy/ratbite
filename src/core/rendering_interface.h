@@ -93,7 +93,7 @@ private:
 	void prepareDataForPreviewDrawing();
 	
 	void resolveRender(const glm::mat3& colorspaceTransform);
-	void processChanges(RenderContext& renderContext);
+	void processChanges(RenderContext& renderContext, Camera& camera, SceneData& scene);
 	void updateSubLaunchData();
 	void updateSamplingState();
 	void launch();
@@ -106,7 +106,7 @@ public:
 	RenderingInterface& operator=(const RenderingInterface&) = delete;
 	~RenderingInterface() = default;
 
-	void render(RenderContext& renderContext);
+	void render(RenderContext& renderContext, Camera& camera, SceneData& scene, bool changesMade);
 	void drawPreview(int winWidth, int winHeight) const;
 	bool renderingIsFinished() const { return m_renderingIsFinished; }
 	bool sublaunchIsFinished() const { return m_sublaunchIsFinished; }

@@ -41,6 +41,7 @@ public:
 		m_glfwWindow = glfwCreateWindow(m_width, m_height, "ratbite", NULL, NULL);
 		R_ASSERT(m_glfwWindow != nullptr);
 		glfwMakeContextCurrent(m_glfwWindow);
+		glfwSetInputMode(m_glfwWindow, GLFW_STICKY_KEYS, GLFW_TRUE);
 		glfwSetWindowUserPointer(m_glfwWindow, &m_userPointer);
 		m_userPointer.window = this;
 		m_userPointer.draw = draw;

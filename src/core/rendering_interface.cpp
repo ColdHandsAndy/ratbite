@@ -45,23 +45,16 @@ void RenderingInterface::createAccelerationStructures(const SceneData& scene, co
 	CUdeviceptr vertexBuffer{};
 	CUdeviceptr sbtOffsetBuffer{};
 	CUdeviceptr aabbBuffer{};
-	CUdeviceptr worldToWorldCameraTransformBuffer{};
 	CUdeviceptr instanceBuffer{};
 	CUdeviceptr tempBuffer{};
 
-	float preTransform[12]{
-		1.0f, 0.0f, 0.0f, -cameraPosition.x,
-		0.0f, 1.0f, 0.0f, -cameraPosition.y,
-		0.0f, 0.0f, 1.0f, -cameraPosition.z, };
 
 	const uint32_t instanceCount{ 2 };
 
 	CUDA_CHECK(cudaMalloc(reinterpret_cast<void**>(&vertexBuffer), sizeof(scene.vertices[0]) * scene.vertices.size()));
 	CUDA_CHECK(cudaMalloc(reinterpret_cast<void**>(&sbtOffsetBuffer), sizeof(scene.SBTIndices[0]) * scene.SBTIndices.size()));
-	CUDA_CHECK(cudaMalloc(reinterpret_cast<void**>(&worldToWorldCameraTransformBuffer), sizeof(preTransform)));
 	CUDA_CHECK(cudaMemcpy(reinterpret_cast<void*>(vertexBuffer), scene.vertices.data(), sizeof(scene.vertices[0]) * scene.vertices.size(), cudaMemcpyHostToDevice));
 	CUDA_CHECK(cudaMemcpy(reinterpret_cast<void*>(sbtOffsetBuffer), scene.SBTIndices.data(), sizeof(scene.SBTIndices[0]) * scene.SBTIndices.size(), cudaMemcpyHostToDevice));
-	CUDA_CHECK(cudaMemcpy(reinterpret_cast<void*>(worldToWorldCameraTransformBuffer), preTransform, sizeof(preTransform), cudaMemcpyHostToDevice));
 
 	{
 		OptixAccelBuildOptions accelBuildOptions{
@@ -76,12 +69,11 @@ void RenderingInterface::createAccelerationStructures(const SceneData& scene, co
 					.numVertices = static_cast<unsigned int>(scene.vertices.size()),
 					.vertexFormat = OPTIX_VERTEX_FORMAT_FLOAT3,
 					.vertexStrideInBytes = sizeof(float) * 4,
-					.preTransform = worldToWorldCameraTransformBuffer,
 					.flags = geometryFlags,
 					.numSbtRecords = scene.trianglePrimSBTCount,
 					.sbtIndexOffsetBuffer = sbtOffsetBuffer,
 					.sbtIndexOffsetSizeInBytes = sizeof(scene.SBTIndices[0]),
-					.transformFormat = OPTIX_TRANSFORM_FORMAT_MATRIX_FLOAT12 } } };
+					.transformFormat = OPTIX_TRANSFORM_FORMAT_NONE } } };
 		OptixAccelBufferSizes computedBufferSizes{};
 		OPTIX_CHECK(optixAccelComputeMemoryUsage(m_context, &accelBuildOptions, gasBuildInputs, ARRAYSIZE(gasBuildInputs), &computedBufferSizes));
 		size_t compactedSizeOffset{ ALIGNED_SIZE(computedBufferSizes.tempSizeInBytes, 8ull) };
@@ -107,7 +99,7 @@ void RenderingInterface::createAccelerationStructures(const SceneData& scene, co
 	}
 
 	{
-		OptixAabb aabbs[]{ scene.diskLight.getOptixAABB(-cameraPosition) };
+		OptixAabb aabbs[]{ scene.diskLight.getOptixAABB() };
 		CUDA_CHECK(cudaMalloc(reinterpret_cast<void**>(&aabbBuffer), sizeof(OptixAabb) * scene.lightCount));
 		CUDA_CHECK(cudaMemcpy(reinterpret_cast<void*>(aabbBuffer), aabbs, sizeof(OptixAabb) * scene.lightCount, cudaMemcpyHostToDevice));
 		OptixAccelBuildOptions customPrimAccelBuildOptions{
@@ -158,15 +150,15 @@ void RenderingInterface::createAccelerationStructures(const SceneData& scene, co
 	instances[0].transform[0]  = 1.0f;
 	instances[0].transform[1]  = 0.0f;
 	instances[0].transform[2]  = 0.0f;
-	instances[0].transform[3]  = 0.0f;
+	instances[0].transform[3]  = -cameraPosition.x;
 	instances[0].transform[4]  = 0.0f;
 	instances[0].transform[5]  = 1.0f;
 	instances[0].transform[6]  = 0.0f;
-	instances[0].transform[7]  = 0.0f;
+	instances[0].transform[7]  = -cameraPosition.y;
 	instances[0].transform[8]  = 0.0f;
 	instances[0].transform[9]  = 0.0f;
 	instances[0].transform[10] = 1.0f;
-	instances[0].transform[11] = 0.0f;
+	instances[0].transform[11] = -cameraPosition.z;
 	instances[1].instanceId = 1;
 	instances[1].sbtOffset = scene.trianglePrimSBTCount;
 	instances[1].traversableHandle = m_customPrimHandle;
@@ -175,15 +167,15 @@ void RenderingInterface::createAccelerationStructures(const SceneData& scene, co
 	instances[1].transform[0]  = 1.0f;
 	instances[1].transform[1]  = 0.0f;
 	instances[1].transform[2]  = 0.0f;
-	instances[1].transform[3]  = 0.0f;
+	instances[1].transform[3]  = -cameraPosition.x;
 	instances[1].transform[4]  = 0.0f;
 	instances[1].transform[5]  = 1.0f;
 	instances[1].transform[6]  = 0.0f;
-	instances[1].transform[7]  = 0.0f;
+	instances[1].transform[7]  = -cameraPosition.y;
 	instances[1].transform[8]  = 0.0f;
 	instances[1].transform[9]  = 0.0f;
 	instances[1].transform[10] = 1.0f;
-	instances[1].transform[11] = 0.0f;
+	instances[1].transform[11] = -cameraPosition.z;
 	OptixBuildInput iasBuildInputs[]{
 		OptixBuildInput{ .type = OPTIX_BUILD_INPUT_TYPE_INSTANCES,
 			.instanceArray = OptixBuildInputInstanceArray{ .instances = instanceBuffer, .numInstances = instanceCount } } };
@@ -202,9 +194,9 @@ void RenderingInterface::createAccelerationStructures(const SceneData& scene, co
 	CUDA_CHECK(cudaFree(reinterpret_cast<void*>(tempBuffer)));
 
 	CUDA_CHECK(cudaFree(reinterpret_cast<void*>(vertexBuffer)));
+	CUDA_CHECK(cudaFree(reinterpret_cast<void*>(instanceBuffer)));
 	CUDA_CHECK(cudaFree(reinterpret_cast<void*>(sbtOffsetBuffer)));
 	CUDA_CHECK(cudaFree(reinterpret_cast<void*>(aabbBuffer)));
-	CUDA_CHECK(cudaFree(reinterpret_cast<void*>(worldToWorldCameraTransformBuffer)));
 }
 void RenderingInterface::createModulesProgramGroupsPipeline()
 {
@@ -422,11 +414,13 @@ void RenderingInterface::prepareDataForRendering(const Camera& camera, const Ren
 				.offset = static_cast<uint32_t>(m_currentSampleOffset),
 				.count = static_cast<uint32_t>(m_currentSampleCount) },
 			.renderData = m_renderData,
-			.camU = camera.getU(),
-			.camV = camera.getV(),
-			.camW = camera.getW(),
+			.cameraState = {
+				.camU = camera.getU(),
+				.camV = camera.getV(),
+				.camW = camera.getW(),
+			},
 			.illuminantSpectralDistributionIndex = lightEmissionSpectrumIndex, //Change
-			.diskLightPosition = scene.diskLight.pos - camera.getPosition(), //Change
+			.diskLightPosition = scene.diskLight.pos - glm::vec3{camera.getPosition()}, //Change
 			.diskLightRadius = scene.diskLight.radius, //Change
 			.diskFrame = scene.diskLight.frame, //Change
 			.diskNormal = scene.diskLight.normal, //Change
@@ -525,7 +519,7 @@ void RenderingInterface::resolveRender(const glm::mat3& colorspaceTransform)
 
 	CUDA_CHECK(cudaGraphicsUnmapResources(1, &m_graphicsResource, m_streams[0]));
 }
-void RenderingInterface::processChanges(RenderContext& renderContext)
+void RenderingInterface::processChanges(RenderContext& renderContext, Camera& camera, SceneData& scene)
 {
 	if (m_sampleCount != renderContext.getSampleCount())
 	{
@@ -577,11 +571,104 @@ void RenderingInterface::processChanges(RenderContext& renderContext)
 		CUDA_CHECK(cudaGraphicsGLRegisterImage(&m_graphicsResource, m_glTexture, GL_TEXTURE_2D, cudaGraphicsRegisterFlagsSurfaceLoadStore));
 		glBindTexture(GL_TEXTURE_2D, 0);
 	}	
+
+	if (camera.positionChanged())
+	{
+		const glm::vec3 cameraPosition{ camera.getPosition() };
+
+
+		glm::vec3 lightPosition{ scene.diskLight.pos - cameraPosition };
+		CUDA_CHECK(cudaMemcpyAsync(
+					reinterpret_cast<void*>(m_lpBuffer + offsetof(LaunchParameters, diskLightPosition)),
+					reinterpret_cast<void*>(&lightPosition),
+					sizeof(lightPosition),
+					cudaMemcpyHostToDevice,
+					m_streams[1]));
+
+
+		CUDA_CHECK(cudaFree(reinterpret_cast<void*>(m_iasBuffer)));
+
+		CUdeviceptr instanceBuffer{};
+		CUdeviceptr tempBuffer{};
+
+		constexpr int instanceCount{ 2 };
+		OptixInstance* instances{};
+		CUDA_CHECK(cudaHostAlloc(&instances, sizeof(OptixInstance) * instanceCount, cudaHostAllocMapped));
+		CUDA_CHECK(cudaHostGetDevicePointer(reinterpret_cast<void**>(&instanceBuffer), instances, 0));
+		instances[0].instanceId = 0;
+		instances[0].sbtOffset = 0;
+		instances[0].traversableHandle = m_gasHandle;
+		instances[0].visibilityMask = 0xFF;
+		instances[0].flags = OPTIX_INSTANCE_FLAG_NONE;
+		instances[0].transform[0]  = 1.0f;
+		instances[0].transform[1]  = 0.0f;
+		instances[0].transform[2]  = 0.0f;
+		instances[0].transform[3]  = -cameraPosition.x;
+		instances[0].transform[4]  = 0.0f;
+		instances[0].transform[5]  = 1.0f;
+		instances[0].transform[6]  = 0.0f;
+		instances[0].transform[7]  = -cameraPosition.y;
+		instances[0].transform[8]  = 0.0f;
+		instances[0].transform[9]  = 0.0f;
+		instances[0].transform[10] = 1.0f;
+		instances[0].transform[11] = -cameraPosition.z;
+		instances[1].instanceId = 1;
+		instances[1].sbtOffset = scene.trianglePrimSBTCount;
+		instances[1].traversableHandle = m_customPrimHandle;
+		instances[1].visibilityMask = 0xFF;
+		instances[1].flags = OPTIX_INSTANCE_FLAG_NONE;
+		instances[1].transform[0]  = 1.0f;
+		instances[1].transform[1]  = 0.0f;
+		instances[1].transform[2]  = 0.0f;
+		instances[1].transform[3]  = -cameraPosition.x;
+		instances[1].transform[4]  = 0.0f;
+		instances[1].transform[5]  = 1.0f;
+		instances[1].transform[6]  = 0.0f;
+		instances[1].transform[7]  = -cameraPosition.y;
+		instances[1].transform[8]  = 0.0f;
+		instances[1].transform[9]  = 0.0f;
+		instances[1].transform[10] = 1.0f;
+		instances[1].transform[11] = -cameraPosition.z;
+		OptixBuildInput iasBuildInputs[]{
+			OptixBuildInput{ .type = OPTIX_BUILD_INPUT_TYPE_INSTANCES,
+				.instanceArray = OptixBuildInputInstanceArray{ .instances = instanceBuffer, .numInstances = instanceCount } } };
+
+		OptixAccelBuildOptions accelBuildOptions{
+			.buildFlags = OPTIX_BUILD_FLAG_ALLOW_RANDOM_INSTANCE_ACCESS | OPTIX_BUILD_FLAG_PREFER_FAST_TRACE | OPTIX_BUILD_FLAG_ALLOW_COMPACTION,
+				.operation = OPTIX_BUILD_OPERATION_BUILD };
+		OptixAccelBufferSizes computedBufferSizes{};
+		OPTIX_CHECK(optixAccelComputeMemoryUsage(m_context, &accelBuildOptions, iasBuildInputs, ARRAYSIZE(iasBuildInputs), &computedBufferSizes));
+		CUDA_CHECK(cudaMalloc(reinterpret_cast<void**>(&tempBuffer), computedBufferSizes.tempSizeInBytes));
+		CUDA_CHECK(cudaMalloc(reinterpret_cast<void**>(&m_iasBuffer), computedBufferSizes.outputSizeInBytes));
+		OPTIX_CHECK(optixAccelBuild(m_context, 0, &accelBuildOptions,
+					iasBuildInputs, ARRAYSIZE(iasBuildInputs), 
+					tempBuffer, computedBufferSizes.tempSizeInBytes, m_iasBuffer,
+					computedBufferSizes.outputSizeInBytes, &m_iasHandle, nullptr, 0));
+
+		CUDA_CHECK(cudaFree(reinterpret_cast<void*>(tempBuffer)));
+		CUDA_CHECK(cudaFree(reinterpret_cast<void*>(instanceBuffer)));
+	}
+	if (camera.orientationChanged())
+	{
+		LaunchParameters::CameraState newCamState{
+			.camU = camera.getU(),
+			.camV = camera.getV(),
+			.camW = camera.getW() };
+
+		CUDA_CHECK(cudaMemcpyAsync(
+					reinterpret_cast<void*>(m_lpBuffer + offsetof(LaunchParameters, cameraState)),
+					reinterpret_cast<void*>(&newCamState),
+					sizeof(newCamState),
+					cudaMemcpyHostToDevice,
+					m_streams[1]));
+	}
+
 	m_currentSampleCount = 1;
 	m_currentSampleOffset = 0;
 	m_processedSampleCount = 0;
 
 	renderContext.acceptChanges();
+	camera.acceptChanges();
 	m_renderingIsFinished = false;
 }
 void RenderingInterface::updateSubLaunchData()
@@ -658,7 +745,7 @@ RenderingInterface::RenderingInterface(const Camera& camera, const RenderContext
 	CUDA_CHECK(cudaStreamCreateWithPriority(m_streams + 1, cudaStreamNonBlocking, lowP));
 }
 
-void RenderingInterface::render(RenderContext& renderContext)
+void RenderingInterface::render(RenderContext& renderContext, Camera& camera, SceneData& scene, bool changesMade)
 {
 	if (cudaEventQuery(m_exexEvent) != cudaSuccess)
 		return;
@@ -669,8 +756,8 @@ void RenderingInterface::render(RenderContext& renderContext)
 	else
 		resolveRender(renderContext.getColorspaceTransform());
 	CUDA_SYNC_CHECK();
-	if (renderContext.changesMade())
-		processChanges(renderContext);
+	if (changesMade)
+		processChanges(renderContext, camera, scene);
 	if (m_currentSampleCount == 0)
 	{
 		m_processedSampleCount = m_currentSampleOffset;

@@ -265,7 +265,7 @@ struct SceneData
 		MaterialDescriptor{.bxdfIndex = 1,
 			.baseIOR = SpectralData::SpectralDataType::D_GLASS_BK7_IOR,
 			.baseEmission = SpectralData::SpectralDataType::DESC,
-			.roughness = 0.001f},
+			.roughness = 0.0f},
 		MaterialDescriptor{.bxdfIndex = 0,
 			.baseIOR = SpectralData::SpectralDataType::C_METAL_TIO2_IOR,
 			.baseAC = SpectralData::SpectralDataType::C_METAL_TIO2_AC,

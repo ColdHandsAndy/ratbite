@@ -128,12 +128,57 @@ void menu(UI& ui, Camera& camera, RenderContext& rContext, SceneData& scene, int
 
 	rContext.setPause(pause);
 }
+void input(Window& window, UI& ui, Camera& camera, RenderContext& rContext)
+{
+	static bool first{ true };
+
+	GLFWwindow* glfwwindow{ window.getGLFWwindow() };
+	int state{};
+	state = glfwGetKey(glfwwindow, GLFW_KEY_W);
+	if (state == GLFW_PRESS)
+		camera.addMoveDir(Camera::Direction::FORWARD);
+	state = glfwGetKey(glfwwindow, GLFW_KEY_A);
+	if (state == GLFW_PRESS)
+		camera.addMoveDir(Camera::Direction::LEFT);
+	state = glfwGetKey(glfwwindow, GLFW_KEY_S);
+	if (state == GLFW_PRESS)
+		camera.addMoveDir(Camera::Direction::BACKWARD);
+	state = glfwGetKey(glfwwindow, GLFW_KEY_D);
+	if (state == GLFW_PRESS)
+		camera.addMoveDir(Camera::Direction::RIGHT);
+	state = glfwGetKey(glfwwindow, GLFW_KEY_SPACE);
+	if (state == GLFW_PRESS)
+		camera.addMoveDir(Camera::Direction::UP);
+	state = glfwGetKey(glfwwindow, GLFW_KEY_LEFT_SHIFT);
+	if (state == GLFW_PRESS)
+		camera.addMoveDir(Camera::Direction::DOWN);
+	camera.move();
+
+	bool rightMouseClick{ false };
+	state = glfwGetMouseButton(glfwwindow, GLFW_MOUSE_BUTTON_LEFT);
+	if (state == GLFW_PRESS)
+		rightMouseClick = true;
+	static double xposPrev{};
+	static double yposPrev{};
+	static double xpos{};
+	static double ypos{};
+	glfwGetCursorPos(glfwwindow, &xpos, &ypos);
+	if (!first && rightMouseClick && !ui.mouseIsCaptured())
+	{
+		double xd{ (xpos - xposPrev) };
+		double yd{ (ypos - yposPrev) };
+		camera.rotate(xd, yd);
+	}
+	xposPrev = xpos;
+	yposPrev = ypos;
+
+	first = false;
+}
 
 int main(int argc, char** argv)
 {
 	// TODO:
 	// Immediate mode
-		// Changing camera settings
 		// Changing light and material settings
 	// Camera interface in pt kernel
 	// Sample count heuristic
@@ -163,12 +208,15 @@ int main(int argc, char** argv)
 	{
 		glfwPollEvents();
 
-		if ((!rInterface.renderingIsFinished() || rContext.changesMade()) && !rContext.paused())
-			rInterface.render(rContext);
+		bool changesMade{ rContext.changesMade() || camera.changesMade() };
+		if ((!rInterface.renderingIsFinished() || changesMade) && !rContext.paused())
+			rInterface.render(rContext, camera, scene, changesMade);
 
 		menu(ui, camera, rContext, scene, rInterface.getProcessedSampleCount());
 
 		draw(&window, &rInterface, &ui);
+		
+		input(window, ui, camera, rContext);
 	}
 
 	ui.cleanup();

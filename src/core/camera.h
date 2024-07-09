@@ -4,30 +4,107 @@
 #include <glm/common.hpp>
 #include <glm/gtc/quaternion.hpp>
 #define GLM_ENABLE_EXPERIMENTAL
-#include <glm/gtx/dual_quaternion.hpp>
+#include <glm/gtc/matrix_transform.hpp>
+#include <glm/gtx/transform.hpp>
+
+#include "../core/debug_macros.h"
 
 class Camera
 {
 private:
-	glm::dualquat m_cameraFromWorld{};
-	glm::vec3 m_pos{};
-	glm::vec3 m_u{};
-	glm::vec3 m_v{};
-	glm::vec3 m_w{};
+	glm::dvec3 m_pos{};
+	glm::dvec3 m_u{};
+	glm::dvec3 m_v{};
+	glm::dvec3 m_w{};
+	glm::dvec3 m_upWorld{};
+
+	double m_speed{ 10.0 };
+	double m_rotationSpeed{ 0.002 };
+
+	glm::ivec3 m_step{ 0 };
+
+	bool m_positionChanged{ true };
+	bool m_orientationChanged{ true };
 public:
-	Camera(const glm::vec3& position, const glm::vec3& viewDirection, const glm::vec3& upDirection) : m_pos{ position }
+	Camera(const glm::dvec3& position, const glm::dvec3& viewDirection, const glm::dvec3& upDirection) : m_pos{ position }, m_upWorld{ upDirection }
 	{
 		m_w = glm::normalize(viewDirection);
 		m_u = glm::normalize(glm::cross(glm::normalize(upDirection), m_w));
 		m_v = glm::cross(m_w, m_u);
-		glm::vec3 trans{ glm::transpose(glm::mat3{ m_u, m_v, m_w }) * (-position) };
-		m_cameraFromWorld = glm::dualquat_cast(glm::mat3x4(glm::vec4(m_u, trans.x), glm::vec4(m_v, trans.y), glm::vec4(m_w, trans.z)));
 	}
 	Camera() = delete;
 	~Camera() = default;
 
-	const glm::vec3& getPosition() const { return m_pos; }
-	const glm::vec3& getU() const { return m_u; }
-	const glm::vec3& getV() const { return m_v; }
-	const glm::vec3& getW() const { return m_w; }
+	enum class Direction
+	{
+		RIGHT,
+		LEFT,
+		UP,
+		DOWN,
+		FORWARD,
+		BACKWARD,
+		DESC
+	};
+	void addMoveDir(Direction dir)
+	{
+		switch (dir)
+		{
+			case Direction::FORWARD:
+				m_step.z += 1;
+				break;
+			case Direction::BACKWARD:
+				m_step.z -= 1;
+				break;
+			case Direction::RIGHT:
+				m_step.x += 1;
+				break;
+			case Direction::LEFT:
+				m_step.x -= 1;
+				break;
+			case Direction::UP:
+				m_step.y += 1;
+				break;
+			case Direction::DOWN:
+				m_step.y -= 1;
+				break;
+			default:
+				R_ASSERT_LOG(true, "Unknown direction passed.");
+				break;
+		}
+	}
+	void move()
+	{
+		if (m_step.x == 0 && m_step.y == 0 && m_step.z == 0)
+			return;
+		glm::dvec3 dirStep{ glm::normalize(glm::dvec3{m_step}) * m_speed };
+		m_pos += m_u * dirStep.x;
+		m_pos += m_v * dirStep.y;
+		m_pos += m_w * dirStep.z;
+		m_step = glm::ivec3{};
+		
+		m_positionChanged = true;
+	}
+	void rotate(double xp, double yp)
+	{
+		m_w = glm::dvec3{glm::rotate(xp * m_rotationSpeed, m_upWorld) * glm::dvec4{m_w, 1.0}};
+		m_u = glm::normalize(glm::cross(glm::normalize(m_upWorld), m_w));
+		m_w = glm::dvec3{glm::rotate(yp * m_rotationSpeed, m_u) * glm::dvec4{m_w, 1.0}};
+		m_u = glm::normalize(glm::cross(glm::normalize(m_upWorld), m_w));
+		m_v = glm::cross(m_w, m_u);
+
+		m_orientationChanged = true;
+	}
+	const glm::dvec3& getPosition() const { return m_pos; }
+	const glm::dvec3& getU() const { return m_u; }
+	const glm::dvec3& getV() const { return m_v; }
+	const glm::dvec3& getW() const { return m_w; }
+	const double getMovingSpeed() const { return m_speed; }
+
+	const bool changesMade() const { return m_positionChanged || m_orientationChanged; }
+private:
+	void acceptChanges() { m_positionChanged = false; m_orientationChanged = false; }
+	bool positionChanged() const { return m_positionChanged; }
+	bool orientationChanged() const { return m_orientationChanged; }
+
+	friend class RenderingInterface;
 };

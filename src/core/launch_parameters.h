@@ -33,9 +33,12 @@ struct LaunchParameters
 
 	CUPTR(glm::dvec4) renderData{};
 
-	glm::vec3 camU{};
-	glm::vec3 camV{};
-	glm::vec3 camW{};
+	struct CameraState
+	{
+		glm::vec3 camU{};
+		glm::vec3 camV{};
+		glm::vec3 camW{};
+	} cameraState;
 
 	uint32_t illuminantSpectralDistributionIndex{};
 	glm::vec3 diskLightPosition{};

@@ -434,9 +434,9 @@ extern "C" __global__ void __raygen__main()
 		const glm::vec2 subsampleOffset{ QRNG::Sobol::sample2D(qrngState, QRNG::DimensionOffset::FILTER) };
 		const float xScale{ 2.0f * ((pixelCoordinate.x + subsampleOffset.x) * resState.invFilmWidth) - 1.0f };
 		const float yScale{ 2.0f * ((pixelCoordinate.y + subsampleOffset.y) * resState.invFilmHeight) - 1.0f };
-		glm::vec3 rD{ glm::normalize(parameters.camW
-		+ parameters.camU * xScale * resState.camPerspectiveScaleW
-		+ parameters.camV * yScale * resState.camPerspectiveScaleH) };
+		glm::vec3 rD{ glm::normalize(parameters.cameraState.camW
+		+ parameters.cameraState.camU * xScale * resState.camPerspectiveScaleW
+		+ parameters.cameraState.camV * yScale * resState.camPerspectiveScaleH) };
 		glm::vec3 rO{ 0.0 };
 
 		SampledWavelengths wavelengths{ SampledWavelengths::sampleVisible(QRNG::Sobol::sample1D(qrngState, QRNG::DimensionOffset::WAVELENGTH)) };
@@ -493,7 +493,7 @@ extern "C" __global__ void __raygen__main()
 				if (lightCos <= 0.0f)
 					emissionWeight = 0.0f;
 				else if (depth == 0 || (stateFlags & PathStateFlagBit::PREVIOUS_HIT_SPECULAR))
-					emissionWeight = 1.0f;
+					emissionWeight = 0.25f; // Too many fireflies, maybe this is a bug, suppressing for now
 				else
 				{
 					float lPDF{ parameters.diskSurfacePDF * dToHSqr / lightCos };
