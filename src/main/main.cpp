@@ -132,6 +132,12 @@ void input(Window& window, UI& ui, Camera& camera, RenderContext& rContext)
 {
 	static bool first{ true };
 
+	static double prevTime{ 0.0f };
+	static double delta{};
+	double newTime{ glfwGetTime() };
+	delta = newTime - prevTime;
+	prevTime = newTime;
+
 	GLFWwindow* glfwwindow{ window.getGLFWwindow() };
 	int state{};
 	state = glfwGetKey(glfwwindow, GLFW_KEY_W);
@@ -152,7 +158,7 @@ void input(Window& window, UI& ui, Camera& camera, RenderContext& rContext)
 	state = glfwGetKey(glfwwindow, GLFW_KEY_LEFT_SHIFT);
 	if (state == GLFW_PRESS)
 		camera.addMoveDir(Camera::Direction::DOWN);
-	camera.move();
+	camera.move(delta);
 
 	bool rightMouseClick{ false };
 	state = glfwGetMouseButton(glfwwindow, GLFW_MOUSE_BUTTON_LEFT);
@@ -189,9 +195,9 @@ int main(int argc, char** argv)
 
 	constexpr uint32_t windowWidth{ 1280 };
 	constexpr uint32_t windowHeight{ 720 };
-	constexpr uint32_t renderWidth{ 128 };
-	constexpr uint32_t renderHeight{ 128 };
-	const int samplesToRender{ 1024 };
+	constexpr uint32_t renderWidth{ 360 };
+	constexpr uint32_t renderHeight{ 150 };
+	const int samplesToRender{ 4096 };
 	const int pathLength{ 3 };
 	
 	Window window{ windowWidth, windowHeight };

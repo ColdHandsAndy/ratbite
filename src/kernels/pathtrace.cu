@@ -203,7 +203,7 @@ extern "C" __device__ void __direct_callable__DielectricBxDF(const MaterialData&
 		else
 		{
 			bool valid;
-			float etaRel;
+			float etaRel{ 0.0f };
 			wi = utility::refract(wo, glm::vec3{0.0f, 0.0f, 1.0f}, eta, valid, &etaRel);
 			if (!valid)
 			{
@@ -251,7 +251,7 @@ extern "C" __device__ void __direct_callable__DielectricBxDF(const MaterialData&
 			{
 				f = microfacet::D(wm, ctxm, ms) * R * microfacet::G(wi, wo, ctxi, ctxo, ms)
 				    / (4.0f * cosThetaO * cosThetaI);
-				lbxdfPDF = microfacet::VNDF::PDF<microfacet::VNDF::SPHERICAL_CAP>(wo, wm, wowmAbsDot, ctxo, ctxm, ms) / (4.0f * wowmAbsDot) * pR;
+				lbxdfPDF = microfacet::VNDF::PDF<microfacet::VNDF::ORIGINAL>(wo, wm, wowmAbsDot, ctxo, ctxm, ms) / (4.0f * wowmAbsDot) * pR;
 			}
 			else
 			{
@@ -261,7 +261,7 @@ extern "C" __device__ void __direct_callable__DielectricBxDF(const MaterialData&
 				f = microfacet::D(wm, ctxm, ms) * T * microfacet::G(wi, wo, ctxi, ctxo, ms)
 					* cuda::std::fabs(dotWmWo * dotWmWi / (cosThetaO * cosThetaI * denom))
 					/ (etaRel * etaRel);
-				lbxdfPDF = microfacet::VNDF::PDF<microfacet::VNDF::SPHERICAL_CAP>(wo, wm, wowmAbsDot, ctxo, ctxm, ms) * dwmdwi * pT;
+				lbxdfPDF = microfacet::VNDF::PDF<microfacet::VNDF::ORIGINAL>(wo, wm, wowmAbsDot, ctxo, ctxm, ms) * dwmdwi * pT;
 			}
 			L += directLightData.spectrumSample * f * cosFactor * throughputWeight
 				 * MIS::powerHeuristic(1, directLightData.lightSamplePDF, 1, lbxdfPDF)
@@ -269,7 +269,7 @@ extern "C" __device__ void __direct_callable__DielectricBxDF(const MaterialData&
 		}
 	}
 
-	wm = microfacet::VNDF::sample<microfacet::VNDF::SPHERICAL_CAP>(wo, ctxo, ms, glm::vec2{rand.x, rand.y});
+	wm = microfacet::VNDF::sample<microfacet::VNDF::ORIGINAL>(wo, ctxo, ms, glm::vec2{rand.x, rand.y});
 	microfacet::ContextMicronormal ctxm{ microfacet::createContextMicronormal(wm) };
 
 	const float dotWmWo{ glm::dot(wo, wm) };
@@ -292,7 +292,7 @@ extern "C" __device__ void __direct_callable__DielectricBxDF(const MaterialData&
 		const float cosThetaI{ LocalTransform::cosTheta(wi) };
 		f = microfacet::D(wm, ctxm, ms) * R * microfacet::G(wi, wo, ctxi, ctxo, ms) 
 			/ (4.0f * cosThetaO * cosThetaI);
-		bxdfPDF = microfacet::VNDF::PDF<microfacet::VNDF::SPHERICAL_CAP>(wo, wm, absDotWmWo, ctxo, ctxm, ms) / (4.0f * absDotWmWo) * pR;
+		bxdfPDF = microfacet::VNDF::PDF<microfacet::VNDF::ORIGINAL>(wo, wm, absDotWmWo, ctxo, ctxm, ms) / (4.0f * absDotWmWo) * pR;
 		cosFactor = cuda::std::fabs(cosThetaI);
 	}
 	else
@@ -314,7 +314,7 @@ extern "C" __device__ void __direct_callable__DielectricBxDF(const MaterialData&
 		f = microfacet::D(wm, ctxm, ms) * T * microfacet::G(wi, wo, ctxi, ctxo, ms)
 			* cuda::std::fabs(dotWmWo * dotWmWi / (cosThetaO * cosThetaI * denom));
 		const float pT{ cuda::std::fmax(0.0f, 1.0f - pR) };
-		bxdfPDF = microfacet::VNDF::PDF<microfacet::VNDF::SPHERICAL_CAP>(wo, wm, absDotWmWo, ctxo, ctxm, ms) * dwmdwi * pT;
+		bxdfPDF = microfacet::VNDF::PDF<microfacet::VNDF::ORIGINAL>(wo, wm, absDotWmWo, ctxo, ctxm, ms) * dwmdwi * pT;
 		stateFlags = (stateFlags & PathStateFlagBit::TRANSMISSION) ? stateFlags & (~static_cast<PathStateFlags>(PathStateFlagBit::TRANSMISSION)) : stateFlags | PathStateFlagBit::TRANSMISSION;
 		cosFactor = cuda::std::fabs(cosThetaI);
 	}
@@ -466,6 +466,7 @@ extern "C" __global__ void __raygen__main()
 			glm::vec3 hP; //Hit position
 			glm::vec3 hN; //Hit normal
 			MaterialData* material;
+			uint32_t a;
 			unpackTraceData(parameters, hP, hN, stateFlags, &material,
 				pl0, pl1, pl2, pl3, pl4, pl5, pl6);
 			glm::vec3 toHit{ hP - rO };
@@ -493,7 +494,7 @@ extern "C" __global__ void __raygen__main()
 				if (lightCos <= 0.0f)
 					emissionWeight = 0.0f;
 				else if (depth == 0 || (stateFlags & PathStateFlagBit::PREVIOUS_HIT_SPECULAR))
-					emissionWeight = 0.25f; // Too many fireflies, maybe this is a bug, suppressing for now
+					emissionWeight = 0.1f; // Too many fireflies, maybe this is a bug, suppressing for now
 				else
 				{
 					float lPDF{ parameters.diskSurfacePDF * dToHSqr / lightCos };

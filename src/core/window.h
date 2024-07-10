@@ -45,7 +45,7 @@ public:
 		glfwSetWindowUserPointer(m_glfwWindow, &m_userPointer);
 		m_userPointer.window = this;
 		m_userPointer.draw = draw;
-		glfwSwapInterval(1);
+		glfwSwapInterval(0);
 		glfwSetFramebufferSizeCallback(m_glfwWindow, glfwFramebufferSizeCallback);
 		glfwSetWindowRefreshCallback(m_glfwWindow, glfwWindowRefreshCallback);
 		R_ASSERT_LOG(gladLoadGLLoader((GLADloadproc) glfwGetProcAddress), "GLAD failed to load OpenGL funcitons");

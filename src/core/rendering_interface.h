@@ -56,6 +56,7 @@ private:
 	// TEMP
 	uint32_t lightEmissionSpectrumIndex{};
 	//
+	RenderContext::Mode m_mode{};
 	constexpr static inline uint32_t m_rDataComponentSize{ sizeof(double) };
 	constexpr static inline uint32_t m_rDataComponentCount{ 4 };
 	int m_launchWidth{};

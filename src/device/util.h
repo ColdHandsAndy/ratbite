@@ -61,6 +61,7 @@ namespace utility
 
 	CU_DEVICE CU_INLINE float roughnessToAlpha(float roughness)
 	{
-		return cuda::std::sqrtf(roughness);
+		// return cuda::std::sqrtf(roughness);
+		return roughness;
 	}
 }

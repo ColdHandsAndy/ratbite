@@ -145,6 +145,9 @@ namespace microfacet
 	{
 		enum SamplingMethod
 		{
+			// "Sampling the GGX Distribution of Visible Normals" - Eric Heitz
+			// https://jcgt.org/published/0007/04/01/paper.pdf
+			ORIGINAL,
 			// "Sampling Visible GGX Normals with Spherical Caps" - Jonathan Dupuy, Anis Benyoub.
 			// https://arxiv.org/pdf/2306.05044
 			SPHERICAL_CAP,
@@ -156,7 +159,26 @@ namespace microfacet
 		template<SamplingMethod Method>
 		CU_DEVICE CU_INLINE glm::vec3 sample(const glm::vec3& wo, const ContextOutgoing& ctxo, const Microsurface& ms, const glm::vec2& uv)
 		{
-			if constexpr (Method == SPHERICAL_CAP)
+			if constexpr (Method == ORIGINAL)
+			{
+				glm::vec3 wh{ glm::normalize(glm::vec3{ms.alphaX * wo.x, ms.alphaY * wo.y, wo.z}) };
+				if (wh.z < 0)
+					wh = -wh;
+
+				glm::vec3 t{ (wh.z < 0.99999f) ? glm::normalize(glm::cross(glm::vec3{0.0f, 0.0f, 1.0f}, wh)) : glm::vec3{1.0f, 0.0f, 0.0f} };
+				glm::vec3 b{ glm::cross(wh, t) };
+
+				glm::vec2 p{ sampling::disk::sampleUniform2DPolar(uv) };
+
+				float h{ cuda::std::sqrtf(1.0f - p.x * p.x) };
+				p.y = glm::mix(h, p.y, (1.0f + wh.z) / 2.0f);
+
+				float pz{ cuda::std::sqrtf(cuda::std::fmax(0.0f, 1.0f - (p.x * p.x + p.y * p.y))) };
+				glm::vec3 nh{ p.x * t + p.y * b + pz * wh };
+
+				return glm::normalize(glm::vec3{ms.alphaX * nh.x, ms.alphaY * nh.y, cuda::std::fmax(1e-6f, nh.z)});
+			}
+			else if constexpr (Method == SPHERICAL_CAP)
 			{
 				glm::vec3 woStd{ glm::normalize(glm::vec3{wo.x * ms.alphaX, wo.y * ms.alphaY, wo.z}) };
 
@@ -194,7 +216,11 @@ namespace microfacet
 		template<SamplingMethod Method>
 		CU_DEVICE CU_INLINE float PDF(const glm::vec3& wo, const glm::vec3& wm, const float absDotWoWm, const ContextOutgoing& ctxo, const ContextMicronormal& ctxm, const Microsurface& ms)
 		{
-			if constexpr (Method == SPHERICAL_CAP)
+			if constexpr (Method == ORIGINAL)
+			{
+				return G1(wo, ctxo, ms) / cuda::std::fabs(LocalTransform::cosTheta(wo)) * D(wm, ctxm, ms) * absDotWoWm;
+			}
+			else if constexpr (Method == SPHERICAL_CAP)
 			{
 				return G1(wo, ctxo, ms) / cuda::std::fabs(LocalTransform::cosTheta(wo)) * D(wm, ctxm, ms) * absDotWoWm;
 			}

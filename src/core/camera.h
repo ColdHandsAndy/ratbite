@@ -18,13 +18,13 @@ private:
 	glm::dvec3 m_w{};
 	glm::dvec3 m_upWorld{};
 
-	double m_speed{ 10.0 };
+	double m_speed{ 280.0 };
 	double m_rotationSpeed{ 0.002 };
 
 	glm::ivec3 m_step{ 0 };
 
-	bool m_positionChanged{ true };
-	bool m_orientationChanged{ true };
+	bool m_positionChanged{ false };
+	bool m_orientationChanged{ false };
 public:
 	Camera(const glm::dvec3& position, const glm::dvec3& viewDirection, const glm::dvec3& upDirection) : m_pos{ position }, m_upWorld{ upDirection }
 	{
@@ -72,13 +72,13 @@ public:
 				break;
 		}
 	}
-	void move()
+	void move(double delta)
 	{
 		if (m_step.x == 0 && m_step.y == 0 && m_step.z == 0)
 			return;
-		glm::dvec3 dirStep{ glm::normalize(glm::dvec3{m_step}) * m_speed };
+		glm::dvec3 dirStep{ glm::normalize(glm::dvec3{m_step}) * m_speed * delta };
 		m_pos += m_u * dirStep.x;
-		m_pos += m_v * dirStep.y;
+		m_pos += m_upWorld * dirStep.y;
 		m_pos += m_w * dirStep.z;
 		m_step = glm::ivec3{};
 		

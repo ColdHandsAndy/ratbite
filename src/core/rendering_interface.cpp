@@ -194,9 +194,9 @@ void RenderingInterface::createAccelerationStructures(const SceneData& scene, co
 	CUDA_CHECK(cudaFree(reinterpret_cast<void*>(tempBuffer)));
 
 	CUDA_CHECK(cudaFree(reinterpret_cast<void*>(vertexBuffer)));
-	CUDA_CHECK(cudaFree(reinterpret_cast<void*>(instanceBuffer)));
 	CUDA_CHECK(cudaFree(reinterpret_cast<void*>(sbtOffsetBuffer)));
 	CUDA_CHECK(cudaFree(reinterpret_cast<void*>(aabbBuffer)));
+	CUDA_CHECK(cudaFreeHost(reinterpret_cast<void*>(instances)));
 }
 void RenderingInterface::createModulesProgramGroupsPipeline()
 {
@@ -395,6 +395,7 @@ void RenderingInterface::fillSpectralCurvesData()
 }
 void RenderingInterface::prepareDataForRendering(const Camera& camera, const RenderContext& renderContext, const SceneData& scene)
 {
+	m_mode = renderContext.getRenderMode();
 	m_sampleCount = renderContext.getSampleCount();
 	m_pathLength = renderContext.getPathLength();
 	m_launchWidth = renderContext.getRenderWidth();
@@ -521,6 +522,8 @@ void RenderingInterface::resolveRender(const glm::mat3& colorspaceTransform)
 }
 void RenderingInterface::processChanges(RenderContext& renderContext, Camera& camera, SceneData& scene)
 {
+	m_mode = renderContext.getRenderMode();
+
 	if (m_sampleCount != renderContext.getSampleCount())
 	{
 		m_sampleCount = renderContext.getSampleCount();
@@ -646,7 +649,7 @@ void RenderingInterface::processChanges(RenderContext& renderContext, Camera& ca
 					computedBufferSizes.outputSizeInBytes, &m_iasHandle, nullptr, 0));
 
 		CUDA_CHECK(cudaFree(reinterpret_cast<void*>(tempBuffer)));
-		CUDA_CHECK(cudaFree(reinterpret_cast<void*>(instanceBuffer)));
+		CUDA_CHECK(cudaFreeHost(reinterpret_cast<void*>(instances)));
 	}
 	if (camera.orientationChanged())
 	{
@@ -688,7 +691,15 @@ void RenderingInterface::updateSamplingState()
 {
 	m_processedSampleCount = m_currentSampleOffset;
 	m_currentSampleOffset += m_currentSampleCount;
-	m_currentSampleCount = std::min(std::max(0, m_sampleCount - static_cast<int>(m_currentSampleOffset)), 1);
+
+	int sublaunchSize{};
+	constexpr int maxSublaunchSize{ 64 };
+	if (m_mode == RenderContext::Mode::RENDER)
+		sublaunchSize = std::min(static_cast<int>(std::pow(std::max(3, m_currentSampleCount), 1.5)), maxSublaunchSize);
+	else
+		sublaunchSize = 1;
+
+	m_currentSampleCount = std::min(std::max(0, m_sampleCount - static_cast<int>(m_currentSampleOffset)), sublaunchSize);
 }
 void RenderingInterface::launch()
 {
@@ -754,8 +765,10 @@ void RenderingInterface::render(RenderContext& renderContext, Camera& camera, Sc
 	if (first) [[unlikely]]
 		first = false;
 	else
+	{
 		resolveRender(renderContext.getColorspaceTransform());
-	CUDA_SYNC_CHECK();
+		CUDA_SYNC_CHECK();
+	}
 	if (changesMade)
 		processChanges(renderContext, camera, scene);
 	if (m_currentSampleCount == 0)
