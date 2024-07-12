@@ -38,6 +38,10 @@ struct LaunchParameters
 		glm::vec3 camU{};
 		glm::vec3 camV{};
 		glm::vec3 camW{};
+
+		bool depthOfFieldEnabled{};
+		float appertureSize{};
+		float focusDistance{};
 	} cameraState;
 
 	uint32_t illuminantSpectralDistributionIndex{};

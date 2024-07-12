@@ -10,6 +10,7 @@
 #include "window.h"
 #include "camera.h"
 #include "render_context.h"
+#include "launch_parameters.h"
 
 class RenderingInterface
 {
@@ -54,6 +55,8 @@ private:
 
 	cudaEvent_t m_exexEvent{};
 	cudaStream_t m_streams[5]{};
+
+	LaunchParameters m_launchParameters{};
 
 	// TEMP
 	uint32_t lightEmissionSpectrumIndex{};

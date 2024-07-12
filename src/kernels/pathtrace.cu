@@ -10,6 +10,7 @@
 #include "../core/util_macros.h"
 #include "../core/material.h"
 #include "../device/util.h"
+#include "../device/dir_gen.h"
 #include "../device/local_transform.h"
 #include "../device/filter.h"
 #include "../device/color.h"
@@ -431,13 +432,27 @@ extern "C" __global__ void __raygen__main()
 	bool terminated{ false };
 	do
 	{
-		const glm::vec2 subsampleOffset{ QRNG::Sobol::sample2D(qrngState, QRNG::DimensionOffset::FILTER) };
-		const float xScale{ 2.0f * ((pixelCoordinate.x + subsampleOffset.x) * resState.invFilmWidth) - 1.0f };
-		const float yScale{ 2.0f * ((pixelCoordinate.y + subsampleOffset.y) * resState.invFilmHeight) - 1.0f };
-		glm::vec3 rD{ glm::normalize(parameters.cameraState.camW
-		+ parameters.cameraState.camU * xScale * resState.camPerspectiveScaleW
-		+ parameters.cameraState.camV * yScale * resState.camPerspectiveScaleH) };
-		glm::vec3 rO{ 0.0 };
+		const glm::vec2 subsample{ QRNG::Sobol::sample2D(qrngState, QRNG::DimensionOffset::FILTER) };
+		const glm::vec2 lensSample{ QRNG::Sobol::sample2D(qrngState, QRNG::DimensionOffset::LENS) };
+		Ray ray{ generateThinLensCamera(pixelCoordinate, subsample, lensSample,
+				parameters.cameraState.focusDistance, parameters.cameraState.appertureSize,
+				glm::vec2{resState.invFilmWidth, resState.invFilmHeight}, glm::vec2{resState.camPerspectiveScaleW, resState.camPerspectiveScaleH},
+				parameters.cameraState.camU, parameters.cameraState.camV, parameters.cameraState.camW) };
+		if (parameters.cameraState.depthOfFieldEnabled)
+		{
+			ray = generateThinLensCamera(pixelCoordinate, subsample,
+					lensSample, parameters.cameraState.focusDistance, parameters.cameraState.appertureSize,
+					glm::vec2{resState.invFilmWidth, resState.invFilmHeight}, glm::vec2{resState.camPerspectiveScaleW, resState.camPerspectiveScaleH},
+					parameters.cameraState.camU, parameters.cameraState.camV, parameters.cameraState.camW);
+		}
+		else
+		{
+			ray = generatePinholeCameraDirection(pixelCoordinate, subsample,
+					glm::vec2{resState.invFilmWidth, resState.invFilmHeight}, glm::vec2{resState.camPerspectiveScaleW, resState.camPerspectiveScaleH},
+					parameters.cameraState.camU, parameters.cameraState.camV, parameters.cameraState.camW);
+		}
+		glm::vec3& rO{ ray.o };
+		glm::vec3& rD{ ray.d };
 
 		SampledWavelengths wavelengths{ SampledWavelengths::sampleVisible(QRNG::Sobol::sample1D(qrngState, QRNG::DimensionOffset::WAVELENGTH)) };
 		SampledSpectrum L{ 0.0f };
@@ -560,7 +575,7 @@ extern "C" __global__ void __raygen__main()
 		{
 			resolveSample(L, wavelengths.getPDF());
 			result += glm::dvec4{color::toRGB(*parameters.sensorSpectralCurveA, *parameters.sensorSpectralCurveB, *parameters.sensorSpectralCurveC,
-					wavelengths, L), filter::computeFilterWeight(subsampleOffset)};
+					wavelengths, L), filter::computeFilterWeight(subsample)};
 		}
 	} while (++sample < parameters.samplingState.count);
 	parameters.renderData[li.y * resState.filmWidth + li.x] = result;

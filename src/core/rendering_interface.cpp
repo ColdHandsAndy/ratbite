@@ -405,7 +405,7 @@ void RenderingInterface::prepareDataForRendering(const Camera& camera, const Ren
 	m_launchHeight = renderContext.getRenderHeight();
 	CUDA_CHECK(cudaMalloc(reinterpret_cast<void**>(&m_renderData),
 				m_rDataComponentSize * m_rDataComponentCount * renderContext.getRenderWidth() * renderContext.getRenderHeight()));
-	LaunchParameters launchParameters{
+	m_launchParameters = {
 			.resolutionState = {
 				.filmWidth = static_cast<uint32_t>(renderContext.getRenderWidth()),
 				.filmHeight = static_cast<uint32_t>(renderContext.getRenderHeight()),
@@ -422,6 +422,9 @@ void RenderingInterface::prepareDataForRendering(const Camera& camera, const Ren
 				.camU = camera.getU(),
 				.camV = camera.getV(),
 				.camW = camera.getW(),
+				.depthOfFieldEnabled = camera.depthOfFieldEnabled(),
+				.appertureSize = static_cast<float>(camera.getAperture()),
+				.focusDistance = static_cast<float>(camera.getFocusDistance()),
 			},
 			.illuminantSpectralDistributionIndex = lightEmissionSpectrumIndex, //Change
 			.diskLightPosition = scene.diskLight.pos - glm::vec3{camera.getPosition()}, //Change
@@ -439,7 +442,7 @@ void RenderingInterface::prepareDataForRendering(const Camera& camera, const Ren
 			.traversable = m_iasBuffer };
 
 	CUDA_CHECK(cudaMalloc(reinterpret_cast<void**>(&m_lpBuffer), sizeof(LaunchParameters)));
-	CUDA_CHECK(cudaMemcpy(reinterpret_cast<void*>(m_lpBuffer), &launchParameters, sizeof(LaunchParameters), cudaMemcpyHostToDevice));
+	CUDA_CHECK(cudaMemcpy(reinterpret_cast<void*>(m_lpBuffer), &m_launchParameters, sizeof(LaunchParameters), cudaMemcpyHostToDevice));
 }
 void RenderingInterface::prepareDataForPreviewDrawing()
 {
@@ -633,12 +636,8 @@ void RenderingInterface::processChanges(RenderContext& renderContext, Camera& ca
 	if (m_pathLength != renderContext.getPathLength())
 	{
 		m_pathLength = renderContext.getPathLength();
-		CUDA_CHECK(cudaMemcpyAsync(
-					reinterpret_cast<void*>(m_lpBuffer + offsetof(LaunchParameters, maxPathLength)),
-					reinterpret_cast<void*>(&m_pathLength),
-					sizeof(m_pathLength),
-					cudaMemcpyHostToDevice,
-					m_streams[1]));
+
+		m_launchParameters.maxPathLength = m_pathLength;
 	}	
 	if (m_launchWidth != renderContext.getRenderWidth() || m_launchHeight != renderContext.getRenderHeight())
 	{
@@ -652,23 +651,15 @@ void RenderingInterface::processChanges(RenderContext& renderContext, Camera& ca
 			.camPerspectiveScaleW = static_cast<float>(glm::tan((glm::radians(45.0) * 0.5))) * (static_cast<float>(renderContext.getRenderWidth()) / static_cast<float>(renderContext.getRenderHeight())),
 			.camPerspectiveScaleH = static_cast<float>(glm::tan((glm::radians(45.0) * 0.5))) };
 
-		CUDA_CHECK(cudaMemcpyAsync(
-					reinterpret_cast<void*>(m_lpBuffer + offsetof(LaunchParameters, resolutionState)),
-					reinterpret_cast<void*>(&newResolutionState),
-					sizeof(newResolutionState),
-					cudaMemcpyHostToDevice,
-					m_streams[1]));
+		m_launchParameters.resolutionState = newResolutionState;
+
 
 		CUDA_CHECK(cudaFree(reinterpret_cast<void*>(m_renderData)));
 		CUDA_CHECK(cudaMalloc(reinterpret_cast<void**>(&m_renderData),
 					m_rDataComponentSize * m_rDataComponentCount * renderContext.getRenderWidth() * renderContext.getRenderHeight()));
 
-		CUDA_CHECK(cudaMemcpyAsync(
-					reinterpret_cast<void*>(m_lpBuffer + offsetof(LaunchParameters, renderData)),
-					reinterpret_cast<void*>(&m_renderData),
-					sizeof(m_renderData),
-					cudaMemcpyHostToDevice,
-					m_streams[1]));
+		m_launchParameters.renderData = m_renderData;
+
 
 		CUDA_CHECK(cudaGraphicsUnregisterResource(m_graphicsResource));
 		glBindTexture(GL_TEXTURE_2D, m_glTexture);
@@ -683,12 +674,7 @@ void RenderingInterface::processChanges(RenderContext& renderContext, Camera& ca
 
 
 		glm::vec3 lightPosition{ scene.diskLight.pos - cameraPosition };
-		CUDA_CHECK(cudaMemcpyAsync(
-					reinterpret_cast<void*>(m_lpBuffer + offsetof(LaunchParameters, diskLightPosition)),
-					reinterpret_cast<void*>(&lightPosition),
-					sizeof(lightPosition),
-					cudaMemcpyHostToDevice,
-					m_streams[1]));
+		m_launchParameters.diskLightPosition = lightPosition;
 
 
 		CUDA_CHECK(cudaFree(reinterpret_cast<void*>(m_iasBuffer)));
@@ -755,17 +741,15 @@ void RenderingInterface::processChanges(RenderContext& renderContext, Camera& ca
 	}
 	if (camera.orientationChanged())
 	{
-		LaunchParameters::CameraState newCamState{
-			.camU = camera.getU(),
-			.camV = camera.getV(),
-			.camW = camera.getW() };
-
-		CUDA_CHECK(cudaMemcpyAsync(
-					reinterpret_cast<void*>(m_lpBuffer + offsetof(LaunchParameters, cameraState)),
-					reinterpret_cast<void*>(&newCamState),
-					sizeof(newCamState),
-					cudaMemcpyHostToDevice,
-					m_streams[1]));
+		m_launchParameters.cameraState.camU = camera.getU();
+		m_launchParameters.cameraState.camV = camera.getV();
+		m_launchParameters.cameraState.camW = camera.getW();
+	}
+	if (camera.depthOfFieldChanged())
+	{
+		m_launchParameters.cameraState.depthOfFieldEnabled = camera.depthOfFieldEnabled();
+		m_launchParameters.cameraState.appertureSize = camera.getAperture();
+		m_launchParameters.cameraState.focusDistance = camera.getFocusDistance();
 	}
 
 	if (scene.materialChanged)
@@ -774,6 +758,8 @@ void RenderingInterface::processChanges(RenderContext& renderContext, Camera& ca
 		changeMaterial(scene.changedMaterialIndex, scene.changedDesc, scene.materialDescriptors[scene.changedMaterialIndex]);
 		prevDesc = scene.changedDesc;
 	}
+
+	CUDA_CHECK(cudaMemcpyAsync(reinterpret_cast<void*>(m_lpBuffer), &m_launchParameters, sizeof(m_launchParameters), cudaMemcpyHostToDevice, m_streams[1]));
 
 	m_currentSampleCount = 1;
 	m_currentSampleOffset = 0;

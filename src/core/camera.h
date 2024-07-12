@@ -23,6 +23,11 @@ private:
 
 	glm::ivec3 m_step{ 0 };
 
+	bool m_depthOfFieldEnabled{ false };
+	double m_focusDistance{ 250.0f };
+	double m_aperture{ 1.0f };
+
+	bool m_depthOfFieldChanged{ false };
 	bool m_positionChanged{ false };
 	bool m_orientationChanged{ false };
 public:
@@ -99,17 +104,24 @@ public:
 
 		m_orientationChanged = true;
 	}
+	void setFocusDistance(double fd) { m_focusDistance = std::max(0.0, std::min(65504.0, fd)); m_depthOfFieldChanged = true; }
+	void setAperture(double a) { m_aperture = std::max(0.0, std::min(65504.0, a)); m_depthOfFieldChanged = true; }
+	void setDepthOfField(bool enabled) { m_depthOfFieldEnabled = enabled; m_depthOfFieldChanged = true; }
 	const glm::dvec3& getPosition() const { return m_pos; }
 	const glm::dvec3& getU() const { return m_u; }
 	const glm::dvec3& getV() const { return m_v; }
 	const glm::dvec3& getW() const { return m_w; }
 	const double getMovingSpeed() const { return m_speed; }
+	const double getFocusDistance() const { return m_focusDistance; }
+	const double getAperture() const { return m_aperture; }
+	const bool depthOfFieldEnabled() const { return m_depthOfFieldEnabled; }
 
-	const bool changesMade() const { return m_positionChanged || m_orientationChanged; }
+	const bool changesMade() const { return m_positionChanged || m_orientationChanged || m_depthOfFieldChanged; }
 private:
-	void acceptChanges() { m_positionChanged = false; m_orientationChanged = false; }
+	void acceptChanges() { m_positionChanged = false; m_orientationChanged = false; m_depthOfFieldChanged = false; }
 	bool positionChanged() const { return m_positionChanged; }
 	bool orientationChanged() const { return m_orientationChanged; }
+	bool depthOfFieldChanged() const { return m_depthOfFieldChanged; }
 
 	friend class RenderingInterface;
 };

@@ -95,6 +95,22 @@ void menu(UI& ui, Camera& camera, RenderContext& rContext, SceneData& scene, int
 			rContext.setRenderHeight(renderHeight);
 
 
+		ImGui::SeparatorText("Camera settings");
+		static bool checkbox{ camera.depthOfFieldEnabled() };
+		changed = ImGui::Checkbox("Depth of Field", &checkbox);
+		if (changed) camera.setDepthOfField(checkbox);
+		if (checkbox)
+		{
+			static float apperture{ static_cast<float>(camera.getAperture()) };
+			changed = ImGui::SliderFloat("Aperture", &apperture, 0.0f, 100.0f);
+			if (changed) camera.setAperture(apperture);
+
+			static float focusDistance{ static_cast<float>(camera.getFocusDistance()) };
+			changed = ImGui::SliderFloat("Focus distance", &focusDistance, 0.01f, 1000.0f);
+			if (changed) camera.setFocusDistance(focusDistance);
+		}
+
+
 		ImGui::SeparatorText("Change material");
 
 		static int currentItem{ 0 };
@@ -161,7 +177,6 @@ void menu(UI& ui, Camera& camera, RenderContext& rContext, SceneData& scene, int
 					scene.changedDesc.baseIOR = SpectralData::SpectralDataType::D_GLASS_F5_IOR;
 					scene.changedDesc.baseAC = SpectralData::SpectralDataType::NONE;
 				}
-				scene.changedDesc.baseEmission = SpectralData::SpectralDataType::NONE;
 			}
 
 			if (scene.changedDesc.bxdf == SceneData::BxDF::CONDUCTOR)
@@ -264,7 +279,9 @@ int main(int argc, char** argv)
 {
 	// TODO:
 	// Camera interface in pt kernel
+	// Transmission hit offsetting fix
 	// Better lights handling
+	// Figure out direct light sampling on an emissive hit
 	// OBJ loading
 	// More BxDFs
 
