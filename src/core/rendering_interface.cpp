@@ -7,6 +7,7 @@
 #include <vector>
 #include <unordered_map>
 #include <functional>
+#include <tuple>
 #define NOMINMAX
 #include <windows.h>
 
@@ -298,29 +299,30 @@ void RenderingInterface::createRenderResolveProgram()
 }
 void RenderingInterface::fillMaterials(const SceneData& scene)
 {
-	std::unordered_map<SpectralData::SpectralDataType, int> loadMats{};
 	std::vector<MaterialData> matData(scene.materialDescriptors.size());
-	std::function addMat{ [](const SpectralData::SpectralDataType sdt, uint16_t& spectrumIndex, std::unordered_map<SpectralData::SpectralDataType, int>& loadMats)
+	std::function addSpec{ [this](const SpectralData::SpectralDataType sdt, uint16_t& spectrumIndex)
 		{
-			if (sdt != SpectralData::SpectralDataType::DESC)
+			if (sdt != SpectralData::SpectralDataType::NONE)
 			{
-				if (loadMats.contains(sdt))
+				if (m_loadedSpectra.contains(sdt))
 				{
-					spectrumIndex = loadMats.at(sdt);
+					SpectrumRecord& rec{ m_loadedSpectra.at(sdt) };
+					rec.refcount += 1;
+					spectrumIndex = rec.index;
 				}
 				else
 				{
-					spectrumIndex = loadMats.size();
-					loadMats.insert({ sdt, spectrumIndex });
+					spectrumIndex = m_loadedSpectra.size();
+					m_loadedSpectra.insert({sdt, SpectrumRecord{spectrumIndex, 1}});
 				}
 			}
 		} };
 	for (int i{ 0 }; i < scene.materialDescriptors.size(); ++i)
 	{
-		addMat(scene.materialDescriptors[i].baseIOR, matData[i].indexOfRefractSpectrumDataIndex, loadMats);
-		addMat(scene.materialDescriptors[i].baseAC, matData[i].absorpCoefSpectrumDataIndex, loadMats);
-		addMat(scene.materialDescriptors[i].baseEmission, matData[i].emissionSpectrumDataIndex, loadMats);
-		matData[i].bxdfIndexSBT = scene.materialDescriptors[i].bxdfIndex;
+		addSpec(scene.materialDescriptors[i].baseIOR, matData[i].indexOfRefractSpectrumDataIndex);
+		addSpec(scene.materialDescriptors[i].baseAC, matData[i].absorpCoefSpectrumDataIndex);
+		addSpec(scene.materialDescriptors[i].baseEmission, matData[i].emissionSpectrumDataIndex);
+		matData[i].bxdfIndexSBT = bxdfTypeToIndex(scene.materialDescriptors[i].bxdf);
 		matData[i].mfRoughnessValue = scene.materialDescriptors[i].roughness;
 	}
 	//
@@ -328,12 +330,12 @@ void RenderingInterface::fillMaterials(const SceneData& scene)
 	//
 	CUDA_CHECK(cudaMalloc(reinterpret_cast<void**>(&m_materialData), sizeof(MaterialData) * matData.size()));
 	CUDA_CHECK(cudaMemcpy(reinterpret_cast<void*>(m_materialData), matData.data(), sizeof(MaterialData) * matData.size(), cudaMemcpyHostToDevice));
-	DenselySampledSpectrum* spectrums{ new DenselySampledSpectrum[loadMats.size()]};
-	for (const auto& [specType, index] : loadMats)
-		spectrums[index] = SpectralData::loadSpectrum(specType);
-	CUDA_CHECK(cudaMalloc(reinterpret_cast<void**>(&m_spectralData), sizeof(DenselySampledSpectrum) * loadMats.size()));
-	CUDA_CHECK(cudaMemcpy(reinterpret_cast<void*>(m_spectralData), spectrums, sizeof(DenselySampledSpectrum) * loadMats.size(), cudaMemcpyHostToDevice));
-	delete[] spectrums;
+	DenselySampledSpectrum* spectra{ new DenselySampledSpectrum[m_loadedSpectra.size()]};
+	for (const auto& [specType, rec] : m_loadedSpectra)
+		spectra[rec.index] = SpectralData::loadSpectrum(specType);
+	CUDA_CHECK(cudaMalloc(reinterpret_cast<void**>(&m_spectralData), sizeof(DenselySampledSpectrum) * m_loadedSpectra.size()));
+	CUDA_CHECK(cudaMemcpy(reinterpret_cast<void*>(m_spectralData), spectra, sizeof(DenselySampledSpectrum) * m_loadedSpectra.size(), cudaMemcpyHostToDevice));
+	delete[] spectra;
 }
 void RenderingInterface::createSBT(const SceneData& scene)
 {
@@ -351,12 +353,13 @@ void RenderingInterface::createSBT(const SceneData& scene)
 	CUDA_CHECK(cudaMemcpy(reinterpret_cast<void*>(m_sbt.missRecordBase), &missRecord, m_sbt.missRecordStrideInBytes * m_sbt.missRecordCount, cudaMemcpyHostToDevice));
 
 	//Fill callable records (bxdfs)
-	m_sbt.callablesRecordCount = 2;
+	constexpr int callableCount{ 2 };
+	m_sbt.callablesRecordCount = callableCount;
 	m_sbt.callablesRecordStrideInBytes = sizeof(OptixRecordCallable);
 	CUDA_CHECK(cudaMalloc(reinterpret_cast<void**>(&m_sbt.callablesRecordBase), m_sbt.callablesRecordStrideInBytes * m_sbt.callablesRecordCount));
-	OptixRecordCallable callableRecords[2]{};
-	OPTIX_CHECK(optixSbtRecordPackHeader(m_ptProgramGroups[RenderingInterface::CALLABLE_CONDUCTOR_BXDF], callableRecords + 0));
-	OPTIX_CHECK(optixSbtRecordPackHeader(m_ptProgramGroups[RenderingInterface::CALLABLE_DIELECTRIC_BXDF], callableRecords + 1));
+	OptixRecordCallable callableRecords[callableCount]{};
+	OPTIX_CHECK(optixSbtRecordPackHeader(m_ptProgramGroups[RenderingInterface::CALLABLE_CONDUCTOR_BXDF], callableRecords + bxdfTypeToIndex(SceneData::BxDF::CONDUCTOR)));
+	OPTIX_CHECK(optixSbtRecordPackHeader(m_ptProgramGroups[RenderingInterface::CALLABLE_DIELECTRIC_BXDF], callableRecords + bxdfTypeToIndex(SceneData::BxDF::DIELECTIRIC)));
 	CUDA_CHECK(cudaMemcpy(reinterpret_cast<void*>(m_sbt.callablesRecordBase), callableRecords, m_sbt.callablesRecordStrideInBytes * m_sbt.callablesRecordCount, cudaMemcpyHostToDevice));
 
 	uint32_t hitgroupCount{ 0 };
@@ -429,7 +432,7 @@ void RenderingInterface::prepareDataForRendering(const Camera& camera, const Ren
 			.lightScale = scene.diskLight.scale, //Change
 			.diskSurfacePDF = 1.0f / scene.diskLight.area, //Change
 			.materials = m_materialData,
-			.spectrums = m_spectralData,
+			.spectra = m_spectralData,
 			.sensorSpectralCurveA = m_sensorSpectralCurvesData + sizeof(DenselySampledSpectrum) * 0,
 			.sensorSpectralCurveB = m_sensorSpectralCurvesData + sizeof(DenselySampledSpectrum) * 1,
 			.sensorSpectralCurveC = m_sensorSpectralCurvesData + sizeof(DenselySampledSpectrum) * 2,
@@ -500,6 +503,105 @@ void RenderingInterface::prepareDataForPreviewDrawing()
 
 	glDeleteShader(vertexShader);
 	glDeleteShader(fragmentShader);
+}
+
+void RenderingInterface::changeMaterial(int index, const SceneData::MaterialDescriptor& desc, const SceneData::MaterialDescriptor& prevDesc)
+{
+	std::function remSpecRef{ [this](const SpectralData::SpectralDataType sdt)
+		{
+			if (sdt != SpectralData::SpectralDataType::NONE)
+			{
+				if (m_loadedSpectra.contains(sdt))
+				{
+					SpectrumRecord& rec{ m_loadedSpectra.at(sdt) };
+					R_ASSERT_LOG(rec.refcount > 0, "Spectrum refcount is zero or negative.");
+					if (--rec.refcount == 0)
+					{
+						m_freeSpectra.push(rec.index);
+						m_loadedSpectra.erase(sdt);
+					}
+				}
+				else
+					R_ERR_LOG("Attempted to remove a reference to a not loaded spectrum.")
+			}
+		} };
+	if (desc.baseIOR != prevDesc.baseIOR)
+		remSpecRef(prevDesc.baseIOR);
+	if (desc.baseAC != prevDesc.baseAC)
+		remSpecRef(prevDesc.baseAC);
+	if (desc.baseEmission != prevDesc.baseEmission)
+		remSpecRef(prevDesc.baseEmission);
+	MaterialData matData{
+		.bxdfIndexSBT = static_cast<uint32_t>(bxdfTypeToIndex(desc.bxdf)),
+		.indexOfRefractSpectrumDataIndex = static_cast<uint16_t>(getSpectrum(desc.baseIOR)),
+		.absorpCoefSpectrumDataIndex = static_cast<uint16_t>(getSpectrum(desc.baseAC)),
+		.emissionSpectrumDataIndex = static_cast<uint16_t>(getSpectrum(desc.baseEmission)),
+		.mfRoughnessValue = desc.roughness
+	};
+
+	CUDA_CHECK(cudaMemcpy(reinterpret_cast<MaterialData*>(m_materialData) + index, &matData, sizeof(MaterialData), cudaMemcpyHostToDevice));
+}
+uint32_t RenderingInterface::getSpectrum(SpectralData::SpectralDataType type)
+{
+	if (type != SpectralData::SpectralDataType::NONE)
+	{
+		int index{};
+		if (m_loadedSpectra.contains(type))
+		{
+			SpectrumRecord& rec{ m_loadedSpectra.at(type) };
+			rec.refcount += 1;
+			index = rec.index;
+		}
+		else
+		{
+			if (m_freeSpectra.empty())
+			{
+				index = static_cast<int>(m_loadedSpectra.size());
+				int oldCount{ index };
+				m_loadedSpectra.insert({type, SpectrumRecord{index, 1}});
+				CUdeviceptr oldSpectraBuffer{ m_spectralData };
+				CUDA_CHECK(cudaMalloc(reinterpret_cast<void**>(&m_spectralData), sizeof(DenselySampledSpectrum) * m_loadedSpectra.size()));
+				CUDA_CHECK(cudaMemcpy(reinterpret_cast<void*>(m_spectralData), reinterpret_cast<void*>(oldSpectraBuffer), sizeof(DenselySampledSpectrum) * oldCount, cudaMemcpyDeviceToDevice));
+				CUDA_CHECK(cudaFree(reinterpret_cast<void*>(oldSpectraBuffer)));
+				DenselySampledSpectrum spec{ SpectralData::loadSpectrum(type) };
+				CUDA_CHECK(cudaMemcpy(reinterpret_cast<DenselySampledSpectrum*>(m_spectralData) + index, &spec, sizeof(DenselySampledSpectrum), cudaMemcpyHostToDevice));
+				CUDA_CHECK(cudaMemcpy(
+							reinterpret_cast<void*>(m_lpBuffer + offsetof(LaunchParameters, spectra)),
+							reinterpret_cast<void**>(&m_spectralData),
+							sizeof(CUdeviceptr),
+							cudaMemcpyHostToDevice));
+			}
+			else
+			{
+				index = m_freeSpectra.top();
+				m_freeSpectra.pop();
+				m_loadedSpectra.insert({type, {index, 1}});
+				DenselySampledSpectrum spec{ SpectralData::loadSpectrum(type) };
+				CUDA_CHECK(cudaMemcpy(reinterpret_cast<DenselySampledSpectrum*>(m_spectralData) + index,
+							&spec,
+							sizeof(DenselySampledSpectrum),
+							cudaMemcpyHostToDevice));
+			}
+		}
+		return index;
+	}
+	return 0;
+}
+int RenderingInterface::bxdfTypeToIndex(SceneData::BxDF type)
+{
+	switch (type)
+	{
+		case SceneData::BxDF::CONDUCTOR:
+			return 0;
+			break;
+		case SceneData::BxDF::DIELECTIRIC:
+			return 1;
+			break;
+		default:
+			R_ERR_LOG("Unknown BxDF type.")
+			break;
+	}
+	return -1;
 }
 
 void RenderingInterface::resolveRender(const glm::mat3& colorspaceTransform)
@@ -666,10 +768,18 @@ void RenderingInterface::processChanges(RenderContext& renderContext, Camera& ca
 					m_streams[1]));
 	}
 
+	if (scene.materialChanged)
+	{
+		SceneData::MaterialDescriptor& prevDesc{ scene.materialDescriptors[scene.changedMaterialIndex] };
+		changeMaterial(scene.changedMaterialIndex, scene.changedDesc, scene.materialDescriptors[scene.changedMaterialIndex]);
+		prevDesc = scene.changedDesc;
+	}
+
 	m_currentSampleCount = 1;
 	m_currentSampleOffset = 0;
 	m_processedSampleCount = 0;
 
+	scene.materialChanged = false;
 	renderContext.acceptChanges();
 	camera.acceptChanges();
 	m_renderingIsFinished = false;

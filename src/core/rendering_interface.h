@@ -1,5 +1,7 @@
 #pragma once
 
+#include <unordered_map>
+#include <stack>
 #include <glad/glad.h>
 #include <glm/vec3.hpp>
 #include <glm/mat3x3.hpp>
@@ -70,6 +72,15 @@ private:
 	bool m_renderingIsFinished{ false };
 	bool m_sublaunchIsFinished{ false };
 
+	struct SpectrumRecord
+	{
+		int index{};
+		int refcount{};
+	};
+	typedef std::unordered_map<SpectralData::SpectralDataType, SpectrumRecord> SpectraMap;
+	std::unordered_map<SpectralData::SpectralDataType, SpectrumRecord> m_loadedSpectra{};
+	std::stack<int> m_freeSpectra{};
+
 	template <typename T>
 		struct Record
 		{
@@ -92,11 +103,15 @@ private:
 	void fillSpectralCurvesData();
 	void prepareDataForRendering(const Camera& camera, const RenderContext& renderContext, const SceneData& scene);
 	void prepareDataForPreviewDrawing();
-	
-	void resolveRender(const glm::mat3& colorspaceTransform);
-	void processChanges(RenderContext& renderContext, Camera& camera, SceneData& scene);
+
+	void changeMaterial(int index, const SceneData::MaterialDescriptor& desc, const SceneData::MaterialDescriptor& prevDesc);
+	void addMaterial(const SceneData::MaterialDescriptor& desc);
+	int bxdfTypeToIndex(SceneData::BxDF type);
 	void updateSubLaunchData();
 	void updateSamplingState();
+	
+	void processChanges(RenderContext& renderContext, Camera& camera, SceneData& scene);
+	void resolveRender(const glm::mat3& colorspaceTransform);
 	void launch();
 public:
 	RenderingInterface(const Camera& camera, const RenderContext& renderContext, const SceneData& scene);
@@ -112,5 +127,6 @@ public:
 	bool renderingIsFinished() const { return m_renderingIsFinished; }
 	bool sublaunchIsFinished() const { return m_sublaunchIsFinished; }
 	int getProcessedSampleCount() const { return m_processedSampleCount; }
+	uint32_t getSpectrum(SpectralData::SpectralDataType type);
 	void cleanup();
 };

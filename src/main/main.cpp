@@ -55,27 +55,6 @@ void menu(UI& ui, Camera& camera, RenderContext& rContext, SceneData& scene, int
 
 	if (mode == RenderContext::Mode::IMMEDIATE)
 	{
-		ImGui::SeparatorText("Render settings");
-
-		static int sampleCount{ rContext.getSampleCount() };
-		changed = ImGui::InputInt("Sample count", &sampleCount);
-		sampleCount = std::max(1, std::min(65535, sampleCount));
-		if (changed) rContext.setSampleCount(sampleCount);
-
-		static int pathLength{ rContext.getPathLength() };
-		changed = ImGui::InputInt("Path length", &pathLength);
-		pathLength = std::max(1, std::min(65535, pathLength));
-		if (changed) rContext.setPathLength(pathLength);
-
-		static int renderWidth{ rContext.getRenderWidth() };
-		ImGui::DragInt("Render width", &renderWidth, 8, 1, 2048, "%d", ImGuiSliderFlags_AlwaysClamp);
-		if ((renderWidth != rContext.getRenderWidth()) && !ui.keyboardIsCaptured())
-			rContext.setRenderWidth(renderWidth);
-
-		static int renderHeight{ rContext.getRenderHeight() };
-		ImGui::DragInt("Render height", &renderHeight, 8, 1, 2048, "%d", ImGuiSliderFlags_AlwaysClamp);
-		if ((renderHeight != rContext.getRenderHeight()) && !ui.keyboardIsCaptured())
-			rContext.setRenderHeight(renderHeight);
 	}
 	else
 	{
@@ -89,41 +68,135 @@ void menu(UI& ui, Camera& camera, RenderContext& rContext, SceneData& scene, int
 		pause = ImGui::Button(names[index], ImVec2{80.0f, 30.0f}) ? !pause : pause;
 		ImGui::PopStyleColor(3);
 		ImGui::PopID();
+	}
 
-		if (pause)
+	if (pause || mode == RenderContext::Mode::IMMEDIATE)
+	{
+		ImGui::SeparatorText("Render settings");
+
+		static int sampleCount{ rContext.getSampleCount() };
+		changed = ImGui::InputInt("Sample count", &sampleCount);
+		sampleCount = std::max(1, std::min(65535, sampleCount));
+		if (changed) rContext.setSampleCount(sampleCount);
+
+		static int pathLength{ rContext.getPathLength() };
+		changed = ImGui::InputInt("Path length", &pathLength);
+		pathLength = std::max(1, std::min(65535, pathLength));
+		if (changed) rContext.setPathLength(pathLength);
+
+		static int renderWidth{ rContext.getRenderWidth() };
+		ImGui::DragInt("Render width", &renderWidth, 4, 1, 2048, "%d", ImGuiSliderFlags_AlwaysClamp);
+		if ((renderWidth != rContext.getRenderWidth()) && !ui.keyboardIsCaptured())
+			rContext.setRenderWidth(renderWidth);
+
+		static int renderHeight{ rContext.getRenderHeight() };
+		ImGui::DragInt("Render height", &renderHeight, 4, 1, 2048, "%d", ImGuiSliderFlags_AlwaysClamp);
+		if ((renderHeight != rContext.getRenderHeight()) && !ui.keyboardIsCaptured())
+			rContext.setRenderHeight(renderHeight);
+
+
+		ImGui::SeparatorText("Change material");
+
+		static int currentItem{ 0 };
+		if (!scene.materialDescriptors.empty())
 		{
-			ImGui::SeparatorText("Render settings");
+			if (ImGui::BeginCombo("Mesh", scene.materialDescriptors[currentItem].name.c_str()))
+			{
+				for (int i{ 0 }; i < scene.materialDescriptors.size(); ++i)
+				{
+					const bool selected{ currentItem == i };
+					if (ImGui::Selectable(scene.materialDescriptors[i].name.c_str(), selected))
+						currentItem = i;
 
-			static int sampleCount{ rContext.getSampleCount() };
-			changed = ImGui::InputInt("Sample count", &sampleCount);
-			sampleCount = std::max(1, std::min(65535, sampleCount));
-			if (changed) rContext.setSampleCount(sampleCount);
+					if (selected)
+						ImGui::SetItemDefaultFocus();
+				}
+				ImGui::EndCombo();
+			}
+			scene.changedMaterialIndex = currentItem;
+			scene.changedDesc = scene.materialDescriptors[currentItem];
 
-			static int pathLength{ rContext.getPathLength() };
-			changed = ImGui::InputInt("Path length", &pathLength);
-			pathLength = std::max(1, std::min(65535, pathLength));
-			if (changed) rContext.setPathLength(pathLength);
 
-			static int renderWidth{ rContext.getRenderWidth() };
-			ImGui::DragInt("Render width", &renderWidth, 8, 1, 2048, "%d", ImGuiSliderFlags_AlwaysClamp);
-			if ((renderWidth != rContext.getRenderWidth()) && !ui.keyboardIsCaptured())
-				rContext.setRenderWidth(renderWidth);
+			int rb{};
+			switch (scene.changedDesc.bxdf)
+			{
+				case SceneData::BxDF::CONDUCTOR:
+					rb = 0;
+					break;
+				case SceneData::BxDF::DIELECTIRIC:
+					rb = 1;
+					break;
+				default:
+					R_ERR_LOG("Unknown BxDF.")
+					break;
+			}
+			ImGui::RadioButton("Conductor", &rb, 0);
+			ImGui::SameLine();
+			ImGui::RadioButton("Dielectric", &rb, 1);
+			SceneData::BxDF bx{};
+			switch (rb)
+			{
+				case 0:
+					bx = SceneData::BxDF::CONDUCTOR;
+					break;
+				case 1:
+					bx = SceneData::BxDF::DIELECTIRIC;
+					break;
+				default:
+					R_ERR_LOG("Unknown output.")
+					break;
+			}
+			if (bx != scene.changedDesc.bxdf)
+			{
+				scene.materialChanged = true;
 
-			static int renderHeight{ rContext.getRenderHeight() };
-			ImGui::DragInt("Render height", &renderHeight, 8, 1, 2048, "%d", ImGuiSliderFlags_AlwaysClamp);
-			if ((renderHeight != rContext.getRenderHeight()) && !ui.keyboardIsCaptured())
-				rContext.setRenderHeight(renderHeight);
+				scene.changedDesc.bxdf = bx;
+				if (scene.changedDesc.bxdf == SceneData::BxDF::CONDUCTOR)
+				{
+					scene.changedDesc.baseIOR = SpectralData::SpectralDataType::C_METAL_AL_IOR;
+					scene.changedDesc.baseAC = SpectralData::SpectralDataType::C_METAL_AL_AC;
+				}
+				else if (scene.changedDesc.bxdf == SceneData::BxDF::DIELECTIRIC)
+				{
+					scene.changedDesc.baseIOR = SpectralData::SpectralDataType::D_GLASS_F5_IOR;
+					scene.changedDesc.baseAC = SpectralData::SpectralDataType::NONE;
+				}
+				scene.changedDesc.baseEmission = SpectralData::SpectralDataType::NONE;
+			}
+
+			if (scene.changedDesc.bxdf == SceneData::BxDF::CONDUCTOR)
+			{
+				static int currentSpectrum{ 0 };
+				if (ImGui::ListBox("Conductor type", &currentSpectrum, SpectralData::conductorSpectraNames.data(), SpectralData::conductorSpectraNames.size(), 3))
+				{
+					scene.materialChanged = true;
+
+					scene.changedDesc.baseIOR = SpectralData::conductorIORSpectraTypes[currentSpectrum];
+					scene.changedDesc.baseAC = SpectralData::conductorACSpectraTypes[currentSpectrum];
+				}
+			}
+			else if (scene.changedDesc.bxdf == SceneData::BxDF::DIELECTIRIC)
+			{
+				static int currentSpectrum{ 0 };
+				if (ImGui::ListBox("Dielectric type", &currentSpectrum, SpectralData::dielectricSpectraNames.data(), SpectralData::dielectricSpectraNames.size(), 3))
+				{
+					scene.materialChanged = true;
+
+					scene.changedDesc.baseIOR = SpectralData::dielectricIORSpectraTypes[currentSpectrum];
+					scene.changedDesc.baseAC = SpectralData::SpectralDataType::NONE;
+				}
+			}
+
+			if (ImGui::DragFloat("Roughness", &scene.changedDesc.roughness, 0.002f, 0.0f, 1.0f))
+				scene.materialChanged = true;
 		}
 	}
 
-	if (ImGui::TreeNodeEx("Info", ImGuiTreeNodeFlags_DefaultOpen))
-	{
-		ImGui::Text("Sample count: %d", currentSampleCount);
+	ImGui::SeparatorText("Info");
+	ImGui::Text("Sample count: %d", currentSampleCount);
 
-		ImGui::TreePop();
-	}
-
-	ImGui::TextColored(ImColor(0.99f, 0.33f, 0.29f), "Press \"Space\" to hide this menu.");
+	ImGui::SeparatorText("##");
+	ImGui::TextColored(ImColor(0.99f, 0.33f, 0.29f), "Press \"H\" to hide this menu.");
 	ImGui::End();
 
 	rContext.setPause(pause);
@@ -178,18 +251,22 @@ void input(Window& window, UI& ui, Camera& camera, RenderContext& rContext)
 	xposPrev = xpos;
 	yposPrev = ypos;
 
+	static int hKeyState{ GLFW_RELEASE };
+	state = glfwGetKey(glfwwindow, GLFW_KEY_H);
+	if (state == GLFW_RELEASE && hKeyState == GLFW_PRESS)
+		ui.toggle();
+	hKeyState = state;
+
 	first = false;
 }
 
 int main(int argc, char** argv)
 {
 	// TODO:
-	// Immediate mode
-		// Changing light and material settings
 	// Camera interface in pt kernel
-	// Sample count heuristic
+	// Better lights handling
 	// OBJ loading
-	// GLTF loading
+	// More BxDFs
 
 	initialize();
 
@@ -214,7 +291,7 @@ int main(int argc, char** argv)
 	{
 		glfwPollEvents();
 
-		bool changesMade{ rContext.changesMade() || camera.changesMade() };
+		bool changesMade{ rContext.changesMade() || camera.changesMade() || scene.materialChanged };
 		if ((!rInterface.renderingIsFinished() || changesMade) && !rContext.paused())
 			rInterface.render(rContext, camera, scene, changesMade);
 

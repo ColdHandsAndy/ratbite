@@ -50,7 +50,7 @@ struct LaunchParameters
 	float diskSurfacePDF{};
 
 	CUPTR(MaterialData) materials{};
-	CUPTR(DenseSpectrum) spectrums{};
+	CUPTR(DenseSpectrum) spectra{};
 
 	CUPTR(DenseSpectrum) sensorSpectralCurveA{};
 	CUPTR(DenseSpectrum) sensorSpectralCurveB{};

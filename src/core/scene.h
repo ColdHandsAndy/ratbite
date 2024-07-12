@@ -2,6 +2,7 @@
 
 #include <cstdint>
 #include <array>
+#include <string>
 
 #include <optix_types.h>
 
@@ -232,44 +233,91 @@ struct SceneData
 	} diskLight{};
 	static constexpr uint32_t lightMaterialIndex{ geometryMaterialCount };
 
+	enum class BxDF
+	{
+		CONDUCTOR,
+		DIELECTIRIC,
+		DESC
+	};
 	struct MaterialDescriptor //We need 'MaterialDescrioptor' to find material data before rendering
 	{
-		uint32_t bxdfIndex{};
+		std::string name{};
+		BxDF bxdf{};
 		SpectralData::SpectralDataType baseIOR{};
 		SpectralData::SpectralDataType baseAC{};
 		SpectralData::SpectralDataType baseEmission{};
 		float roughness{};
 	};
-	const std::array<MaterialDescriptor, geometryMaterialCount + lightCount> materialDescriptors
+	static constexpr std::array spectraNames{
+		"glass-BK7",
+		"glass-BAF10",
+		"glass-FK51A",
+		"glass-LASF9",
+		"glass-F5",
+		"glass-F10",
+		"glass-F11",
+		"metal-Ag-eta",
+		"metal-Ag-k",
+		"metal-Al-eta",
+		"metal-Al-k",
+		"metal-Au-eta",
+		"metal-Au-k",
+		"metal-Cu-eta",
+		"metal-Cu-k",
+		"metal-CuZn-eta",
+		"metal-CuZn-k",
+		"metal-MgO-eta",
+		"metal-MgO-k",
+		"metal-TiO2-eta",
+		"metal-TiO2-k",
+		"stdillum-D65",
+		"stdillum-F1",
+		"stdillum-F2",
+		"stdillum-F3",
+		"stdillum-F4",
+		"stdillum-F5",
+		"stdillum-F6",
+		"stdillum-F7",
+		"stdillum-F8",
+		"stdillum-F9",
+		"stdillum-F10",
+		"stdillum-F11",
+		"stdillum-F12",
+	};
+	std::array<MaterialDescriptor, geometryMaterialCount + lightCount> materialDescriptors
 	{ {
-		MaterialDescriptor{.bxdfIndex = 0,
+		MaterialDescriptor{.name = "Floor, Back wall and Ceiling",
+			.bxdf = BxDF::CONDUCTOR,
 			.baseIOR = SpectralData::SpectralDataType::C_METAL_AG_IOR,
 			.baseAC = SpectralData::SpectralDataType::C_METAL_AG_AC,
-			.baseEmission = SpectralData::SpectralDataType::DESC,
 			.roughness = 1.0f},
-		MaterialDescriptor{.bxdfIndex = 0,
+		MaterialDescriptor{.name = "Right wall",
+			.bxdf = BxDF::CONDUCTOR,
 			.baseIOR = SpectralData::SpectralDataType::C_METAL_AU_IOR,
 			.baseAC = SpectralData::SpectralDataType::C_METAL_AU_AC,
-			.baseEmission = SpectralData::SpectralDataType::DESC,
 			.roughness = 1.0f},
-		MaterialDescriptor{.bxdfIndex = 0,
+		MaterialDescriptor{.name = "Left wall",
+			.bxdf = BxDF::CONDUCTOR,
 			.baseIOR = SpectralData::SpectralDataType::C_METAL_CU_IOR,
 			.baseAC = SpectralData::SpectralDataType::C_METAL_CU_AC,
-			.baseEmission = SpectralData::SpectralDataType::DESC,
 			.roughness = 1.0f},
-		MaterialDescriptor{.bxdfIndex = 0,
+		MaterialDescriptor{.name = "Tall block",
+			.bxdf = BxDF::CONDUCTOR,
 			.baseIOR = SpectralData::SpectralDataType::C_METAL_AL_IOR,
 			.baseAC = SpectralData::SpectralDataType::C_METAL_AL_AC,
-			.baseEmission = SpectralData::SpectralDataType::DESC,
 			.roughness = 0.1f},
-		MaterialDescriptor{.bxdfIndex = 1,
+		MaterialDescriptor{.name = "Short block",
+			.bxdf = BxDF::DIELECTIRIC,
 			.baseIOR = SpectralData::SpectralDataType::D_GLASS_BK7_IOR,
-			.baseEmission = SpectralData::SpectralDataType::DESC,
-			.roughness = 0.001f},
-		MaterialDescriptor{.bxdfIndex = 0,
+			.roughness = 0.008f},
+		MaterialDescriptor{.name = "Light",
+			.bxdf = BxDF::CONDUCTOR,
 			.baseIOR = SpectralData::SpectralDataType::C_METAL_TIO2_IOR,
 			.baseAC = SpectralData::SpectralDataType::C_METAL_TIO2_AC,
 			.baseEmission = SpectralData::SpectralDataType::ILLUM_D65,
 			.roughness = 1.0f},
 	} };
+	bool materialChanged{ false };
+	int changedMaterialIndex{};
+	MaterialDescriptor changedDesc{};
 };

@@ -28,6 +28,14 @@
 									{ \
 										std::cerr << std::format("Log message.\n\tFile: {}\n\tLine: {}\n\tMessage: {}\n", __FILE__, __LINE__, msg); \
 									}
+#define R_ERR()						{\
+										std::cerr << std::format("Error.\n\tFile: {}\n\tLine: {}\n", __FILE__, __LINE__); \
+										std::abort();\
+									}
+#define R_ERR_LOG(msg)				{\
+										std::cerr << std::format("Error.\n\tFile: {}\n\tLine: {}\n\tMessage: {}\n", __FILE__, __LINE__, msg); \
+										std::abort();\
+									}
 
 inline void checkCUDA(cudaError_t error, const char* call, const char* file, uint32_t line)
 {

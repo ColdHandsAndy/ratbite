@@ -177,7 +177,7 @@ extern "C" __device__ void __direct_callable__DielectricBxDF(const MaterialData&
 	
 	wavelengths.terminateSecondary();
 
-	float eta{ parameters.spectrums[materialData.indexOfRefractSpectrumDataIndex].sample(wavelengths[0]) };
+	float eta{ parameters.spectra[materialData.indexOfRefractSpectrumDataIndex].sample(wavelengths[0]) };
 
 	float alpha{ utility::roughnessToAlpha(materialData.mfRoughnessValue) };
 	microfacet::Microsurface ms{ .alphaX = alpha, .alphaY = alpha };
@@ -346,8 +346,8 @@ extern "C" __device__ void __direct_callable__ConductorBxDF(const MaterialData& 
 		return;
 	}
 
-	SampledSpectrum eta{ parameters.spectrums[materialData.indexOfRefractSpectrumDataIndex].sample(wavelengths) };
-	SampledSpectrum k{ parameters.spectrums[materialData.absorpCoefSpectrumDataIndex].sample(wavelengths) };
+	SampledSpectrum eta{ parameters.spectra[materialData.indexOfRefractSpectrumDataIndex].sample(wavelengths) };
+	SampledSpectrum k{ parameters.spectra[materialData.absorpCoefSpectrumDataIndex].sample(wavelengths) };
 
 	float alpha{ utility::roughnessToAlpha(materialData.mfRoughnessValue) };
 	microfacet::Microsurface ms{ .alphaX = alpha, .alphaY = alpha };
@@ -487,7 +487,7 @@ extern "C" __global__ void __raygen__main()
 
 			if (stateFlags & PathStateFlagBit::EMISSIVE_OBJECT_HIT)
 			{
-				SampledSpectrum Le{ parameters.spectrums[material->emissionSpectrumDataIndex].sample(wavelengths) * parameters.lightScale };
+				SampledSpectrum Le{ parameters.spectra[material->emissionSpectrumDataIndex].sample(wavelengths) * parameters.lightScale };
 				float emissionWeight{};
 				const float lightCos{ -glm::dot(rD, parameters.diskNormal) };
 
@@ -506,7 +506,7 @@ extern "C" __global__ void __raygen__main()
 			// Fill DirectLightData
 			DirectLightData directLightData{};
 			directLightData.spectrumSample =
-				parameters.spectrums[parameters.illuminantSpectralDistributionIndex].sample(wavelengths) * parameters.lightScale;
+				parameters.spectra[parameters.illuminantSpectralDistributionIndex].sample(wavelengths) * parameters.lightScale;
 			glm::vec3 rToLight{
 				(parameters.diskLightPosition + sampling::disk::sampleUniform3D(glm::vec2{QRNG::Sobol::sample2D(qrngState, QRNG::DimensionOffset::LIGHT)}, parameters.diskFrame) * parameters.diskLightRadius) - rO };
 			float sqrdToLight{ rToLight.x * rToLight.x + rToLight.y * rToLight.y + rToLight.z * rToLight.z };

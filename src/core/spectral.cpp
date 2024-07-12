@@ -1471,12 +1471,6 @@ namespace SpectralData
         case SpectralData::SpectralDataType::C_METAL_TIO2_AC:
             return DenselySampledSpectrum{ PiecewiseLinearSpectrum{TiO2_k, ARRAYSIZE(TiO2_k), false} };
             break;
-        case SpectralData::SpectralDataType::ILLUM_A:
-            return DenselySampledSpectrum{ PiecewiseLinearSpectrum{CIE_Illum_A, ARRAYSIZE(CIE_Illum_A), true} };
-            break;
-        case SpectralData::SpectralDataType::ILLUM_D50:
-            return DenselySampledSpectrum{ PiecewiseLinearSpectrum{CIE_Illum_D5000, ARRAYSIZE(CIE_Illum_D5000), true} };
-            break;
         case SpectralData::SpectralDataType::ILLUM_D65:
             return DenselySampledSpectrum{ PiecewiseLinearSpectrum{CIE_Illum_D6500, ARRAYSIZE(CIE_Illum_D6500), true} };
             break;

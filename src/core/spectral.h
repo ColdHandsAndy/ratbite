@@ -1,6 +1,7 @@
 #pragma once
 
 #include <cstdint>
+#include <array>
 
 #include "../core/spectral_settings.h"
 
@@ -51,6 +52,8 @@ namespace SpectralData
 {
     enum class SpectralDataType
     {
+		NONE = 0,
+
         D_GLASS_BK7_IOR,
         D_GLASS_BAF10_IOR,
         D_GLASS_FK51A_IOR,
@@ -72,8 +75,6 @@ namespace SpectralData
         C_METAL_CUZN_AC,
         C_METAL_MGO_AC,
         C_METAL_TIO2_AC,
-        ILLUM_A,
-        ILLUM_D50,
         ILLUM_D65,
         ILLUM_F1,
         ILLUM_F2,
@@ -91,6 +92,81 @@ namespace SpectralData
         DESC
     };
 
+	static constexpr std::array dielectricSpectraNames{ std::to_array<const char*>({
+		"Glass BK7",
+		"Glass BAF10",
+		"Glass FK51A",
+		"Glass LASF9",
+		"Glass F5",
+		"Glass F10",
+		"Glass F11",
+		}) };
+	static constexpr std::array dielectricIORSpectraTypes{ std::to_array<SpectralDataType>({
+		SpectralDataType::D_GLASS_BK7_IOR,
+		SpectralDataType::D_GLASS_BAF10_IOR,
+		SpectralDataType::D_GLASS_FK51A_IOR,
+		SpectralDataType::D_GLASS_LASF9_IOR,
+		SpectralDataType::D_GLASS_F5_IOR,
+		SpectralDataType::D_GLASS_F10_IOR,
+		SpectralDataType::D_GLASS_F11_IOR,
+		}) };
+	static constexpr std::array conductorSpectraNames{ std::to_array<const char*>({
+		"Metal Ag",
+		"Metal Al",
+		"Metal Au",
+		"Metal Cu",
+		"Metal CuZn",
+		"Metal MgO",
+		"Metal TiO2",
+		}) };
+	static constexpr std::array conductorIORSpectraTypes{ std::to_array<SpectralDataType>({
+		SpectralDataType::C_METAL_AG_IOR,
+		SpectralDataType::C_METAL_AL_IOR,
+		SpectralDataType::C_METAL_AU_IOR,
+		SpectralDataType::C_METAL_CU_IOR,
+		SpectralDataType::C_METAL_CUZN_IOR,
+		SpectralDataType::C_METAL_MGO_IOR,
+		SpectralDataType::C_METAL_TIO2_IOR,
+		}) };
+	static constexpr std::array conductorACSpectraTypes{ std::to_array<SpectralDataType>({
+		SpectralDataType::C_METAL_AG_AC,
+		SpectralDataType::C_METAL_AL_AC,
+		SpectralDataType::C_METAL_AU_AC,
+		SpectralDataType::C_METAL_CU_AC,
+		SpectralDataType::C_METAL_CUZN_AC,
+		SpectralDataType::C_METAL_MGO_AC,
+		SpectralDataType::C_METAL_TIO2_AC,
+		}) };
+	static constexpr std::array emissionSpectraNames{ std::to_array<const char*>({
+		"Illum D65",
+		"Illum F1",
+		"Illum F2",
+		"Illum F3",
+		"Illum F4",
+		"Illum F5",
+		"Illum F6",
+		"Illum F7",
+		"Illum F8",
+		"Illum F9",
+		"Illum F10",
+		"Illum F11",
+		"Illum F12",
+		}) };
+	static constexpr std::array emissionSpectraTypes{ std::to_array<SpectralDataType>({
+		SpectralDataType::ILLUM_D65,
+		SpectralDataType::ILLUM_F1,
+		SpectralDataType::ILLUM_F2,
+		SpectralDataType::ILLUM_F3,
+		SpectralDataType::ILLUM_F4,
+		SpectralDataType::ILLUM_F5,
+		SpectralDataType::ILLUM_F6,
+		SpectralDataType::ILLUM_F7,
+		SpectralDataType::ILLUM_F8,
+		SpectralDataType::ILLUM_F9,
+		SpectralDataType::ILLUM_F10,
+		SpectralDataType::ILLUM_F11,
+		SpectralDataType::ILLUM_F12,
+		}) };
 
     namespace CIE
     {

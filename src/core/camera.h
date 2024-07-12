@@ -26,7 +26,7 @@ private:
 	bool m_positionChanged{ false };
 	bool m_orientationChanged{ false };
 public:
-	Camera(const glm::dvec3& position, const glm::dvec3& viewDirection, const glm::dvec3& upDirection) : m_pos{ position }, m_upWorld{ upDirection }
+	Camera(const glm::dvec3& position, const glm::dvec3& viewDirection, const glm::dvec3& upDirection) : m_pos{ position }, m_upWorld{ glm::normalize(upDirection) }
 	{
 		m_w = glm::normalize(viewDirection);
 		m_u = glm::normalize(glm::cross(glm::normalize(upDirection), m_w));
@@ -87,9 +87,14 @@ public:
 	void rotate(double xp, double yp)
 	{
 		m_w = glm::dvec3{glm::rotate(xp * m_rotationSpeed, m_upWorld) * glm::dvec4{m_w, 1.0}};
-		m_u = glm::normalize(glm::cross(glm::normalize(m_upWorld), m_w));
-		m_w = glm::dvec3{glm::rotate(yp * m_rotationSpeed, m_u) * glm::dvec4{m_w, 1.0}};
-		m_u = glm::normalize(glm::cross(glm::normalize(m_upWorld), m_w));
+		m_u = glm::normalize(glm::cross(m_upWorld, m_w));
+		glm::dvec3 newW{ glm::dvec3{glm::rotate(yp * m_rotationSpeed, m_u) * glm::dvec4{m_w, 1.0}} };
+		glm::dvec3 newU{ glm::normalize(glm::cross(m_upWorld, newW)) };
+		if (glm::dot(newU, m_u) > 0.0)
+		{
+			m_w = newW;
+			m_u = newU;
+		}
 		m_v = glm::cross(m_w, m_u);
 
 		m_orientationChanged = true;

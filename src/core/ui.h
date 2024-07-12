@@ -9,7 +9,7 @@
 class UI
 {
 private:
-
+	bool m_draw{ true };
 public:
 	UI(GLFWwindow* window)
 	{
@@ -27,6 +27,8 @@ public:
 	UI &operator=(UI&&) = default;
 	UI &operator=(const UI&) = default;
 	~UI() = default;
+
+	void toggle() { m_draw = !m_draw; }
 	
 	bool mouseIsCaptured() const { return ImGui::GetIO().WantCaptureMouse; }
 	bool keyboardIsCaptured() const { return ImGui::GetIO().WantCaptureKeyboard; }
@@ -39,8 +41,15 @@ public:
 	}
 	void renderImGui()
 	{
-		ImGui::Render();
-		ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
+		if (m_draw)
+		{
+			ImGui::Render();
+			ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
+		}
+		else
+		{
+			ImGui::EndFrame();
+		}
 	}
 
 	void cleanup()
