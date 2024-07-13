@@ -31,7 +31,8 @@ enum class PathStateFlagBit : uint32_t
 	EMISSIVE_OBJECT_HIT = 16u,
 	REGULARIZED = 32u,
 	SECONDARY_SPECTRAL_SAMPLES_TERMINATED = 64u,
-	PATH_TERMINATED = 128u,
+	INSIDE_OBJECT = 128u,
+	PATH_TERMINATED = 256u,
 };
 STRONGLY_TYPED_ENUM_OPERATOR_EXPAND_WITH_PREFIX(PathStateFlags, PathStateFlagBit, CU_DEVICE CU_INLINE)
 
@@ -211,10 +212,10 @@ extern "C" __device__ void __direct_callable__DielectricBxDF(const MaterialData&
 				stateFlags = stateFlags | PathStateFlagBit::PATH_TERMINATED;
 				return;
 			}
-			stateFlags = (stateFlags & PathStateFlagBit::TRANSMISSION) ? stateFlags & (~static_cast<PathStateFlags>(PathStateFlagBit::TRANSMISSION)) : stateFlags | PathStateFlagBit::TRANSMISSION;
 			bxdfPDF = cuda::std::fmax(0.0f, 1.0f - p);
 			throughputWeight *= T / (etaRel * etaRel) / bxdfPDF;
 		}
+		stateFlags = wi.z < 0.0f ? stateFlags | static_cast<PathStateFlags>(PathStateFlagBit::INSIDE_OBJECT) : stateFlags & (~static_cast<PathStateFlags>(PathStateFlagBit::INSIDE_OBJECT));
 		stateFlags = stateFlags | PathStateFlagBit::CURRENT_HIT_SPECULAR;
 		local.fromLocal(wi);
 		rD = wi;
@@ -316,7 +317,6 @@ extern "C" __device__ void __direct_callable__DielectricBxDF(const MaterialData&
 			* cuda::std::fabs(dotWmWo * dotWmWi / (cosThetaO * cosThetaI * denom));
 		const float pT{ cuda::std::fmax(0.0f, 1.0f - pR) };
 		bxdfPDF = microfacet::VNDF::PDF<microfacet::VNDF::ORIGINAL>(wo, wm, absDotWmWo, ctxo, ctxm, ms) * dwmdwi * pT;
-		stateFlags = (stateFlags & PathStateFlagBit::TRANSMISSION) ? stateFlags & (~static_cast<PathStateFlags>(PathStateFlagBit::TRANSMISSION)) : stateFlags | PathStateFlagBit::TRANSMISSION;
 		cosFactor = cuda::std::fabs(cosThetaI);
 	}
 
@@ -329,6 +329,7 @@ extern "C" __device__ void __direct_callable__DielectricBxDF(const MaterialData&
 	throughputWeight *= f * cosFactor / bxdfPDF;
 
 	glm::vec3 locWi{ wi };
+	stateFlags = locWi.z < 0.0f ? stateFlags | static_cast<PathStateFlags>(PathStateFlagBit::INSIDE_OBJECT) : stateFlags & (~static_cast<PathStateFlags>(PathStateFlagBit::INSIDE_OBJECT));
 	local.fromLocal(locWi);
 	rD = locWi;
 }
@@ -561,7 +562,7 @@ extern "C" __global__ void __raygen__main()
 				 L, wavelengths, throughputWeight,
 				 bxdfPDF, rD, stateFlags);
 
-			if (stateFlags & PathStateFlagBit::TRANSMISSION)
+			if (stateFlags & PathStateFlagBit::INSIDE_OBJECT)
 				rO = utility::offsetRay(hP, -hN);
 
 			qrngState.advanceBounce();

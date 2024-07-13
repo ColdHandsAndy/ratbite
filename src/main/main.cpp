@@ -278,11 +278,10 @@ void input(Window& window, UI& ui, Camera& camera, RenderContext& rContext)
 int main(int argc, char** argv)
 {
 	// TODO:
-	// Camera interface in pt kernel
-	// Transmission hit offsetting fix
 	// Better lights handling
 	// Figure out direct light sampling on an emissive hit
 	// OBJ loading
+	// Adaptive sampling
 	// More BxDFs
 
 	initialize();
