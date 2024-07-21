@@ -107,7 +107,7 @@ private:
 	void prepareDataForRendering(const Camera& camera, const RenderContext& renderContext, const SceneData& scene);
 	void prepareDataForPreviewDrawing();
 
-	void changeMaterial(int index, const SceneData::MaterialDescriptor& desc, const SceneData::MaterialDescriptor& prevDesc);
+	void changeMaterial(int index, bool newMat, const SceneData::MaterialDescriptor& desc, const SceneData::MaterialDescriptor& prevDesc);
 	void addMaterial(const SceneData::MaterialDescriptor& desc);
 	int bxdfTypeToIndex(SceneData::BxDF type);
 	void updateSubLaunchData();
@@ -130,6 +130,7 @@ public:
 	bool renderingIsFinished() const { return m_renderingIsFinished; }
 	bool sublaunchIsFinished() const { return m_sublaunchIsFinished; }
 	int getProcessedSampleCount() const { return m_processedSampleCount; }
+	uint32_t setNewSpectrum(SpectralData::SpectralDataType type);
 	uint32_t getSpectrum(SpectralData::SpectralDataType type);
 	void cleanup();
 };

@@ -131,7 +131,7 @@ void menu(UI& ui, Camera& camera, RenderContext& rContext, SceneData& scene, int
 			}
 			scene.changedMaterialIndex = currentItem;
 			scene.changedDesc = scene.materialDescriptors[currentItem];
-
+			scene.changedDescIsNew = false;
 
 			int rb{};
 			switch (scene.changedDesc.bxdf)

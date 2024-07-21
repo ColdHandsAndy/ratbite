@@ -3,6 +3,8 @@
 #include <cuda_runtime.h>
 #include <cuda/std/cmath>
 
+#include <glm/common.hpp>
+
 #include "../core/spectral_settings.h"
 #include "../core/util_macros.h"
 
@@ -158,6 +160,22 @@ public:
 		t /= SpectralSettings::KSpectralSamplesNumber;
 		return t;
 	}
+	CU_DEVICE CU_INLINE float sum() const
+	{
+		float t{ this->spectrum[0] };
+		for (int i{ 1 }; i < SpectralSettings::KSpectralSamplesNumber; ++i)
+		{
+			t += this->spectrum[i];
+		}
+		return t;
+	}
+	CU_DEVICE CU_INLINE void clamp(float a, float b)
+	{
+		for (int i{ 0 }; i < SpectralSettings::KSpectralSamplesNumber; ++i)
+		{
+			this->spectrum[i] = glm::clamp(this->spectrum[i], a, b);
+		}
+	}
 
 	CU_DEVICE CU_INLINE float operator[](int i) const
 	{
@@ -176,6 +194,7 @@ class SampledWavelengths
 private:
 	SampledSpectrum lambda{};
 	SampledSpectrum pdf{};
+	float activeCount{ SpectralSettings::KSpectralSamplesNumber };
 
 public:
 	CU_DEVICE CU_INLINE SampledWavelengths() = default;
@@ -183,7 +202,7 @@ public:
 
 	CU_DEVICE CU_INLINE static SampledWavelengths sampleUniform(float u, float lambdaMin = SpectralSettings::KMinSampledLambda, float lambdaMax = SpectralSettings::KMaxSampledLambda)
 	{
-		SampledWavelengths swl;
+		SampledWavelengths swl{};
 
 		swl.lambda[0] = lambdaMin * (1.0f - u) + lambdaMax * u;
 
@@ -203,7 +222,7 @@ public:
 
 	CU_DEVICE CU_INLINE static SampledWavelengths sampleVisible(float u)
 	{
-		SampledWavelengths swl;
+		SampledWavelengths swl{};
 
 		for (int i{ 0 }; i < SpectralSettings::KSpectralSamplesNumber; ++i)
 		{
@@ -222,18 +241,37 @@ public:
 
 	CU_DEVICE CU_INLINE const SampledSpectrum& getLambda() const { return lambda; }
 	CU_DEVICE CU_INLINE const SampledSpectrum& getPDF() const { return pdf; }
+	CU_DEVICE CU_INLINE const float getActiveCount() const { return activeCount; }
 
-	CU_DEVICE CU_INLINE void terminateSecondary()
+	CU_DEVICE CU_INLINE void terminateSecondary(uint32_t index)
 	{
-		if (secondaryTerminated())
+		if (pdf[index] == 0.0f)
+			return;
+		pdf[index] = 0.0f;
+		float mtpl{ static_cast<float>(SpectralSettings::KSpectralSamplesNumber) / activeCount };
+		activeCount -= 1.0f;
+		mtpl *= activeCount / static_cast<float>(SpectralSettings::KSpectralSamplesNumber);
+		for (int i{ 0 }; i < SpectralSettings::KSpectralSamplesNumber; ++i)
+		{
+			if (pdf[i] != 0.0f)
+				pdf[i] *= mtpl;
+		}
+	}
+	CU_DEVICE CU_INLINE void terminateAllSecondary()
+	{
+		if (allSecondaryTerminated())
 			return;
 
+		float mtpl{ static_cast<float>(SpectralSettings::KSpectralSamplesNumber) / activeCount };
+		activeCount = 1.0f;
+		mtpl *= activeCount / static_cast<float>(SpectralSettings::KSpectralSamplesNumber);
+
+		pdf[0] *= mtpl;
 		for (int i{ 1 }; i < SpectralSettings::KSpectralSamplesNumber; ++i)
 			pdf[i] = 0.0f;
-		pdf[0] /= SpectralSettings::KSpectralSamplesNumber;
 	}
 
-	CU_DEVICE CU_INLINE bool secondaryTerminated() const
+	CU_DEVICE CU_INLINE bool allSecondaryTerminated() const
 	{
 		for (int i{ 1 }; i < SpectralSettings::KSpectralSamplesNumber; ++i)
 		{

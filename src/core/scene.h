@@ -309,7 +309,7 @@ struct SceneData
 		MaterialDescriptor{.name = "Short block",
 			.bxdf = BxDF::DIELECTIRIC,
 			.baseIOR = SpectralData::SpectralDataType::D_GLASS_BK7_IOR,
-			.roughness = 0.008f},
+			.roughness = 0.01f},
 		MaterialDescriptor{.name = "Light",
 			.bxdf = BxDF::CONDUCTOR,
 			.baseIOR = SpectralData::SpectralDataType::C_METAL_TIO2_IOR,
@@ -318,6 +318,7 @@ struct SceneData
 			.roughness = 1.0f},
 	} };
 	bool materialChanged{ false };
+	bool changedDescIsNew{ false };
 	int changedMaterialIndex{};
 	MaterialDescriptor changedDesc{};
 };

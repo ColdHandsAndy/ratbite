@@ -140,6 +140,33 @@ namespace microfacet
 		float rPerp{ (mfCosTheta - eta * mfCosThetaT) / (mfCosTheta + eta * mfCosThetaT) };
 		return (rParl * rParl + rPerp * rPerp) / 2.0f;
 	}
+	//Fresnel function for dielectrics (Spectrum version)
+	CU_DEVICE CU_INLINE SampledSpectrum FReal(float mfCosTheta, SampledSpectrum eta)
+	{
+		mfCosTheta = glm::clamp(mfCosTheta, -1.0f, 1.0f);
+
+		if (mfCosTheta < 0.0f)
+		{
+			eta = SampledSpectrum(1.0f) / eta;
+			mfCosTheta = -mfCosTheta;
+		}
+
+		float mfSin2Theta{ 1.0f - mfCosTheta * mfCosTheta };
+		SampledSpectrum mfSin2ThetaT{ SampledSpectrum(mfSin2Theta) / (eta * eta) };
+		SampledSpectrum mfCosThetaT{};
+		for (int i{ 0 }; i < SampledSpectrum::getSampleCount(); ++i)
+			mfCosThetaT[i] = cuda::std::sqrtf(cuda::std::fmax(0.0f, 1.0f - mfSin2ThetaT[i]));
+
+		SampledSpectrum rParl{ (eta * mfCosTheta - mfCosThetaT) / (eta * mfCosTheta + mfCosThetaT) };
+		SampledSpectrum rPerp{ (SampledSpectrum(mfCosTheta) - eta * mfCosThetaT) / (SampledSpectrum(mfCosTheta) + eta * mfCosThetaT) };
+		SampledSpectrum res{ (rParl * rParl + rPerp * rPerp) / 2.0f };
+		for (int i{ 0 }; i < SampledSpectrum::getSampleCount(); ++i)
+		{
+			if (mfSin2ThetaT[i] >= 1.0f)
+				res[i] = 1.0f;
+		}
+		return res;
+	}
 
 	namespace VNDF
 	{
@@ -157,12 +184,12 @@ namespace microfacet
 			DESC
 		};
 		template<SamplingMethod Method>
-		CU_DEVICE CU_INLINE glm::vec3 sample(const glm::vec3& wo, const ContextOutgoing& ctxo, const Microsurface& ms, const glm::vec2& uv)
+		CU_DEVICE CU_INLINE glm::vec3 sample(const glm::vec3& wo, const Microsurface& ms, const glm::vec2& uv)
 		{
 			if constexpr (Method == ORIGINAL)
 			{
 				glm::vec3 wh{ glm::normalize(glm::vec3{ms.alphaX * wo.x, ms.alphaY * wo.y, wo.z}) };
-				if (wh.z < 0)
+				if (wh.z < 0.0f)
 					wh = -wh;
 
 				glm::vec3 t{ (wh.z < 0.99999f) ? glm::normalize(glm::cross(glm::vec3{0.0f, 0.0f, 1.0f}, wh)) : glm::vec3{1.0f, 0.0f, 0.0f} };
@@ -181,6 +208,8 @@ namespace microfacet
 			else if constexpr (Method == SPHERICAL_CAP)
 			{
 				glm::vec3 woStd{ glm::normalize(glm::vec3{wo.x * ms.alphaX, wo.y * ms.alphaY, wo.z}) };
+				if (woStd.z < 0.0f)
+					woStd = -woStd;
 
 				float phi{ 2.0f * glm::pi<float>() * uv.x };
 				float b{ woStd.z };
@@ -200,7 +229,7 @@ namespace microfacet
 				float s{ 1.0f + glm::length(glm::vec2{wo.x, wo.y}) };
 				float a2{ a * a };
 				float s2{ s * s };
-				float k{ (1.0f - a2) * s2 / (s2 * a2 * wo.z * wo.z) };
+				float k{ (1.0f - a2) * s2 / (s2 + a2 * wo.z * wo.z) };
 				float b{ wo.z > 0.0f ? k * woStd.z : woStd.z };
 				float z{ __fmaf_rd(1.0f - uv.y, 1.0f + b, -b) };
 				float sinTheta{ cuda::std::sqrtf(glm::clamp(1.0f - z * z, 0.0f, 1.0f)) };

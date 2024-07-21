@@ -70,32 +70,32 @@ namespace QRNG
 
 		CU_DEVICE CU_INLINE static float sample1D(const State& qrngState, DimensionOffset dOffset)
 		{
-			uint32_t seed{ qrngState.getHash() ^ getDimHash(dOffset) };
-			uint32_t index{ reversedBitOwen(reverseIntegerBits(qrngState.getSample()), seed ^ 0xbff95bfe) };
 			uint32_t offset{ qrngState.getOffset() + static_cast<uint32_t>(dOffset) };
+			uint32_t seed{ qrngState.getHash() ^ getDimHash(offset) };
+			uint32_t index{ reversedBitOwen(reverseIntegerBits(qrngState.getSample()), seed ^ 0xbff95bfe) };
 
 			return sobolBurley(index, 0, seed ^ 0x635c77bd);
 		}
 		CU_DEVICE CU_INLINE static glm::vec2 sample2D(const State& qrngState, DimensionOffset dOffset)
 		{
-			uint32_t seed{ qrngState.getHash() ^ getDimHash(dOffset) };
-			uint32_t index{ reversedBitOwen(reverseIntegerBits(qrngState.getSample()), seed ^ 0xf8ade99a) };
 			uint32_t offset{ qrngState.getOffset() + static_cast<uint32_t>(dOffset) };
+			uint32_t seed{ qrngState.getHash() ^ getDimHash(offset) };
+			uint32_t index{ reversedBitOwen(reverseIntegerBits(qrngState.getSample()), seed ^ 0xf8ade99a) };
 
 			return glm::vec2{ sobolBurley(index, 0, seed ^ 0xe0aaaf76), sobolBurley(index, 1, seed ^ 0x94964d4e) };
 		}
 		CU_DEVICE CU_INLINE static glm::vec3 sample3D(const State& qrngState, DimensionOffset dOffset)
 		{
-			uint32_t seed{ qrngState.getHash() ^ getDimHash(dOffset) };
-			uint32_t index{ reversedBitOwen(reverseIntegerBits(qrngState.getSample()), seed ^ 0xcaa726ac) };
 			uint32_t offset{ qrngState.getOffset() + static_cast<uint32_t>(dOffset) };
+			uint32_t seed{ qrngState.getHash() ^ getDimHash(offset) };
+			uint32_t index{ reversedBitOwen(reverseIntegerBits(qrngState.getSample()), seed ^ 0xcaa726ac) };
 
 			return glm::vec3{ sobolBurley(index, 0, seed ^ 0x9e78e391), sobolBurley(index, 1, seed ^ 0x67c33241), sobolBurley(index, 2, seed ^ 0x78c395c5) };
 		}
 	private:
-		CU_DEVICE CU_INLINE static uint32_t getDimHash(DimensionOffset dOffset)
+		CU_DEVICE CU_INLINE static uint32_t getDimHash(uint32_t offset)
 		{
-			uint32_t i{ static_cast<uint32_t>(dOffset) };
+			uint32_t i{ offset };
 			i ^= i >> 16;
 			i *= 0x21f0aaad;
 			i ^= i >> 15;

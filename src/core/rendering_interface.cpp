@@ -508,7 +508,7 @@ void RenderingInterface::prepareDataForPreviewDrawing()
 	glDeleteShader(fragmentShader);
 }
 
-void RenderingInterface::changeMaterial(int index, const SceneData::MaterialDescriptor& desc, const SceneData::MaterialDescriptor& prevDesc)
+void RenderingInterface::changeMaterial(int index, bool newMat, const SceneData::MaterialDescriptor& desc, const SceneData::MaterialDescriptor& prevDesc)
 {
 	std::function remSpecRef{ [this](const SpectralData::SpectralDataType sdt)
 		{
@@ -528,23 +528,49 @@ void RenderingInterface::changeMaterial(int index, const SceneData::MaterialDesc
 					R_ERR_LOG("Attempted to remove a reference to a not loaded spectrum.")
 			}
 		} };
-	if (desc.baseIOR != prevDesc.baseIOR)
-		remSpecRef(prevDesc.baseIOR);
-	if (desc.baseAC != prevDesc.baseAC)
-		remSpecRef(prevDesc.baseAC);
-	if (desc.baseEmission != prevDesc.baseEmission)
-		remSpecRef(prevDesc.baseEmission);
-	MaterialData matData{
-		.bxdfIndexSBT = static_cast<uint32_t>(bxdfTypeToIndex(desc.bxdf)),
-		.indexOfRefractSpectrumDataIndex = static_cast<uint16_t>(getSpectrum(desc.baseIOR)),
-		.absorpCoefSpectrumDataIndex = static_cast<uint16_t>(getSpectrum(desc.baseAC)),
-		.emissionSpectrumDataIndex = static_cast<uint16_t>(getSpectrum(desc.baseEmission)),
-		.mfRoughnessValue = desc.roughness
-	};
+	MaterialData matData{};
+	matData.bxdfIndexSBT = static_cast<uint32_t>(bxdfTypeToIndex(desc.bxdf));
+	matData.mfRoughnessValue = desc.roughness;
+	if (newMat)
+	{
+		matData.indexOfRefractSpectrumDataIndex = static_cast<uint16_t>(setNewSpectrum(desc.baseIOR));
+		matData.absorpCoefSpectrumDataIndex = static_cast<uint16_t>(setNewSpectrum(desc.baseAC));
+		matData.emissionSpectrumDataIndex = static_cast<uint16_t>(setNewSpectrum(desc.baseEmission));
+	}
+	else
+	{
+		if (desc.baseIOR != prevDesc.baseIOR)
+		{
+			remSpecRef(prevDesc.baseIOR);
+			matData.indexOfRefractSpectrumDataIndex = static_cast<uint16_t>(setNewSpectrum(desc.baseIOR));
+		}
+		else
+		{
+			matData.indexOfRefractSpectrumDataIndex = static_cast<uint16_t>(getSpectrum(desc.baseIOR));
+		}
+		if (desc.baseAC != prevDesc.baseAC)
+		{
+			remSpecRef(prevDesc.baseAC);
+			matData.absorpCoefSpectrumDataIndex = static_cast<uint16_t>(setNewSpectrum(desc.baseAC));
+		}
+		else
+		{
+			matData.absorpCoefSpectrumDataIndex = static_cast<uint16_t>(getSpectrum(desc.baseAC));
+		}
+		if (desc.baseEmission != prevDesc.baseEmission)
+		{
+			remSpecRef(prevDesc.baseEmission);
+			matData.emissionSpectrumDataIndex = static_cast<uint16_t>(setNewSpectrum(desc.baseEmission));
+		}
+		else
+		{
+			matData.emissionSpectrumDataIndex = static_cast<uint16_t>(getSpectrum(desc.baseEmission));
+		}
+	}
 
 	CUDA_CHECK(cudaMemcpy(reinterpret_cast<MaterialData*>(m_materialData) + index, &matData, sizeof(MaterialData), cudaMemcpyHostToDevice));
 }
-uint32_t RenderingInterface::getSpectrum(SpectralData::SpectralDataType type)
+uint32_t RenderingInterface::setNewSpectrum(SpectralData::SpectralDataType type)
 {
 	if (type != SpectralData::SpectralDataType::NONE)
 	{
@@ -568,11 +594,7 @@ uint32_t RenderingInterface::getSpectrum(SpectralData::SpectralDataType type)
 				CUDA_CHECK(cudaFree(reinterpret_cast<void*>(oldSpectraBuffer)));
 				DenselySampledSpectrum spec{ SpectralData::loadSpectrum(type) };
 				CUDA_CHECK(cudaMemcpy(reinterpret_cast<DenselySampledSpectrum*>(m_spectralData) + index, &spec, sizeof(DenselySampledSpectrum), cudaMemcpyHostToDevice));
-				CUDA_CHECK(cudaMemcpy(
-							reinterpret_cast<void*>(m_lpBuffer + offsetof(LaunchParameters, spectra)),
-							reinterpret_cast<void**>(&m_spectralData),
-							sizeof(CUdeviceptr),
-							cudaMemcpyHostToDevice));
+				m_launchParameters.spectra = m_spectralData;
 			}
 			else
 			{
@@ -587,6 +609,15 @@ uint32_t RenderingInterface::getSpectrum(SpectralData::SpectralDataType type)
 			}
 		}
 		return index;
+	}
+	return 0;
+}
+uint32_t RenderingInterface::getSpectrum(SpectralData::SpectralDataType type)
+{
+	if (type != SpectralData::SpectralDataType::NONE)
+	{
+		R_ASSERT_LOG(m_loadedSpectra.contains(type), "Spectral data not loaded");
+		return m_loadedSpectra.at(type).index;
 	}
 	return 0;
 }
@@ -755,7 +786,7 @@ void RenderingInterface::processChanges(RenderContext& renderContext, Camera& ca
 	if (scene.materialChanged)
 	{
 		SceneData::MaterialDescriptor& prevDesc{ scene.materialDescriptors[scene.changedMaterialIndex] };
-		changeMaterial(scene.changedMaterialIndex, scene.changedDesc, scene.materialDescriptors[scene.changedMaterialIndex]);
+		changeMaterial(scene.changedMaterialIndex, scene.changedDescIsNew, scene.changedDesc, scene.materialDescriptors[scene.changedMaterialIndex]);
 		prevDesc = scene.changedDesc;
 	}
 
