@@ -2,7 +2,7 @@
 
 #include <cuda_runtime.h>
 
-#include "../core/util_macros.h"
+#include "../core/util.h"
 
 namespace MIS
 {

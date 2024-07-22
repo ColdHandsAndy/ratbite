@@ -1,5 +1,7 @@
 #pragma once
 
+#define NOMINMAX
+
 #include "rendering_interface.h"
 
 #include <fstream>
@@ -8,8 +10,6 @@
 #include <unordered_map>
 #include <functional>
 #include <tuple>
-#define NOMINMAX
-#include <windows.h>
 
 #include <optix.h>
 #include <optix_function_table_definition.h>
@@ -26,7 +26,7 @@
 #include "window.h"
 #include "render_context.h"
 #include "launch_parameters.h"
-#include "util_macros.h"
+#include "util.h"
 #include "debug_macros.h"
 #include "callbacks.h"
 #include "../kernels/optix_programs_desc.h"
@@ -220,10 +220,7 @@ void RenderingInterface::createModulesProgramGroupsPipeline()
 			.pipelineLaunchParamsVariableName = "parameters",
 			.usesPrimitiveTypeFlags = static_cast<uint32_t>(OPTIX_PRIMITIVE_TYPE_FLAGS_TRIANGLE | OPTIX_PRIMITIVE_TYPE_FLAGS_CUSTOM) };
 
-	TCHAR buffer[MAX_PATH]{};
-	GetModuleFileName(NULL, buffer, MAX_PATH);
-	std::filesystem::path progpath{ buffer };
-	std::ifstream ifstr{ progpath.remove_filename() / "pathtrace.ptx", std::ios_base::binary | std::ios_base::ate };
+	std::ifstream ifstr{ getExeDir() / "pathtrace.ptx", std::ios_base::binary | std::ios_base::ate };
 	size_t inputSize{ static_cast<size_t>(ifstr.tellg()) };
 	char* input{ new char[inputSize] };
 	ifstr.seekg(0);
@@ -284,10 +281,7 @@ void RenderingInterface::createModulesProgramGroupsPipeline()
 }
 void RenderingInterface::createRenderResolveProgram()
 {
-	TCHAR charbuffer[MAX_PATH]{};
-	GetModuleFileName(NULL, charbuffer, MAX_PATH);
-	std::filesystem::path progpath{ charbuffer };
-	std::ifstream ifstr{ progpath.remove_filename() / "image.ptx", std::ios_base::binary | std::ios_base::ate };
+	std::ifstream ifstr{ getExeDir() / "image.ptx", std::ios_base::binary | std::ios_base::ate };
 	size_t inputSize{ static_cast<size_t>(ifstr.tellg()) };
 	char* input{ new char[inputSize + 1] };
 	ifstr.seekg(0);

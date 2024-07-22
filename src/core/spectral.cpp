@@ -1,5 +1,5 @@
 #include "spectral.h"
-#include "util_macros.h"
+#include "util.h"
 #include "debug_macros.h"
 
 #include <glm/common.hpp>

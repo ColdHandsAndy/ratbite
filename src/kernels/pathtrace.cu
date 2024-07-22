@@ -7,7 +7,7 @@
 #include <glm/gtc/quaternion.hpp>
 
 #include "../core/launch_parameters.h"
-#include "../core/util_macros.h"
+#include "../core/util.h"
 #include "../core/material.h"
 #include "../device/util.h"
 #include "../device/dir_gen.h"
@@ -429,7 +429,7 @@ extern "C" __device__ void __direct_callable__ConductorBxDF(const MaterialData& 
 		bxdfPDF = 1.0f;
 		stateFlags = stateFlags | PathStateFlagBit::CURRENT_HIT_SPECULAR;
 		local.fromLocal(wi);
-		rD = wi;
+		rD = glm::normalize(wi);
 		return;
 	}
 
@@ -569,8 +569,9 @@ extern "C" __global__ void __raygen__main()
 
 				if (lightCos <= 0.0f)
 					emissionWeight = 0.0f;
-				else if (depth == 0 || (stateFlags & PathStateFlagBit::PREVIOUS_HIT_SPECULAR))
-					emissionWeight = 0.1f; // Too many fireflies, maybe this is a bug, suppressing for now
+				// else if (depth == 0 || (stateFlags & PathStateFlagBit::PREVIOUS_HIT_SPECULAR))
+				else if (depth == 0) // Disable reflective caustics for now
+					emissionWeight = 1.0f;
 				else
 				{
 					float lPDF{ parameters.diskSurfacePDF * dToHSqr / lightCos };

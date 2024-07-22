@@ -5,7 +5,7 @@
 #include <glm/vec2.hpp>
 #include <glm/vec3.hpp>
 
-#include "../core/util_macros.h"
+#include "../core/util.h"
 
 // Cycles QRNG approach https://github.com/blender/cycles/tree/main
 namespace QRNG

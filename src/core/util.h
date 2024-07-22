@@ -1,7 +1,5 @@
 #pragma once
 
-
-
 #define ARRAYSIZE(x) ((sizeof(x) / sizeof(*(x))) / static_cast<size_t>(!(sizeof(x) % sizeof(*(x)))))
 #define ALIGNED_SIZE(size, alignment_requirement) (size + ((alignment_requirement - (size % alignment_requirement)) % alignment_requirement))
 #define DISPATCH_SIZE(dispatchElementCount, groupElementCount)	\
@@ -50,3 +48,7 @@
 	STRONGLY_TYPED_ENUM_OPERATOR_EXPAND_ONE_OP_WITH_PREFIX(flagsType, enumClass, |, prefix) \
 	STRONGLY_TYPED_ENUM_OPERATOR_EXPAND_ONE_OP_WITH_PREFIX(flagsType, enumClass, &, prefix) \
 	STRONGLY_TYPED_ENUM_OPERATOR_EXPAND_ONE_OP_WITH_PREFIX(flagsType, enumClass, ^, prefix)
+
+#include <filesystem>
+std::filesystem::path getExePath();
+std::filesystem::path getExeDir();

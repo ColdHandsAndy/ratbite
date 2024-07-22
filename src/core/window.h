@@ -1,10 +1,14 @@
 #pragma once
 
+#include <filesystem>
+
 #include <glad/glad.h>
 #include <GLFW/glfw3.h>
+#include <stb/stb_image.h>
 
 #include "debug_macros.h"
 #include "callbacks.h"
+#include "util.h"
 
 class Window;
 class RenderingInterface;
@@ -41,6 +45,14 @@ public:
 		m_glfwWindow = glfwCreateWindow(m_width, m_height, "ratbite", NULL, NULL);
 		R_ASSERT(m_glfwWindow != nullptr);
 		glfwMakeContextCurrent(m_glfwWindow);
+		glfwSetWindowTitle(m_glfwWindow, "ratbite");
+		int iconW{};
+		int iconH{};
+		int iconC{};
+		uint8_t* pixels{ stbi_load((getExeDir() / "logo_icon_64.png").string().c_str(), &iconW, &iconH, &iconC, 0) };
+		GLFWimage icon{ .width = iconW, .height = iconH, .pixels = pixels };
+		glfwSetWindowIcon(m_glfwWindow, 1, &icon);
+		stbi_image_free(pixels);
 		glfwSetInputMode(m_glfwWindow, GLFW_STICKY_KEYS, GLFW_TRUE);
 		glfwSetWindowUserPointer(m_glfwWindow, &m_userPointer);
 		m_userPointer.window = this;

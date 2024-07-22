@@ -2,7 +2,7 @@
 
 #include <glm/vec3.hpp>
 
-#include "../core/util_macros.h"
+#include "../core/util.h"
 #include "spectral.h"
 
 namespace color

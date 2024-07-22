@@ -64,6 +64,9 @@ add_custom_command(TARGET copyPTX POST_BUILD
                    COMMAND_EXPAND_LISTS)
 
 
+add_custom_command(TARGET ratbite POST_BUILD
+	COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_SOURCE_DIR}/docs/pics/logo_icon_64.png $<TARGET_FILE_DIR:ratbite>)
+
 if (${CMAKE_EXPORT_COMPILE_COMMANDS})
     add_custom_command(TARGET ratbite
                        COMMAND ${CMAKE_COMMAND} -E copy_if_different

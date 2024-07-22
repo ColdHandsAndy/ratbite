@@ -5,7 +5,7 @@
 #include <glm/vec3.hpp>
 #include <glm/gtc/quaternion.hpp>
 
-#include "../core/util_macros.h"
+#include "../core/util.h"
 
 namespace sampling
 {

@@ -1,6 +1,10 @@
 #include <iostream>
 #include <cstdint>
+#include <filesystem>
 
+#define STB_IMAGE_IMPLEMENTATION
+#include <stb/stb_image.h>
+#undef STB_IMAGE_IMPLEMENTATION
 #include <glad/glad.h>
 #include <GLFW/glfw3.h>
 #include <optix.h>
@@ -322,4 +326,21 @@ int main(int argc, char** argv)
 	rInterface.cleanup();
 	glfwTerminate();
 	return 0;
+}
+
+std::filesystem::path generateExePath()
+{
+	TCHAR buffer[MAX_PATH]{};
+	GetModuleFileName(NULL, buffer, MAX_PATH);
+	std::filesystem::path exepath{ buffer };
+	return exepath;
+}
+std::filesystem::path getExePath()
+{
+	static const std::filesystem::path exepath{ generateExePath() };
+	return exepath;
+}
+std::filesystem::path getExeDir()
+{
+	return getExePath().remove_filename();
 }

@@ -10,7 +10,7 @@
 #include <glm/geometric.hpp>
 #include <glm/gtc/constants.hpp>
 
-#include "../core/util_macros.h"
+#include "../core/util.h"
 #include "../device/sampling.h"
 #include "../device/spectral.h"
 #include "../device/local_transform.h"
@@ -54,10 +54,10 @@ namespace microfacet
 		float alphaY{};
 		CU_DEVICE CU_INLINE void regularize()
 		{
-			if (alphaX < 0.3f)
-				alphaX = glm::clamp(2.0f * alphaX, 0.1f, 0.3f);
-			if (alphaY < 0.3f)
-				alphaY = glm::clamp(2.0f * alphaY, 0.1f, 0.3f);
+			if (alphaX < 0.5f)
+				alphaX = glm::clamp(2.5f * alphaX, 0.3f, 1.0f);
+			if (alphaY < 0.5f)
+				alphaY = glm::clamp(2.5f * alphaY, 0.3f, 1.0f);
 		}
 	};
 

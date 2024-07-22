@@ -6,7 +6,7 @@
 #include <glm/common.hpp>
 
 #include "../core/spectral_settings.h"
-#include "../core/util_macros.h"
+#include "../core/util.h"
 
 class SampledSpectrum
 {

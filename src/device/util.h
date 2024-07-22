@@ -6,7 +6,7 @@
 #include <glm/vec3.hpp>
 #include "glm/geometric.hpp"
 
-#include "../core/util_macros.h"
+#include "../core/util.h"
 
 namespace utility
 {

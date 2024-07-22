@@ -7,7 +7,7 @@
 #include <glm/vec2.hpp>
 #include <glm/vec3.hpp>
 
-#include "../core/util_macros.h"
+#include "../core/util.h"
 #include "../device/sampling.h"
 
 struct Ray

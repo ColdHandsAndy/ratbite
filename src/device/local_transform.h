@@ -8,7 +8,7 @@
 #include <glm/mat3x3.hpp>
 #include <glm/gtc/quaternion.hpp>
 
-#include "../core/util_macros.h"
+#include "../core/util.h"
 
 
 template<typename T, typename... U>

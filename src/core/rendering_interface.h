@@ -117,7 +117,7 @@ private:
 	void resolveRender(const glm::mat3& colorspaceTransform);
 	void launch();
 public:
-	RenderingInterface(const Camera& camera, const RenderContext& renderContext, const SceneData& scene);
+	RenderingInterface(const Camera& camera, const RenderContext& renderContext, const SceneData& scener);
 	RenderingInterface() = delete;
 	RenderingInterface(RenderingInterface&&) = delete;
 	RenderingInterface(const RenderingInterface&) = delete;

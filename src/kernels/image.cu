@@ -6,7 +6,7 @@
 #include <glm/mat3x3.hpp>
 #include <glm/vec3.hpp>
 
-#include "../core/util_macros.h"
+#include "../core/util.h"
 
 #define TONEMAP_ACES 1
 #define TONEMAP_AGX 0

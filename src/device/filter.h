@@ -2,7 +2,7 @@
 
 #include <glm/vec2.hpp>
 
-#include "../core/util_macros.h"
+#include "../core/util.h"
 
 namespace filter
 {
