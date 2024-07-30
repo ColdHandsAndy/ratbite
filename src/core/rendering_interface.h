@@ -18,15 +18,20 @@ private:
 	OptixDeviceContext m_context{};
 	OptixPipeline m_pipeline{};
 	OptixModule m_ptModule{};
+	OptixModule m_builtInSphereModule{};
 	OptixTraversableHandle m_gasHandle{};
 	CUdeviceptr m_gasBuffer{};
 	OptixTraversableHandle m_customPrimHandle{};
 	CUdeviceptr m_customPrimBuffer{};
+	CUdeviceptr m_spherePrimitiveHandle{};
+	CUdeviceptr m_spherePrimBuffer{};
 	OptixTraversableHandle m_iasHandle{};
 	CUdeviceptr m_iasBuffer{};
 	CUdeviceptr m_materialData{};
 	CUdeviceptr m_spectralData{};
 	CUdeviceptr m_sensorSpectralCurvesData{};
+	CUdeviceptr m_diskLights{};
+	CUdeviceptr m_sphereLights{};
 	CUdeviceptr m_lpBuffer{};
 	CUdeviceptr m_renderData{};
 	enum PathtracerProgramGroup
@@ -35,6 +40,7 @@ private:
 		MISS,
 		TRIANGLE,
 		DISK,
+		SPHERE,
 		CALLABLE_CONDUCTOR_BXDF,
 		CALLABLE_DIELECTRIC_BXDF,
 		ALL_GROUPS
@@ -42,6 +48,9 @@ private:
 	static constexpr uint32_t m_ptProgramGroupCount{ ALL_GROUPS };
 	OptixProgramGroup m_ptProgramGroups[m_ptProgramGroupCount]{};
 	OptixShaderBindingTable m_sbt{};
+	const uint32_t m_spherePrimitiveSBTRecordCount{ 1 };
+	const uint32_t m_customPrimitiveSBTRecordCount{ 1 };
+	const uint32_t m_trianglePrimitiveSBTRecordOffest{ m_spherePrimitiveSBTRecordCount + m_customPrimitiveSBTRecordCount };
 
 	CUmodule m_imageModule{};
 	CUfunction m_resolveRenderDataFunc{};
@@ -58,9 +67,6 @@ private:
 
 	LaunchParameters m_launchParameters{};
 
-	// TEMP
-	uint32_t lightEmissionSpectrumIndex{};
-	//
 	RenderContext::Mode m_mode{};
 	constexpr static inline uint32_t m_rDataComponentSize{ sizeof(double) };
 	constexpr static inline uint32_t m_rDataComponentCount{ 4 };
@@ -98,16 +104,20 @@ private:
 	typedef Record<RecordDataPack32> OptixRecordHitgroup;
 
 	void createOptixContext();
+	void fillMaterials(const SceneData& scene);
+	void fillLightData(const SceneData& scene, const glm::vec3& cameraPosition);
 	void createAccelerationStructures(const SceneData& scene, const glm::vec3& cameraPosition);
 	void createModulesProgramGroupsPipeline();
 	void createRenderResolveProgram();
-	void fillMaterials(const SceneData& scene);
 	void createSBT(const SceneData& scene);
 	void fillSpectralCurvesData();
-	void prepareDataForRendering(const Camera& camera, const RenderContext& renderContext, const SceneData& scene);
+	void prepareDataForRendering(const Camera& camera, const RenderContext& renderContext);
 	void prepareDataForPreviewDrawing();
 
-	void changeMaterial(int index, bool newMat, const SceneData::MaterialDescriptor& desc, const SceneData::MaterialDescriptor& prevDesc);
+	void buildGeometryAccelerationStructure(const SceneData& scene);
+	void buildLightAccelerationStructure(const SceneData& scene, LightType type);
+	void buildInstanceAccelerationStructure(const SceneData& scene, const glm::vec3& cameraPosition);
+	void changeMaterial(int index, const SceneData::MaterialDescriptor& desc, const SceneData::MaterialDescriptor& prevDesc);
 	void addMaterial(const SceneData::MaterialDescriptor& desc);
 	int bxdfTypeToIndex(SceneData::BxDF type);
 	void updateSubLaunchData();

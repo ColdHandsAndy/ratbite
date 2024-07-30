@@ -9,6 +9,7 @@
 
 #include "../core/util.h"
 #include "../core/material.h"
+#include "../core/light.h"
 #ifdef __CUDACC__
 #include "../device/spectral.h"
 #endif // __CUDACC__
@@ -44,14 +45,13 @@ struct LaunchParameters
 		float focusDistance{};
 	} cameraState;
 
-	uint32_t illuminantSpectralDistributionIndex{};
-	glm::vec3 diskLightPosition{};
-	float diskLightRadius{};
-	glm::quat diskFrame{};
-	glm::vec3 diskNormal{};
-	float diskArea{};
-	float lightScale{};
-	float diskSurfacePDF{};
+	struct Lights
+	{
+		float lightCount{};
+		CUPTR(uint16_t) orderedCount{};
+		CUPTR(DiskLightData) disks{};
+		CUPTR(SphereLightData) spheres{};
+	} lights;
 
 	CUPTR(MaterialData) materials{};
 	CUPTR(DenseSpectrum) spectra{};

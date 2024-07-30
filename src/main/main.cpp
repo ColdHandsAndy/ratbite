@@ -1,6 +1,7 @@
 #include <iostream>
 #include <cstdint>
 #include <filesystem>
+#include <cmath>
 
 #define STB_IMAGE_IMPLEMENTATION
 #include <stb/stb_image.h>
@@ -39,6 +40,8 @@ void draw(Window* window, const RenderingInterface* rInterface, UI* ui)
 void menu(UI& ui, Camera& camera, RenderContext& rContext, SceneData& scene, int currentSampleCount)
 {
 	ui.startImGuiRecording();
+
+	ImColor infoColor{ 0.99f, 0.33f, 0.29f };
 
 	bool changed{ false };
 	static bool pause{ false };
@@ -115,6 +118,120 @@ void menu(UI& ui, Camera& camera, RenderContext& rContext, SceneData& scene, int
 		}
 
 
+		ImGui::SeparatorText("Lights settings");
+		bool lightsChanged{ false };
+		if (ImGui::TreeNode("Sphere lights"))
+		{
+			if (scene.sphereLights.size() == 0)
+				ImGui::TextColored(infoColor, "None");
+
+			static int sel{ -1 };
+			for (int i{ 0 }; i < scene.sphereLights.size(); ++i)
+			{
+				char name[32]{};
+				std::sprintf(name, "Sphere %d", i);
+				if (ImGui::Selectable(name, sel == i))
+				{
+					sel = i;
+				}
+				if (sel == i)
+				{
+					SceneData::SphereLight& l{ scene.sphereLights[sel] };
+
+					float v[3]{ l.getPosition().x, l.getPosition().y, l.getPosition().z };
+					changed = ImGui::DragFloat3("Position", v, 10.0f, -10000.0f, -10000.0f);
+					if (changed)
+					{
+						l.setPosition(glm::vec3{v[0], v[1], v[2]});
+						lightsChanged = true;
+					}
+
+					float r{ l.getRadius() };
+					changed = ImGui::DragFloat("Radius", &r, 10.0f, 0.0001f, 2000.0f);
+					if (changed)
+					{
+						l.setRadius(r);
+						lightsChanged = true;
+					}
+
+					float s{ l.getPowerScale() };
+					changed = ImGui::DragFloat("Power", &s, 0.02f, 0.0f, 100.0f);
+					if (changed)
+					{
+						l.setPowerScale(s);
+						lightsChanged = true;
+					}
+				}
+			}
+			if (lightsChanged)
+				scene.changedLightType = LightType::SPHERE;
+			ImGui::TreePop();
+		}
+		if (ImGui::TreeNode("Disk lights"))
+		{
+			if (scene.diskLights.size() == 0)
+				ImGui::TextColored(infoColor, "None");
+
+			static int sel{ -1 };
+			for (int i{ 0 }; i < scene.diskLights.size(); ++i)
+			{
+				char name[32]{};
+				std::sprintf(name, "Disk %d", i);
+				if (ImGui::Selectable(name, sel == i))
+				{
+					sel = i;
+				}
+				if (sel == i)
+				{
+					SceneData::DiskLight& l{ scene.diskLights[sel] };
+
+					float v[3]{ l.getPosition().x, l.getPosition().y, l.getPosition().z };
+					changed = ImGui::DragFloat3("Position", v, 10.0f, -10000.0f, -10000.0f);
+					if (changed)
+					{
+						l.setPosition(glm::vec3{v[0], v[1], v[2]});
+						lightsChanged = true;
+					}
+
+					float r{ l.getRadius() };
+					changed = ImGui::DragFloat("Radius", &r, 10.0f, 0.0001f, 2000.0f);
+					if (changed)
+					{
+						l.setRadius(r);
+						lightsChanged = true;
+					}
+
+					float s{ l.getPowerScale() };
+					changed = ImGui::DragFloat("Power", &s, 0.02f, 0.0f, 100.0f);
+					if (changed)
+					{
+						l.setPowerScale(s);
+						lightsChanged = true;
+					}
+
+					static float theta{};
+					static float phi{};
+					const glm::vec3& norm{ l.getNormal() };
+					float xzL{ glm::length(glm::vec2(norm.x, norm.z)) };
+					if (xzL > 0.0001f)
+						phi = (norm.z > 0.0f ? 1.0f : -1.0f) * std::acos(norm.x / xzL);
+					theta = std::acos(norm.y);
+					changed = ImGui::DragFloat("Phi", &phi, 2.0f * glm::pi<float>() / 360.0f, glm::pi<float>(), glm::pi<float>());
+					changed = ImGui::DragFloat("Theta", &theta, 2.0f * glm::pi<float>() / 360.0f, 0.0f, glm::pi<float>()) || changed;
+					if (changed)
+					{
+						l.setNormal(glm::normalize(glm::vec3{std::sin(theta) * std::cos(phi), std::cos(theta), std::sin(theta) * std::sin(phi)}));
+						lightsChanged = true;
+					}
+				}
+			}
+			if (lightsChanged)
+				scene.changedLightType = LightType::DISK;
+			ImGui::TreePop();
+		}
+		scene.lightDataChangesMade = lightsChanged;
+
+
 		ImGui::SeparatorText("Change material");
 
 		static int currentItem{ 0 };
@@ -133,12 +250,12 @@ void menu(UI& ui, Camera& camera, RenderContext& rContext, SceneData& scene, int
 				}
 				ImGui::EndCombo();
 			}
-			scene.changedMaterialIndex = currentItem;
-			scene.changedDesc = scene.materialDescriptors[currentItem];
-			scene.changedDescIsNew = false;
+			scene.changedMaterialDescriptorIndex = currentItem;
+			scene.tempDescriptor = scene.materialDescriptors[currentItem];
+			scene.newMaterialDescriptorAdded = false;
 
 			int rb{};
-			switch (scene.changedDesc.bxdf)
+			switch (scene.tempDescriptor.bxdf)
 			{
 				case SceneData::BxDF::CONDUCTOR:
 					rb = 0;
@@ -166,48 +283,48 @@ void menu(UI& ui, Camera& camera, RenderContext& rContext, SceneData& scene, int
 					R_ERR_LOG("Unknown output.")
 					break;
 			}
-			if (bx != scene.changedDesc.bxdf)
+			if (bx != scene.tempDescriptor.bxdf)
 			{
-				scene.materialChanged = true;
+				scene.materialDescriptorChangesMade = true;
 
-				scene.changedDesc.bxdf = bx;
-				if (scene.changedDesc.bxdf == SceneData::BxDF::CONDUCTOR)
+				scene.tempDescriptor.bxdf = bx;
+				if (scene.tempDescriptor.bxdf == SceneData::BxDF::CONDUCTOR)
 				{
-					scene.changedDesc.baseIOR = SpectralData::SpectralDataType::C_METAL_AL_IOR;
-					scene.changedDesc.baseAC = SpectralData::SpectralDataType::C_METAL_AL_AC;
+					scene.tempDescriptor.baseIOR = SpectralData::SpectralDataType::C_METAL_AL_IOR;
+					scene.tempDescriptor.baseAC = SpectralData::SpectralDataType::C_METAL_AL_AC;
 				}
-				else if (scene.changedDesc.bxdf == SceneData::BxDF::DIELECTIRIC)
+				else if (scene.tempDescriptor.bxdf == SceneData::BxDF::DIELECTIRIC)
 				{
-					scene.changedDesc.baseIOR = SpectralData::SpectralDataType::D_GLASS_F5_IOR;
-					scene.changedDesc.baseAC = SpectralData::SpectralDataType::NONE;
+					scene.tempDescriptor.baseIOR = SpectralData::SpectralDataType::D_GLASS_F5_IOR;
+					scene.tempDescriptor.baseAC = SpectralData::SpectralDataType::NONE;
 				}
 			}
 
-			if (scene.changedDesc.bxdf == SceneData::BxDF::CONDUCTOR)
+			if (scene.tempDescriptor.bxdf == SceneData::BxDF::CONDUCTOR)
 			{
 				static int currentSpectrum{ 0 };
 				if (ImGui::ListBox("Conductor type", &currentSpectrum, SpectralData::conductorSpectraNames.data(), SpectralData::conductorSpectraNames.size(), 3))
 				{
-					scene.materialChanged = true;
+					scene.materialDescriptorChangesMade = true;
 
-					scene.changedDesc.baseIOR = SpectralData::conductorIORSpectraTypes[currentSpectrum];
-					scene.changedDesc.baseAC = SpectralData::conductorACSpectraTypes[currentSpectrum];
+					scene.tempDescriptor.baseIOR = SpectralData::conductorIORSpectraTypes[currentSpectrum];
+					scene.tempDescriptor.baseAC = SpectralData::conductorACSpectraTypes[currentSpectrum];
 				}
 			}
-			else if (scene.changedDesc.bxdf == SceneData::BxDF::DIELECTIRIC)
+			else if (scene.tempDescriptor.bxdf == SceneData::BxDF::DIELECTIRIC)
 			{
 				static int currentSpectrum{ 0 };
 				if (ImGui::ListBox("Dielectric type", &currentSpectrum, SpectralData::dielectricSpectraNames.data(), SpectralData::dielectricSpectraNames.size(), 3))
 				{
-					scene.materialChanged = true;
+					scene.materialDescriptorChangesMade = true;
 
-					scene.changedDesc.baseIOR = SpectralData::dielectricIORSpectraTypes[currentSpectrum];
-					scene.changedDesc.baseAC = SpectralData::SpectralDataType::NONE;
+					scene.tempDescriptor.baseIOR = SpectralData::dielectricIORSpectraTypes[currentSpectrum];
+					scene.tempDescriptor.baseAC = SpectralData::SpectralDataType::NONE;
 				}
 			}
 
-			if (ImGui::DragFloat("Roughness", &scene.changedDesc.roughness, 0.002f, 0.0f, 1.0f))
-				scene.materialChanged = true;
+			if (ImGui::DragFloat("Roughness", &scene.tempDescriptor.roughness, 0.002f, 0.0f, 1.0f))
+				scene.materialDescriptorChangesMade = true;
 		}
 	}
 
@@ -215,7 +332,7 @@ void menu(UI& ui, Camera& camera, RenderContext& rContext, SceneData& scene, int
 	ImGui::Text("Sample count: %d", currentSampleCount);
 
 	ImGui::SeparatorText("##");
-	ImGui::TextColored(ImColor(0.99f, 0.33f, 0.29f), "Press \"H\" to hide this menu.");
+	ImGui::TextColored(infoColor, "Press \"H\" to hide this menu.");
 	ImGui::End();
 
 	rContext.setPause(pause);
@@ -282,8 +399,6 @@ void input(Window& window, UI& ui, Camera& camera, RenderContext& rContext)
 int main(int argc, char** argv)
 {
 	// TODO:
-	// Better lights handling
-	// Figure out direct light sampling on an emissive hit
 	// OBJ loading
 	// Adaptive sampling
 	// More BxDFs
@@ -311,7 +426,7 @@ int main(int argc, char** argv)
 	{
 		glfwPollEvents();
 
-		bool changesMade{ rContext.changesMade() || camera.changesMade() || scene.materialChanged };
+		bool changesMade{ rContext.changesMade() || camera.changesMade() || scene.changesMade() };
 		if ((!rInterface.renderingIsFinished() || changesMade) && !rContext.paused())
 			rInterface.render(rContext, camera, scene, changesMade);
 

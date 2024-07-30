@@ -3,6 +3,7 @@
 #include <cuda_runtime.h>
 #include <cuda/std/cmath>
 
+#include <glm/vec2.hpp>
 #include <glm/vec3.hpp>
 #include "glm/geometric.hpp"
 
@@ -26,6 +27,23 @@ namespace utility
 		return glm::vec3{ cuda::std::fabs(p.x) < originInterval ? p.x + floatScale * n.x : pIntOff.x,
 						  cuda::std::fabs(p.y) < originInterval ? p.y + floatScale * n.y : pIntOff.y,
 						  cuda::std::fabs(p.z) < originInterval ? p.z + floatScale * n.z : pIntOff.z };
+	}
+	CU_DEVICE CU_INLINE void createOrthonormalBasis(const glm::vec3& n, glm::vec3& u, glm::vec3& v)
+	{
+		float sign{ cuda::std::copysignf(1.0f, n.z) };
+		float a{ -1.0f / (sign + n.z) };
+		float b{ n.x * n.y * a };
+		u = glm::vec3(1.0f + sign * (n.x * n.x) * a, sign * b, -sign * n.x);
+		v = glm::vec3(b, sign + (n.y * n.y) * a, -n.y);
+	}
+
+	CU_DEVICE CU_INLINE glm::vec2 polarToCartesian(float r, float phi)
+	{
+		return {r * cuda::std::cosf(phi), r * cuda::std::sinf(phi)};
+	}
+	CU_DEVICE CU_INLINE glm::vec3 polarToCartesian(float r, float phi, float theta)
+	{
+		return {r * cuda::std::sinf(theta) * cuda::std::cosf(phi), r * cuda::std::sinf(theta) * cuda::std::sinf(phi), r * cuda::std::cosf(theta)};
 	}
 
 	CU_DEVICE CU_INLINE glm::vec3 reflect(const glm::vec3& v, const glm::vec3& n)

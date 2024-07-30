@@ -12,11 +12,13 @@
 #    define CU_HOST __host__
 #    define CU_DEVICE __device__
 #    define CU_INLINE __forceinline__
+#	 define CU_CONSTANT __constant__
 #else
 #    define CU_HOSTDEVICE
 #    define CU_HOST
 #    define CU_DEVICE
 #    define CU_INLINE inline
+#	 define CU_CONSTANT
 #endif
 
 #if defined(__CUDACC__)

@@ -8,7 +8,7 @@ namespace Program
     static constexpr unsigned int maxDCDepth{ 1 };
     static constexpr unsigned int maxCCDepth{ 0 };
 
-    static constexpr unsigned int payloadValueCount{ 7 };
+    static constexpr unsigned int payloadValueCount{ 8 };
     static constexpr unsigned int payloadSemantics[payloadValueCount]
     {
         //Position
@@ -48,20 +48,28 @@ namespace Program
         OPTIX_PAYLOAD_SEMANTICS_MS_NONE           |
         OPTIX_PAYLOAD_SEMANTICS_AH_NONE           |
         OPTIX_PAYLOAD_SEMANTICS_IS_WRITE,
-        
-        //Misc
+
+		//Material + State
+		OPTIX_PAYLOAD_SEMANTICS_TRACE_CALLER_READ |
+		OPTIX_PAYLOAD_SEMANTICS_CH_WRITE          |
+		OPTIX_PAYLOAD_SEMANTICS_MS_WRITE          |
+		OPTIX_PAYLOAD_SEMANTICS_AH_NONE           |
+		OPTIX_PAYLOAD_SEMANTICS_IS_WRITE,
+
+		//Light
         OPTIX_PAYLOAD_SEMANTICS_TRACE_CALLER_READ |
         OPTIX_PAYLOAD_SEMANTICS_CH_WRITE          |
         OPTIX_PAYLOAD_SEMANTICS_MS_WRITE          |
         OPTIX_PAYLOAD_SEMANTICS_AH_NONE           |
-        OPTIX_PAYLOAD_SEMANTICS_IS_NONE,
+        OPTIX_PAYLOAD_SEMANTICS_IS_WRITE,
     };
 
     static constexpr char raygenName[]{ "__raygen__main" };
     static constexpr char missName[]{ "__miss__miss" };
     static constexpr char closehitTriangleName[]{ "__closesthit__triangle" };
     static constexpr char intersectionDiskName[]{ "__intersection__disk" };
-    static constexpr char closehitDiskName[]{ "__closesthit__disk" };
+	static constexpr char closehitDiskName[]{ "__closesthit__disk" };
+	static constexpr char closehitSphereName[]{ "__closesthit__sphere" };
     static constexpr char conductorBxDFName[]{ "__direct_callable__ConductorBxDF" };
     static constexpr char dielectricBxDFName[]{  "__direct_callable__DielectricBxDF" };
 }
