@@ -453,9 +453,8 @@ extern "C" __device__ void __direct_callable__DielectricBxDF(const MaterialData&
 				}
 			}
 		}
-		L += directLightData.spectrumSample * f * cosFactor * throughputWeight
-			* MIS::powerHeuristic(1, directLightData.lightSamplePDF, 1, lbxdfPDF)
-			/ directLightData.lightSamplePDF;
+		L += directLightData.spectrumSample * f * throughputWeight
+			* (cosFactor * MIS::powerHeuristic(1, directLightData.lightSamplePDF, 1, lbxdfPDF) / directLightData.lightSamplePDF);
 	}
 
 	SampledSpectrum R{};
@@ -666,18 +665,19 @@ extern "C" __global__ void __raygen__main()
 	do
 	{
 		const glm::vec2 subsample{ QRNG::Sobol::sample2D(qrngState, QRNG::DimensionOffset::FILTER) };
+		const glm::vec2 sampleCoordinate{ pixelCoordinate + filter::gaussian::sampleDistribution(subsample) };
 		const glm::vec2 lensSample{ QRNG::Sobol::sample2D(qrngState, QRNG::DimensionOffset::LENS) };
 		Ray ray;
 		if (parameters.cameraState.depthOfFieldEnabled)
 		{
-			ray = generateThinLensCamera(pixelCoordinate, subsample,
+			ray = generateThinLensCamera(sampleCoordinate,
 					lensSample, parameters.cameraState.focusDistance, parameters.cameraState.appertureSize,
 					glm::vec2{resState.invFilmWidth, resState.invFilmHeight}, glm::vec2{resState.camPerspectiveScaleW, resState.camPerspectiveScaleH},
 					parameters.cameraState.camU, parameters.cameraState.camV, parameters.cameraState.camW);
 		}
 		else
 		{
-			ray = generatePinholeCameraDirection(pixelCoordinate, subsample,
+			ray = generatePinholeCameraDirection(sampleCoordinate,
 					glm::vec2{resState.invFilmWidth, resState.invFilmHeight}, glm::vec2{resState.camPerspectiveScaleW, resState.camPerspectiveScaleH},
 					parameters.cameraState.camU, parameters.cameraState.camV, parameters.cameraState.camW);
 		}
@@ -688,7 +688,6 @@ extern "C" __global__ void __raygen__main()
 		SampledSpectrum L{ 0.0f };
 		SampledSpectrum throughputWeight{ 1.0f };
 		float bxdfPDF{ 1.0f };
-		float refractionScale{ 1.0f };
 		LightType lightType{ LightType::NONE };
 		uint16_t lightIndex{};
 		PathStateFlags stateFlags{ 0 };
@@ -713,7 +712,6 @@ extern "C" __global__ void __raygen__main()
 			glm::vec3 hP; //Hit position
 			glm::vec3 hN; //Hit normal
 			MaterialData* material;
-			uint32_t a;
 			unpackTraceData(parameters, hP, hN, stateFlags, lightType, lightIndex, &material,
 				pl0, pl1, pl2, pl3, pl4, pl5, pl6, pl7);
 

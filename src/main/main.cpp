@@ -120,6 +120,7 @@ void menu(UI& ui, Camera& camera, RenderContext& rContext, SceneData& scene, int
 
 		ImGui::SeparatorText("Lights settings");
 		bool lightsChanged{ false };
+		scene.changedLightType = LightType::NONE;
 		if (ImGui::TreeNode("Sphere lights"))
 		{
 			if (scene.sphereLights.size() == 0)
@@ -147,7 +148,7 @@ void menu(UI& ui, Camera& camera, RenderContext& rContext, SceneData& scene, int
 					}
 
 					float r{ l.getRadius() };
-					changed = ImGui::DragFloat("Radius", &r, 10.0f, 0.0001f, 2000.0f);
+					changed = ImGui::DragFloat("Radius", &r, 5.0f, 0.0001f, 2000.0f);
 					if (changed)
 					{
 						l.setRadius(r);
@@ -155,7 +156,7 @@ void menu(UI& ui, Camera& camera, RenderContext& rContext, SceneData& scene, int
 					}
 
 					float s{ l.getPowerScale() };
-					changed = ImGui::DragFloat("Power", &s, 0.02f, 0.0f, 100.0f);
+					changed = ImGui::DragFloat("Power", &s, 0.001f, 0.0f, 100.0f);
 					if (changed)
 					{
 						l.setPowerScale(s);
@@ -163,7 +164,7 @@ void menu(UI& ui, Camera& camera, RenderContext& rContext, SceneData& scene, int
 					}
 				}
 			}
-			if (lightsChanged)
+			if (lightsChanged && scene.changedLightType == LightType::NONE)
 				scene.changedLightType = LightType::SPHERE;
 			ImGui::TreePop();
 		}
@@ -194,7 +195,7 @@ void menu(UI& ui, Camera& camera, RenderContext& rContext, SceneData& scene, int
 					}
 
 					float r{ l.getRadius() };
-					changed = ImGui::DragFloat("Radius", &r, 10.0f, 0.0001f, 2000.0f);
+					changed = ImGui::DragFloat("Radius", &r, 5.0f, 0.0001f, 2000.0f);
 					if (changed)
 					{
 						l.setRadius(r);
@@ -202,7 +203,7 @@ void menu(UI& ui, Camera& camera, RenderContext& rContext, SceneData& scene, int
 					}
 
 					float s{ l.getPowerScale() };
-					changed = ImGui::DragFloat("Power", &s, 0.02f, 0.0f, 100.0f);
+					changed = ImGui::DragFloat("Power", &s, 0.001f, 0.0f, 100.0f);
 					if (changed)
 					{
 						l.setPowerScale(s);
@@ -225,7 +226,7 @@ void menu(UI& ui, Camera& camera, RenderContext& rContext, SceneData& scene, int
 					}
 				}
 			}
-			if (lightsChanged)
+			if (lightsChanged && scene.changedLightType == LightType::NONE)
 				scene.changedLightType = LightType::DISK;
 			ImGui::TreePop();
 		}
