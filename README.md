@@ -7,8 +7,11 @@ Spectral Monte Carlo Path Tracer[^1] written in C++ with OptiX and CUDA
 * Sampling of visible normals[^3][^4]
 * Conductor BxDF
 * Dielectric BxDF (Reflection + Transmission)
+* Multiple Importance Sampling
+* Next Event Estimation
 * Depth of Field
 * Low-discrepancy sequence generation
+* Multiple lights support (Sphere + Disk)
 * Render preview
 
 [^1]: [Physically Based Rendering: From Theory To Implementation. Fourth edition.](https://pbr-book.org/4ed/contents)
