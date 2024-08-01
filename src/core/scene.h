@@ -383,20 +383,21 @@ struct SceneData
 
 	SceneData()
 	{
-		int matIndex{ static_cast<int>(materialDescriptors.size()) };
-		materialDescriptors.push_back(
-				MaterialDescriptor{.name = "Light",
-				.bxdf = BxDF::CONDUCTOR,
-				.baseIOR = SpectralData::SpectralDataType::C_METAL_AL_IOR,
-				.baseAC = SpectralData::SpectralDataType::C_METAL_AL_AC,
-				.baseEmission = SpectralData::SpectralDataType::ILLUM_F5,
-				.roughness = 1.0f});
-		DiskLight disk{ {-278.0f, 514.0f, 279.5f},
-			80.0f,
-			glm::normalize(glm::vec3{0.0f, -1.0f, 0.0f}),
-			0.4f,
-			matIndex };
-		diskLights.push_back(disk);
+		int matIndex{};
+		// matIndex = static_cast<int>(materialDescriptors.size());
+		// materialDescriptors.push_back(
+		// 		MaterialDescriptor{.name = "Light 0",
+		// 		.bxdf = BxDF::CONDUCTOR,
+		// 		.baseIOR = SpectralData::SpectralDataType::C_METAL_AL_IOR,
+		// 		.baseAC = SpectralData::SpectralDataType::C_METAL_AL_AC,
+		// 		.baseEmission = SpectralData::SpectralDataType::ILLUM_D65,
+		// 		.roughness = 1.0f});
+		// DiskLight disk{ {-278.0f, 514.0f, 279.5f},
+		// 	80.0f,
+		// 	glm::normalize(glm::vec3{0.0f, -1.0f, 0.0f}),
+		// 	0.0f,
+		// 	matIndex };
+		// diskLights.push_back(disk);
 		// DiskLight disk2{ {-278.0f, 314.0f, 279.5f},
 		// 	80.0f,
 		// 	glm::normalize(glm::vec3{0.0f, -1.0f, 0.0f}),
@@ -409,10 +410,26 @@ struct SceneData
 		// 	0.2f,
 		// 	matIndex };
 		// diskLights.push_back(disk3);
+		matIndex = static_cast<int>(materialDescriptors.size());
+		materialDescriptors.push_back(
+				MaterialDescriptor{.name = "Light 1",
+				.bxdf = BxDF::CONDUCTOR,
+				.baseIOR = SpectralData::SpectralDataType::C_METAL_AL_IOR,
+				.baseAC = SpectralData::SpectralDataType::C_METAL_AL_AC,
+				.baseEmission = SpectralData::SpectralDataType::ILLUM_F5,
+				.roughness = 1.0f});
 		SphereLight sphere{ {-78.0f, 214.0f, 339.5f}, 90.0f, 0.1f, matIndex };
 		sphereLights.push_back(sphere);
-		// SphereLight sphere1{ {-378.0f, 454.0f, 279.5f}, 120.0f, 0.1f, matIndex };
-		// sphereLights.push_back(sphere1);
+		matIndex = static_cast<int>(materialDescriptors.size());
+		materialDescriptors.push_back(
+				MaterialDescriptor{.name = "Light 2",
+				.bxdf = BxDF::CONDUCTOR,
+				.baseIOR = SpectralData::SpectralDataType::C_METAL_AL_IOR,
+				.baseAC = SpectralData::SpectralDataType::C_METAL_AL_AC,
+				.baseEmission = SpectralData::SpectralDataType::ILLUM_F9,
+				.roughness = 1.0f});
+		SphereLight sphere1{ {-378.0f, 454.0f, 279.5f}, 120.0f, 0.1f, matIndex };
+		sphereLights.push_back(sphere1);
 
 		lightCount = diskLights.size() + sphereLights.size();
 	}
