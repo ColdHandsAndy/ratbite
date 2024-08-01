@@ -14,6 +14,11 @@ Spectral Monte Carlo Path Tracer[^1] written in C++ with OptiX and CUDA
 * Multiple lights support (Sphere + Disk)
 * Render preview
 
+### Examples
+![](docs/pics/cb.PNG)
+![](docs/pics/cbm.PNG)
+![](docs/pics/cbt.PNG)
+
 [^1]: [Physically Based Rendering: From Theory To Implementation. Fourth edition.](https://pbr-book.org/4ed/contents)
 [^2]: [Hero Wavelength Spectral Sampling](https://cgg.mff.cuni.cz/~wilkie/Website/EGSR_14_files/WNDWH14HWSS.pdf)
 [^3]: [Sampling Visible GGX Normals with Spherical Caps](https://arxiv.org/pdf/2306.05044)
