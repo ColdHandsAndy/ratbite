@@ -338,7 +338,7 @@ extern "C" __global__ void __miss__miss()
 }
 
 extern "C" __device__ void __direct_callable__DielectricBxDF(const MaterialData& materialData, const DirectLightSampleData& directLightData, const QRNG::State& qrngState, const glm::vec3& normal,
-	SampledSpectrum& L, SampledWavelengths& wavelengths, SampledSpectrum& throughputWeight, float& bxdfPDF, glm::vec3& rD, PathStateFlags& stateFlags, uint32_t depth)
+	SampledSpectrum& L, SampledWavelengths& wavelengths, SampledSpectrum& throughputWeight, float& bxdfPDF, glm::vec3& rD, PathStateFlags& stateFlags, float& refractionScale, uint32_t depth)
 {
 	LocalTransform local{ normal } ;
 
@@ -381,7 +381,7 @@ extern "C" __device__ void __direct_callable__DielectricBxDF(const MaterialData&
 			wavelengths.terminateAllSecondary();
 			float T{ glm::clamp(1.0f - R[0], 0.0f, 1.0f) };
 			bool valid;
-			float etaRel{ 1.0f };
+			float& etaRel{ refractionScale };
 			wi = utility::refract(wo, glm::vec3{0.0f, 0.0f, 1.0f}, eta[0], valid, &etaRel);
 			if (!valid)
 			{
@@ -501,7 +501,7 @@ extern "C" __device__ void __direct_callable__DielectricBxDF(const MaterialData&
 	else
 	{
 		bool valid;
-		float etaRel;
+		float& etaRel{ refractionScale };
 		wi = utility::refract(wo, wm, eta[0], valid, &etaRel);
 		if (wo.z * wi.z >= 0.0f || !valid)
 		{
@@ -565,7 +565,7 @@ extern "C" __device__ void __direct_callable__DielectricBxDF(const MaterialData&
 	rD = glm::normalize(locWi);
 }
 extern "C" __device__ void __direct_callable__ConductorBxDF(const MaterialData& materialData, const DirectLightSampleData& directLightData, const QRNG::State& qrngState, const glm::vec3& normal,
-	SampledSpectrum& L, SampledWavelengths& wavelengths, SampledSpectrum& throughputWeight, float& bxdfPDF, glm::vec3& rD, PathStateFlags& stateFlags, uint32_t depth)
+	SampledSpectrum& L, SampledWavelengths& wavelengths, SampledSpectrum& throughputWeight, float& bxdfPDF, glm::vec3& rD, PathStateFlags& stateFlags, float& refractionScale, uint32_t depth)
 {
 	LocalTransform local{ normal } ;
 
@@ -687,6 +687,7 @@ extern "C" __global__ void __raygen__main()
 		SampledWavelengths wavelengths{ SampledWavelengths::sampleVisible(QRNG::Sobol::sample1D(qrngState, QRNG::DimensionOffset::WAVELENGTH)) };
 		SampledSpectrum L{ 0.0f };
 		SampledSpectrum throughputWeight{ 1.0f };
+		float refractionScale{ 1.0f };
 		float bxdfPDF{ 1.0f };
 		LightType lightType{ LightType::NONE };
 		uint16_t lightIndex{};
@@ -742,18 +743,28 @@ extern "C" __global__ void __raygen__main()
 				const MaterialData&, const DirectLightSampleData&, const QRNG::State&,
 				const glm::vec3&,
 				SampledSpectrum&, SampledWavelengths&, SampledSpectrum&,
-				float&, glm::vec3&, PathStateFlags&, uint32_t>
+				float&, glm::vec3&, PathStateFlags&, float&, uint32_t>
 				(material->bxdfIndexSBT,
 				 *material, directLightData, qrngState,
 				 hN,
 				 L, wavelengths, throughputWeight,
-				 bxdfPDF, rD, stateFlags, depth);
+				 bxdfPDF, rD, stateFlags, refractionScale, depth);
 
 			rO = utility::offsetRay(hP, stateFlags & PathStateFlagBit::INSIDE_OBJECT ? -hN : hN); // For nested transmissive objects need to implement some kind of object stack or node system
 
 			qrngState.advanceBounce();
 			updateStateFlags(stateFlags);
 			terminated = stateFlags & PathStateFlagBit::PATH_TERMINATED;
+
+			SampledSpectrum refScaleThroughput{ throughputWeight };
+			if (float tMax{ refScaleThroughput.max() * refractionScale }; tMax < 1.0f && depth > 0)
+			{
+				float q{ cuda::std::fmax(0.0f, 1.0f - tMax) };
+				q = q * q;
+				if (QRNG::Sobol::sample1D(qrngState, QRNG::DimensionOffset::ROULETTE) < q)
+					goto breakPath;
+				throughputWeight /= 1.0f - q;
+			}
 		} while (++depth < parameters.maxPathLength && !terminated);
 	breakPath:
 		qrngState.advanceSample();

@@ -18,6 +18,8 @@ namespace QRNG
 		WAVELENGTH = 0,
 		LIGHT = 1,
 		SURFACE_BXDF = 2,
+
+		ROULETTE = 8,
 		
 		DESC = 16,
 	};
