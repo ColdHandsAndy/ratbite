@@ -10,14 +10,14 @@
 
 namespace
 {
-	void processGLTFNode(const cgltf_node* node, std::vector<SceneData::Instance>& instances, cgltf_mesh* firstMesh, size_t meshCount, glm::mat4 transform)
+	void processGLTFNode(const cgltf_node* node, std::vector<SceneData::Instance>& instances, cgltf_mesh* firstMesh, size_t meshCount, const glm::mat4& transform)
 	{
 		cgltf_float localMat[16]{};
 		cgltf_node_transform_local(node, localMat);
 		glm::mat4 world{ transform * glm::mat4{
-				glm::vec4{localMat[0], localMat[1], localMat[2], localMat[3]},
-				glm::vec4{localMat[4], localMat[5], localMat[6], localMat[7]},
-				glm::vec4{localMat[8], localMat[9], localMat[10], localMat[11]},
+				glm::vec4{localMat[0], -localMat[1], -localMat[2], localMat[3]},
+				glm::vec4{-localMat[4], localMat[5], localMat[6], localMat[7]},
+				glm::vec4{-localMat[8], localMat[9], localMat[10], localMat[11]},
 				glm::vec4{-localMat[12], localMat[13], localMat[14], localMat[15]}} };
 
 		if (node->mesh != nullptr)

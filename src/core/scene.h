@@ -278,8 +278,9 @@ struct SceneData
 			.baseAC = SpectralData::SpectralDataType::C_METAL_AL_AC,
 			.baseEmission = SpectralData::SpectralDataType::NONE,
 			.roughness = 1.0f} };
-		// loadModel("A:/Models/gltf/deccer cubes/deccer_cubes.gltf", &mat);
-		loadModel("A:/Models/gltf/cornell_scene/cornell_scene.gltf", &mat);
+		loadModel("A:/Models/gltf/deccer cubes/deccer_cubes.gltf", &mat);
+		// loadModel("A:/Models/gltf/cornell_scene/cornell_scene.gltf", &mat);
+		// loadModel("A:/Models/gltf/prism/prism.gltf", &mat);
 
 
 		int matIndex{};
@@ -319,16 +320,16 @@ struct SceneData
 				.roughness = 1.0f});
 		SphereLight sphere{ {-78.0f, 214.0f, 339.5f}, 90.0f, 0.1f, matIndex };
 		sphereLights.push_back(sphere);
-		matIndex = static_cast<int>(materialDescriptors.size());
-		materialDescriptors.push_back(
-				MaterialDescriptor{.name = "Light 2",
-				.bxdf = BxDF::CONDUCTOR,
-				.baseIOR = SpectralData::SpectralDataType::C_METAL_AL_IOR,
-				.baseAC = SpectralData::SpectralDataType::C_METAL_AL_AC,
-				.baseEmission = SpectralData::SpectralDataType::ILLUM_F9,
-				.roughness = 1.0f});
-		SphereLight sphere1{ {-378.0f, 454.0f, 279.5f}, 120.0f, 0.1f, matIndex };
-		sphereLights.push_back(sphere1);
+		// matIndex = static_cast<int>(materialDescriptors.size());
+		// materialDescriptors.push_back(
+		// 		MaterialDescriptor{.name = "Light 2",
+		// 		.bxdf = BxDF::CONDUCTOR,
+		// 		.baseIOR = SpectralData::SpectralDataType::C_METAL_AL_IOR,
+		// 		.baseAC = SpectralData::SpectralDataType::C_METAL_AL_AC,
+		// 		.baseEmission = SpectralData::SpectralDataType::ILLUM_F9,
+		// 		.roughness = 1.0f});
+		// SphereLight sphere1{ {-378.0f, 454.0f, 279.5f}, 120.0f, 0.1f, matIndex };
+		// sphereLights.push_back(sphere1);
 
 		lightCount = diskLights.size() + sphereLights.size();
 	}

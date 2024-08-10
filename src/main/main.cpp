@@ -83,7 +83,7 @@ void menu(UI& ui, Camera& camera, RenderContext& rContext, SceneData& scene, int
 
 		static int sampleCount{ rContext.getSampleCount() };
 		changed = ImGui::InputInt("Sample count", &sampleCount);
-		sampleCount = std::max(1, std::min(65535, sampleCount));
+		sampleCount = std::max(1, std::min(1048576, sampleCount));
 		if (changed) rContext.setSampleCount(sampleCount);
 
 		static int pathLength{ rContext.getPathLength() };
@@ -414,7 +414,7 @@ int main(int argc, char** argv)
 	const int pathLength{ 3 };
 	
 	Window window{ windowWidth, windowHeight };
-	Camera camera{ {-278.0f, 273.0f, -800.0f}, {0.0f, 0.0f, 1.0f}, {0.0f, 1.0f, 0.0f} };
+	Camera camera{ {-278.0f, 273.0f, 800.0f}, {0.0f, 0.0f, -1.0f}, {0.0f, 1.0f, 0.0f} };
 	SceneData scene{};
 	RenderContext rContext{ renderWidth, renderHeight, pathLength, samplesToRender, Color::RGBColorspace::sRGB };
 	RenderingInterface rInterface{ camera, rContext, scene };

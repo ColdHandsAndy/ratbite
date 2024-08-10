@@ -798,7 +798,7 @@ extern "C" __global__ void __raygen__main()
 			{
 				/*SampledSpectrum Lo{ sampleSpectrum(wavelengths) };
 				float emissionWeight{ 1.0f };
-				if (depth != 0 && !(stateFlags & PathStateBitfield::PREVIOUS_HIT_SPECULAR))
+				if (depth != 0 && !static_cast<bool>(stateFlags & PathStateBitfield::PREVIOUS_HIT_SPECULAR))
 					emissionWeight = MIS::powerHeuristic(1, bxdfPDF, 1, lightPDF);
 				L += throughputWeight * Lo * emissionWeight;*/
 				

@@ -14,7 +14,7 @@ namespace filter
 		CU_DEVICE CU_INLINE glm::vec2 sampleDistribution(const glm::vec2& uv)
 		{
 			constexpr float rad{ 1.5f };
-			constexpr float sigma{ 0.5f };
+			constexpr float sigma{ 0.25f };
 			const float uTH{ cuda::std::expf(-(rad * rad) / (2.0f * sigma * sigma)) };
 			const float u{ cuda::std::fmaxf(0.00001f, uv.x * (1.0f - uTH) + uTH) };
 			const float v{ uv.y };
