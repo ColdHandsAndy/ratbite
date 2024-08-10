@@ -5,6 +5,7 @@
 #include <vector>
 #include <stack>
 #include <string>
+#include <filesystem>
 
 #include <optix_types.h>
 
@@ -12,171 +13,106 @@
 #include <glm/vec3.hpp>
 #include <glm/gtc/quaternion.hpp>
 
+#include "../core/debug_macros.h"
 #include "../core/material.h"
 #include "../core/spectral.h"
 #include "../core/light.h"
+#include "../core/util.h"
 
 struct SceneData
 {
-	constexpr static uint32_t triangleCount{ 34 };
-	constexpr static uint32_t geometryMaterialCount{ 5 };
+	enum class BxDF
+	{
+		CONDUCTOR,
+		DIELECTIRIC,
+		DESC
+	};
+	struct MaterialDescriptor //We need 'MaterialDescrioptor' to find material data before rendering
+	{
+		std::string name{};
+		BxDF bxdf{};
+		SpectralData::SpectralDataType baseIOR{};
+		SpectralData::SpectralDataType baseAC{};
+		SpectralData::SpectralDataType baseEmission{};
+		float roughness{};
+	};
+	std::vector<MaterialDescriptor> materialDescriptors{};
 
-	const std::array<glm::vec4, triangleCount * 3> vertices
-	{ {
-		// Floor
-		{    -0.0f,    0.0f,    0.0f, 0.0f  },
-		{    -0.0f,    0.0f,  559.2f, 0.0f  },
-		{  -556.0f,    0.0f,  559.2f, 0.0f  },
+	bool materialDescriptorChangesMade{ false };
+	bool newMaterialDescriptorAdded{ false };
+	int changedMaterialDescriptorIndex{};
+	MaterialDescriptor tempDescriptor{};
 
-		{    -0.0f,    0.0f,    0.0f, 0.0f  },
-		{  -556.0f,    0.0f,  559.2f, 0.0f  },
-		{  -556.0f,    0.0f,    0.0f, 0.0f  },
 
-		// Ceiling
-		{    -0.0f,  548.8f,    0.0f, 0.0f  },
-		{  -556.0f,  548.8f,    0.0f, 0.0f  },
-		{  -556.0f,  548.8f,  559.2f, 0.0f  },
+	// TODO: Need to free index buffer before deleting a submesh
+	struct Submesh
+	{
+		IndexType indexType{};
+		uint32_t primitiveCount{};
+		void* indices{};
+		std::vector<glm::vec4> vertices{};
+		std::vector<glm::vec4> normals{};
+		// std::vector<glm::quat> frame{};
+		int materialIndex{};
+		static Submesh createSubmesh(size_t indexCount, IndexType indexType, size_t vertexCount, int materialIndex)
+		{
+			Submesh smesh{};
+			smesh.primitiveCount = indexCount / 3;
+			if (smesh.primitiveCount == 0)
+				return smesh;
 
-		{    -0.0f,  548.8f,    0.0f, 0.0f  },
-		{  -556.0f,  548.8f,  559.2f, 0.0f  },
-		{    -0.0f,  548.8f,  559.2f, 0.0f  },
+			smesh.materialIndex = materialIndex;
+			smesh.indexType = indexType;
 
-		// Back wall
-		{    -0.0f,    0.0f,  559.2f, 0.0f  },
-		{    -0.0f,  548.8f,  559.2f, 0.0f  },
-		{  -556.0f,  548.8f,  559.2f, 0.0f  },
+			size_t tSize{};
+			switch (indexType)
+			{
+				case IndexType::UINT_16:
+					tSize = sizeof(uint16_t);
+					break;
+				case IndexType::UINT_32:
+					tSize = sizeof(uint32_t);
+					break;
+				default:
+					R_ERR_LOG("Invalid type passed");
+					break;
+			}
+			smesh.indices = malloc(indexCount * tSize);
 
-		{    -0.0f,    0.0f,  559.2f, 0.0f  },
-		{  -556.0f,  548.8f,  559.2f, 0.0f  },
-		{  -556.0f,    0.0f,  559.2f, 0.0f  },
+			smesh.vertices.resize(vertexCount);
+			smesh.normals.resize(vertexCount);
 
-		// Right wall
-		{    -0.0f,    0.0f,    0.0f, 0.0f  },
-		{    -0.0f,  548.8f,    0.0f, 0.0f  },
-		{    -0.0f,  548.8f,  559.2f, 0.0f  },
+			return smesh;
+		}
+	};
+	struct Mesh
+	{
+		std::vector<Submesh> submeshes{};
+	};
+	struct Instance
+	{
+		int meshIndex{};
+		glm::mat3x4 transform{};
+	};
+	struct Model
+	{
+		std::filesystem::path path{};
+		std::string name{};
 
-		{    -0.0f,    0.0f,    0.0f, 0.0f  },
-		{    -0.0f,  548.8f,  559.2f, 0.0f  },
-		{    -0.0f,    0.0f,  559.2f, 0.0f  },
+		std::vector<Mesh> meshes{};
+		std::vector<Instance> instances{};
+	};
+	std::vector<Model> models{};
+	int getGeometryMaterialCount() const
+	{
+		int count{ 0 };
+		for(auto& model : models)
+			for(auto& mesh : model.meshes)
+				count += mesh.submeshes.size();
+		return count;
+	}
+	void loadModel(const std::filesystem::path& path, const MaterialDescriptor* assignedMaterial = nullptr);
 
-		// Left wall
-		{  -556.0f,    0.0f,    0.0f, 0.0f  },
-		{  -556.0f,    0.0f,  559.2f, 0.0f  },
-		{  -556.0f,  548.8f,  559.2f, 0.0f  },
-
-		{  -556.0f,    0.0f,    0.0f, 0.0f  },
-		{  -556.0f,  548.8f,  559.2f, 0.0f  },
-		{  -556.0f,  548.8f,    0.0f, 0.0f  },
-
-		// Short block
-		{  -130.0f,  165.0f + 9.0f,   65.0f, 0.0f  },
-		{  - 82.0f,  165.0f + 9.0f,  225.0f, 0.0f  },
-		{  -242.0f,  165.0f + 9.0f,  274.0f, 0.0f  },
-
-		{  -130.0f,  165.0f + 9.0f,   65.0f, 0.0f  },
-		{  -242.0f,  165.0f + 9.0f,  274.0f, 0.0f  },
-		{  -290.0f,  165.0f + 9.0f,  114.0f, 0.0f  },
-
-		{  -290.0f,    0.0f + 9.0f,  114.0f, 0.0f  },
-		{  -290.0f,  165.0f + 9.0f,  114.0f, 0.0f  },
-		{  -240.0f,  165.0f + 9.0f,  272.0f, 0.0f  },
-
-		{  -290.0f,    0.0f + 9.0f,  114.0f, 0.0f  },
-		{  -240.0f,  165.0f + 9.0f,  272.0f, 0.0f  },
-		{  -240.0f,    0.0f + 9.0f,  272.0f, 0.0f  },
-
-		{  -130.0f,    0.0f + 9.0f,   65.0f, 0.0f  },
-		{  -130.0f,  165.0f + 9.0f,   65.0f, 0.0f  },
-		{  -290.0f,  165.0f + 9.0f,  114.0f, 0.0f  },
-
-		{  -130.0f,    0.0f + 9.0f,   65.0f, 0.0f  },
-		{  -290.0f,  165.0f + 9.0f,  114.0f, 0.0f  },
-		{  -290.0f,    0.0f + 9.0f,  114.0f, 0.0f  },
-
-		{   -82.0f,    0.0f + 9.0f,  225.0f, 0.0f  },
-		{   -82.0f,  165.0f + 9.0f,  225.0f, 0.0f  },
-		{  -130.0f,  165.0f + 9.0f,   65.0f, 0.0f  },
-
-		{  - 82.0f,    0.0f + 9.0f,  225.0f, 0.0f  },
-		{  -130.0f,  165.0f + 9.0f,   65.0f, 0.0f  },
-		{  -130.0f,    0.0f + 9.0f,   65.0f, 0.0f  },
-
-		{  -240.0f,    0.0f + 9.0f,  272.0f, 0.0f  },
-		{  -240.0f,  165.0f + 9.0f,  272.0f, 0.0f  },
-		{   -82.0f,  165.0f + 9.0f,  225.0f, 0.0f  },
-
-		{  -240.0f,    0.0f + 9.0f,  272.0f, 0.0f  },
-		{   -82.0f,  165.0f + 9.0f,  225.0f, 0.0f  },
-		{   -82.0f,    0.0f + 9.0f,  225.0f, 0.0f  },
-
-		{  -130.0f,    0.0f + 9.0f,   65.0f, 0.0f  },
-		{  -242.0f,    0.0f + 9.0f,  274.0f, 0.0f  },
-		{  - 82.0f,    0.0f + 9.0f,  225.0f, 0.0f  },
-
-		{  -130.0f,    0.0f + 9.0f,   65.0f, 0.0f  },
-		{  -290.0f,    0.0f + 9.0f,  114.0f, 0.0f  },
-		{  -242.0f,    0.0f + 9.0f,  274.0f, 0.0f  },
-
-		// Tall block
-		{  -423.0f,  330.0f,  247.0f, 0.0f  },
-		{  -265.0f,  330.0f,  296.0f, 0.0f  },
-		{  -314.0f,  330.0f,  455.0f, 0.0f  },
-
-		{  -423.0f,  330.0f,  247.0f, 0.0f  },
-		{  -314.0f,  330.0f,  455.0f, 0.0f  },
-		{  -472.0f,  330.0f,  406.0f, 0.0f  },
-
-		{  -423.0f,    0.0f,  247.0f, 0.0f  },
-		{  -423.0f,  330.0f,  247.0f, 0.0f  },
-		{  -472.0f,  330.0f,  406.0f, 0.0f  },
-
-		{  -423.0f,    0.0f,  247.0f, 0.0f  },
-		{  -472.0f,  330.0f,  406.0f, 0.0f  },
-		{  -472.0f,    0.0f,  406.0f, 0.0f  },
-
-		{  -472.0f,    0.0f,  406.0f, 0.0f  },
-		{  -472.0f,  330.0f,  406.0f, 0.0f  },
-		{  -314.0f,  330.0f,  456.0f, 0.0f  },
-
-		{  -472.0f,    0.0f,  406.0f, 0.0f  },
-		{  -314.0f,  330.0f,  456.0f, 0.0f  },
-		{  -314.0f,    0.0f,  456.0f, 0.0f  },
-
-		{  -314.0f,    0.0f,  456.0f, 0.0f  },
-		{  -314.0f,  330.0f,  456.0f, 0.0f  },
-		{  -265.0f,  330.0f,  296.0f, 0.0f  },
-
-		{  -314.0f,    0.0f,  456.0f, 0.0f  },
-		{  -265.0f,  330.0f,  296.0f, 0.0f  },
-		{  -265.0f,    0.0f,  296.0f, 0.0f  },
-
-		{  -265.0f,    0.0f,  296.0f, 0.0f  },
-		{  -265.0f,  330.0f,  296.0f, 0.0f  },
-		{  -423.0f,  330.0f,  247.0f, 0.0f  },
-
-		{  -265.0f,    0.0f,  296.0f, 0.0f  },
-		{  -423.0f,  330.0f,  247.0f, 0.0f  },
-		{  -423.0f,    0.0f,  247.0f, 0.0f  },
-
-		{  -423.0f,    0.0f,  247.0f, 0.0f  },
-		{  -314.0f,    0.0f,  455.0f, 0.0f  },
-		{  -265.0f,    0.0f,  296.0f, 0.0f  },
-
-		{  -423.0f,    0.0f,  247.0f, 0.0f  },
-		{  -472.0f,    0.0f,  406.0f, 0.0f  },
-		{  -314.0f,    0.0f,  455.0f, 0.0f  },
-	} };
-
-	std::array<uint32_t, triangleCount> SBTIndices
-	{ {
-		0, 0,                                // Floor         -- white lambert
-		0, 0,                                // Ceiling       -- white lambert
-		0, 0,                                // Back wall     -- white lambert
-		1, 1,                                // Right wall    -- green lambert
-		2, 2,                                // Left wall     -- red lambert
-		4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4, 4,  // Short block   -- white lambert
-		3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3, 3,  // Tall block    -- white lambert
-	} };
 
 	class DiskLight
 	{
@@ -325,64 +261,27 @@ struct SceneData
 	std::vector<SceneData::SphereLight> sphereLights{};
 	uint32_t lightCount{};
 
-	enum class BxDF
-	{
-		CONDUCTOR,
-		DIELECTIRIC,
-		DESC
-	};
-	struct MaterialDescriptor //We need 'MaterialDescrioptor' to find material data before rendering
-	{
-		std::string name{};
-		BxDF bxdf{};
-		SpectralData::SpectralDataType baseIOR{};
-		SpectralData::SpectralDataType baseAC{};
-		SpectralData::SpectralDataType baseEmission{};
-		float roughness{};
-	};
-	std::vector<MaterialDescriptor> materialDescriptors
-	{ {
-		MaterialDescriptor{.name = "Floor, Back wall and Ceiling",
-			.bxdf = BxDF::CONDUCTOR,
-			.baseIOR = SpectralData::SpectralDataType::C_METAL_AG_IOR,
-			.baseAC = SpectralData::SpectralDataType::C_METAL_AG_AC,
-			.roughness = 1.0f},
-		MaterialDescriptor{.name = "Right wall",
-			.bxdf = BxDF::CONDUCTOR,
-			.baseIOR = SpectralData::SpectralDataType::C_METAL_AU_IOR,
-			.baseAC = SpectralData::SpectralDataType::C_METAL_AU_AC,
-			.roughness = 1.0f},
-		MaterialDescriptor{.name = "Left wall",
-			.bxdf = BxDF::CONDUCTOR,
-			.baseIOR = SpectralData::SpectralDataType::C_METAL_CU_IOR,
-			.baseAC = SpectralData::SpectralDataType::C_METAL_CU_AC,
-			.roughness = 1.0f},
-		MaterialDescriptor{.name = "Tall block",
-			.bxdf = BxDF::CONDUCTOR,
-			.baseIOR = SpectralData::SpectralDataType::C_METAL_AL_IOR,
-			.baseAC = SpectralData::SpectralDataType::C_METAL_AL_AC,
-			.roughness = 0.1f},
-		MaterialDescriptor{.name = "Short block",
-			.bxdf = BxDF::DIELECTIRIC,
-			.baseIOR = SpectralData::SpectralDataType::D_GLASS_BK7_IOR,
-			.roughness = 0.01f},
-	} };
-
-
-	bool materialDescriptorChangesMade{ false };
-	bool newMaterialDescriptorAdded{ false };
-	int changedMaterialDescriptorIndex{};
-	MaterialDescriptor tempDescriptor{};
-
 	bool lightDataChangesMade{ false };
 	LightType changedLightType{};
 	// bool lightDataAABBChanged{ false };
 	// int changedLightIndex{};
 
+
 	bool changesMade() const { return materialDescriptorChangesMade || lightDataChangesMade; }
 
 	SceneData()
 	{
+		MaterialDescriptor mat{ MaterialDescriptor{
+			.name = "Model",
+			.bxdf = BxDF::CONDUCTOR,
+			.baseIOR = SpectralData::SpectralDataType::C_METAL_AL_IOR,
+			.baseAC = SpectralData::SpectralDataType::C_METAL_AL_AC,
+			.baseEmission = SpectralData::SpectralDataType::NONE,
+			.roughness = 1.0f} };
+		// loadModel("A:/Models/gltf/deccer cubes/deccer_cubes.gltf", &mat);
+		loadModel("A:/Models/gltf/cornell_scene/cornell_scene.gltf", &mat);
+
+
 		int matIndex{};
 		// matIndex = static_cast<int>(materialDescriptors.size());
 		// materialDescriptors.push_back(

@@ -21,8 +21,7 @@
 #include "../device/microfacet.h"
 #include "../device/mis.h"
 
-typedef uint32_t PathStateFlags;
-enum class PathStateFlagBit : uint32_t
+enum class PathStateBitfield : uint32_t
 {
 	NO_FLAGS = 0u,
 	PREVIOUS_HIT_SPECULAR = 1u,
@@ -35,7 +34,7 @@ enum class PathStateFlagBit : uint32_t
 	INSIDE_OBJECT = 128u,
 	PATH_TERMINATED = 256u,
 };
-STRONGLY_TYPED_ENUM_OPERATOR_EXPAND_WITH_PREFIX(PathStateFlags, PathStateFlagBit, CU_DEVICE CU_INLINE)
+ENABLE_ENUM_BITWISE_OPERATORS(PathStateBitfield);
 
 extern "C"
 {
@@ -50,22 +49,35 @@ struct DirectLightSampleData
 	bool occluded{};
 };
 
-CU_DEVICE CU_INLINE void unpackTraceData(const LaunchParameters& params, glm::vec3& hP, glm::vec3& hN, PathStateFlags& stateFlags, LightType& lightType, uint16_t& lightIndex, MaterialData** materialDataPtr,
-	uint32_t pl0, uint32_t pl1, uint32_t pl2, uint32_t pl3, uint32_t pl4, uint32_t pl5, uint32_t pl6, uint32_t pl7)
+CU_DEVICE CU_INLINE void unpackTraceData(const LaunchParameters& params, glm::vec3& hP, uint32_t& encHGN,
+		uint32_t& primitiveIndex, glm::vec2& barycentrics,
+		LightType& lightType, uint16_t& lightIndex,
+		MaterialData** materialDataPtr,
+		glm::quat& shadingFrame,
+		uint32_t pl0, uint32_t pl1, uint32_t pl2, uint32_t pl3, uint32_t pl4, uint32_t pl5, uint32_t pl6, uint32_t pl7, uint32_t pl8, uint32_t pl9, uint32_t pl10, uint32_t pl11)
 {
 	hP = glm::vec3{ __uint_as_float(pl0), __uint_as_float(pl1), __uint_as_float(pl2) };
-	hN = glm::vec3{ __uint_as_float(pl3), __uint_as_float(pl4), __uint_as_float(pl5) };
-	stateFlags = stateFlags | (pl6 >> 16);
-	uint32_t matIndex{ pl6 & 0xFFFF };
+	encHGN = pl3;
+	uint32_t matIndex{ pl7 & 0xFFFF };
 	*materialDataPtr = params.materials + matIndex;
 	lightType = static_cast<LightType>(pl7 >> 16);
-	lightIndex = pl7 & 0xFFFF;
+	if (lightType != LightType::NONE)
+		lightIndex = pl4;
+	else
+	{
+		primitiveIndex = pl4;
+		barycentrics = {__uint_as_float(pl5), __uint_as_float(pl6)};
+	}
+	shadingFrame.x = __uint_as_float(pl8);
+	shadingFrame.y = __uint_as_float(pl9);
+	shadingFrame.z = __uint_as_float(pl10);
+	shadingFrame.w = __uint_as_float(pl11);
 }
-CU_DEVICE CU_INLINE void updateStateFlags(uint32_t& stateFlags)
+CU_DEVICE CU_INLINE void updateStateFlags(PathStateBitfield& stateFlags)
 {
-	PathStateFlags excludeFlags{ PathStateFlagBit::EMISSIVE_OBJECT_HIT | PathStateFlagBit::CURRENT_HIT_SPECULAR };
-	PathStateFlags includeFlags{ (stateFlags & PathStateFlagBit::CURRENT_HIT_SPECULAR) ?
-		static_cast<PathStateFlags>(PathStateFlagBit::PREVIOUS_HIT_SPECULAR) : static_cast<PathStateFlags>(PathStateFlagBit::REGULARIZED) };
+	PathStateBitfield excludeFlags{ PathStateBitfield::EMISSIVE_OBJECT_HIT | PathStateBitfield::CURRENT_HIT_SPECULAR };
+	PathStateBitfield includeFlags{ static_cast<bool>(stateFlags & PathStateBitfield::CURRENT_HIT_SPECULAR) ?
+		PathStateBitfield::PREVIOUS_HIT_SPECULAR : PathStateBitfield::REGULARIZED };
 
 	stateFlags = (stateFlags & (~excludeFlags)) | includeFlags;
 }
@@ -76,8 +88,30 @@ CU_DEVICE CU_INLINE void resolveSample(SampledSpectrum& L, const SampledSpectrum
 		L[i] = pdf[i] != 0.0f ? L[i] / pdf[i] : 0.0f;
 	}
 }
+CU_DEVICE CU_INLINE void resolveAttributes(const MaterialData& material, const glm::vec2& barycentrics, uint32_t primitiveIndex, glm::quat& shadingFrame)
+{
+	// uint8_t* attribBuffer{ material.attributeData };
+	// glm::uvec3 indices;
+	// switch (material.indexType)
+	// {
+	// 	case IndexType::UINT_16:
+	// 		{
+	// 			uint16_t* idata{ reinterpret_cast<uint16_t*>(material.indices) + primitiveIndex * 3 };
+	// 			indices = glm::uvec3{idata[0], idata[1], idata[2]};
+	// 		}
+	// 		break;
+	// 	case IndexType::UINT_32:
+	// 		{
+	// 			uint32_t* idata{ reinterpret_cast<uint32_t*>(material.indices) + primitiveIndex * 3 };
+	// 			indices = glm::uvec3{idata[0], idata[1], idata[2]};
+	// 		}
+	// 		break;
+	// 	default:
+	// 		break;
+	// }
+}
 
-CU_DEVICE CU_INLINE SampledSpectrum emittedLightEval(const LaunchParameters& params, const SampledWavelengths& wavelengths, PathStateFlags stateFlags,
+CU_DEVICE CU_INLINE SampledSpectrum emittedLightEval(const LaunchParameters& params, const SampledWavelengths& wavelengths, PathStateBitfield stateFlags,
 		LightType type, uint16_t index, 
 		const SampledSpectrum& throughputWeight, float bxdfPDF,
 		uint32_t depth, const glm::vec3& rayOrigin, const glm::vec3& rayDir, float sqrdDistToLight)
@@ -118,7 +152,7 @@ CU_DEVICE CU_INLINE SampledSpectrum emittedLightEval(const LaunchParameters& par
 
 	SampledSpectrum Le{ params.spectra[emissionSpectrumDataIndex].sample(wavelengths) * lightPowerScale };
 	float emissionWeight{};
-	if (depth == 0 || (stateFlags & PathStateFlagBit::PREVIOUS_HIT_SPECULAR))
+	if (depth == 0 || static_cast<bool>(stateFlags & PathStateBitfield::PREVIOUS_HIT_SPECULAR))
 		emissionWeight = 1.0f;
 	else
 		emissionWeight = MIS::powerHeuristic(1, bxdfPDF, 1, lightPDF);
@@ -225,35 +259,76 @@ extern "C" __global__ void __closesthit__triangle()
 	hposO.y = vertexObjectData[0].y * (1.0f - barycentrics.x - barycentrics.y) + vertexObjectData[1].y * barycentrics.x + vertexObjectData[2].y * barycentrics.y;
 	hposO.z = vertexObjectData[0].z * (1.0f - barycentrics.x - barycentrics.y) + vertexObjectData[1].z * barycentrics.x + vertexObjectData[2].z * barycentrics.y;
 
-	float3 u{ vertexObjectData[2].x - vertexObjectData[0].x, vertexObjectData[2].y - vertexObjectData[0].y, vertexObjectData[2].z - vertexObjectData[0].z };
-	float3 v{ vertexObjectData[1].x - vertexObjectData[0].x, vertexObjectData[1].y - vertexObjectData[0].y, vertexObjectData[1].z - vertexObjectData[0].z };
-
 	float WFO[12]{};
 	optixGetObjectToWorldTransformMatrix(WFO);
-
-	float3 normal{u.y * v.z - u.z * v.y,
-				  u.z * v.x - u.x * v.z,
-				  u.x * v.y - u.y * v.x};
-	normal = {normal.x * WFO[0] + normal.y * WFO[1] + normal.z * WFO[2],
-			  normal.x * WFO[4] + normal.y * WFO[5] + normal.z * WFO[6],
-			  normal.x * WFO[8] + normal.z * WFO[9] + normal.z * WFO[10] };
-	float normalizeDiv{ __frsqrt_rn(normal.x * normal.x + normal.y * normal.y + normal.z * normal.z) };
-	normal = {normal.x * normalizeDiv, normal.y * normalizeDiv, normal.z * normalizeDiv};
-
 	float3 hpos{ hposO.x * WFO[0] + hposO.y * WFO[1] + hposO.z * WFO[2]  + WFO[3], 
 				 hposO.x * WFO[4] + hposO.y * WFO[5] + hposO.z * WFO[6]  + WFO[7], 
 				 hposO.x * WFO[8] + hposO.y * WFO[9] + hposO.z * WFO[10] + WFO[11] };
 
+	float3 u{ vertexObjectData[2].x - vertexObjectData[0].x, vertexObjectData[2].y - vertexObjectData[0].y, vertexObjectData[2].z - vertexObjectData[0].z };
+	float3 v{ vertexObjectData[1].x - vertexObjectData[0].x, vertexObjectData[1].y - vertexObjectData[0].y, vertexObjectData[1].z - vertexObjectData[0].z };
+	float3 geometryNormal{u.y * v.z - u.z * v.y,
+						  u.z * v.x - u.x * v.z,
+						  u.x * v.y - u.y * v.x};
+	geometryNormal = optixTransformNormalFromObjectToWorldSpace(geometryNormal);
+	float normalizeDiv{ __frsqrt_rn(geometryNormal.x * geometryNormal.x + geometryNormal.y * geometryNormal.y + geometryNormal.z * geometryNormal.z) };
+	geometryNormal = {geometryNormal.x * normalizeDiv, geometryNormal.y * normalizeDiv, geometryNormal.z * normalizeDiv};
+	uint32_t encGeometryNormal{ utility::octohedral::encodeU32(glm::vec3{geometryNormal.x, geometryNormal.y, geometryNormal.z}) };
+
+	uint32_t primitiveIndex{ optixGetPrimitiveIndex() };
 	uint32_t materialIndex{ *reinterpret_cast<uint32_t*>(optixGetSbtDataPointer()) };
+
+
+	const MaterialData& material{ parameters.materials[materialIndex] };
+	uint8_t* attribBuffer{ material.attributeData };
+	glm::uvec3 indices;
+	switch (material.indexType)
+	{
+		case IndexType::UINT_16:
+			{
+				uint16_t* idata{ reinterpret_cast<uint16_t*>(material.indices) + primitiveIndex * 3 };
+				indices = glm::uvec3{idata[0], idata[1], idata[2]};
+			}
+			break;
+		case IndexType::UINT_32:
+			{
+				uint32_t* idata{ reinterpret_cast<uint32_t*>(material.indices) + primitiveIndex * 3 };
+				indices = glm::uvec3{idata[0], idata[1], idata[2]};
+			}
+			break;
+		default:
+			break;
+	}
+	// Normals
+	constexpr uint32_t attributesStride{ sizeof(glm::vec4) };
+	constexpr uint32_t attribOffset{ 0 };
+	uint8_t* normalAtt{ attribBuffer + attribOffset };
+	glm::vec3 shadingNormal{
+		(1.0f - barycentrics.x - barycentrics.y) * (*reinterpret_cast<glm::vec3*>(normalAtt + attributesStride * indices[0]))
+		+
+		barycentrics.x * (*reinterpret_cast<glm::vec3*>(normalAtt + attributesStride * indices[1]))
+		+
+		barycentrics.y * (*reinterpret_cast<glm::vec3*>(normalAtt + attributesStride * indices[2])) };
+
+	float3 sNW{ optixTransformNormalFromObjectToWorldSpace(float3{shadingNormal.x, shadingNormal.y, shadingNormal.z}) };
+	shadingNormal = glm::normalize(glm::vec3{sNW.x, sNW.y, sNW.z});
+
+	glm::mat3 frameMat{ LocalTransform::genFromLocalMatrixFromNormal(shadingNormal) };
+	glm::quat frame{ glm::quat_cast(frameMat) };
+
 
 	optixSetPayload_0(__float_as_uint(hpos.x));
 	optixSetPayload_1(__float_as_uint(hpos.y));
 	optixSetPayload_2(__float_as_uint(hpos.z));
-	optixSetPayload_3(__float_as_uint(normal.x));
-	optixSetPayload_4(__float_as_uint(normal.y));
-	optixSetPayload_5(__float_as_uint(normal.z));
-	optixSetPayload_6(materialIndex & 0xFFFF);
-	optixSetPayload_7(static_cast<uint32_t>(LightType::NONE) << 16u);
+	optixSetPayload_3(encGeometryNormal);
+	optixSetPayload_4(primitiveIndex);
+	optixSetPayload_5(__float_as_uint(barycentrics.x));
+	optixSetPayload_6(__float_as_uint(barycentrics.y));
+	optixSetPayload_7((static_cast<uint32_t>(LightType::NONE) << 16u) | (materialIndex & 0xFFFF));
+	optixSetPayload_8(__float_as_uint(frame.x));
+	optixSetPayload_9(__float_as_uint(frame.y));
+	optixSetPayload_10(__float_as_uint(frame.z));
+	optixSetPayload_11(__float_as_uint(frame.w));
 }
 extern "C" __global__ void __intersection__disk()
 {
@@ -283,15 +358,14 @@ extern "C" __global__ void __intersection__disk()
 	bool intersect{ glm::dot(rhP, rhP) < dR * dR };
 	if (intersect)
 	{
+		uint32_t encGeometryNormal{ utility::octohedral::encodeU32(dN) };
 		glm::vec3 hP{ rhP + dC };
 		optixSetPayload_0(__float_as_uint(hP.x));
 		optixSetPayload_1(__float_as_uint(hP.y));
 		optixSetPayload_2(__float_as_uint(hP.z));
-		optixSetPayload_3(__float_as_uint(dN.x));
-		optixSetPayload_4(__float_as_uint(dN.y));
-		optixSetPayload_5(__float_as_uint(dN.z));
-		optixSetPayload_6(dl.materialIndex & 0xFFFF);
-		optixSetPayload_7((static_cast<uint32_t>(LightType::DISK) << 16u) | (lightIndex & 0xFFFF));
+		optixSetPayload_3(encGeometryNormal);
+		optixSetPayload_4(lightIndex);
+		optixSetPayload_7((static_cast<uint32_t>(LightType::DISK) << 16u) | (dl.materialIndex & 0xFFFF));
 		optixReportIntersection(t, 0);
 	}
 }
@@ -321,14 +395,13 @@ extern "C" __global__ void __closesthit__sphere()
 	if (d2 < sphere.w * sphere.w)
 		dN = -dN;
 
+	uint32_t encGeometryNormal{ utility::octohedral::encodeU32(dN) };
 	optixSetPayload_0(__float_as_uint(hP.x));
 	optixSetPayload_1(__float_as_uint(hP.y));
 	optixSetPayload_2(__float_as_uint(hP.z));
-	optixSetPayload_3(__float_as_uint(dN.x));
-	optixSetPayload_4(__float_as_uint(dN.y));
-	optixSetPayload_5(__float_as_uint(dN.z));
-	optixSetPayload_6(parameters.lights.spheres[lightIndex].materialIndex & 0xFFFF);
-	optixSetPayload_7((static_cast<uint32_t>(LightType::SPHERE) << 16u) | (lightIndex & 0xFFFF));
+	optixSetPayload_3(encGeometryNormal);
+	optixSetPayload_4(lightIndex);
+	optixSetPayload_7((static_cast<uint32_t>(LightType::SPHERE) << 16u) | (sl.materialIndex & 0xFFFF));
 }
 
 extern "C" __global__ void __miss__miss()
@@ -337,10 +410,10 @@ extern "C" __global__ void __miss__miss()
 	optixSetPayload_7(static_cast<uint32_t>(LightType::SKY) << 16);
 }
 
-extern "C" __device__ void __direct_callable__DielectricBxDF(const MaterialData& materialData, const DirectLightSampleData& directLightData, const QRNG::State& qrngState, const glm::vec3& normal,
-	SampledSpectrum& L, SampledWavelengths& wavelengths, SampledSpectrum& throughputWeight, float& bxdfPDF, glm::vec3& rD, PathStateFlags& stateFlags, float& refractionScale, uint32_t depth)
+extern "C" __device__ void __direct_callable__DielectricBxDF(const MaterialData& materialData, const DirectLightSampleData& directLightData, const QRNG::State& qrngState, const glm::quat& shadingFrame,
+	SampledSpectrum& L, SampledWavelengths& wavelengths, SampledSpectrum& throughputWeight, float& bxdfPDF, glm::vec3& rD, PathStateBitfield& stateFlags, float& refractionScale, uint32_t depth)
 {
-	LocalTransform local{ normal } ;
+	LocalTransform local{ shadingFrame } ;
 
 	glm::vec3 locWo{ -rD };
 	glm::vec3 locLi{ directLightData.lightDir };
@@ -350,7 +423,7 @@ extern "C" __device__ void __direct_callable__DielectricBxDF(const MaterialData&
 
 	float alpha{ utility::roughnessToAlpha(materialData.mfRoughnessValue) };
 	microfacet::Microsurface ms{ .alphaX = alpha, .alphaY = alpha };
-	if (stateFlags & PathStateFlagBit::REGULARIZED)
+	if (static_cast<bool>(stateFlags & PathStateBitfield::REGULARIZED))
 		ms.regularize();
 	glm::vec3 wo{ locWo };
 	const float cosThetaO{ LocalTransform::cosTheta(wo) };
@@ -385,14 +458,14 @@ extern "C" __device__ void __direct_callable__DielectricBxDF(const MaterialData&
 			wi = utility::refract(wo, glm::vec3{0.0f, 0.0f, 1.0f}, eta[0], valid, &etaRel);
 			if (!valid)
 			{
-				stateFlags = stateFlags | PathStateFlagBit::PATH_TERMINATED;
+				stateFlags = stateFlags | PathStateBitfield::PATH_TERMINATED;
 				return;
 			}
 			bxdfPDF = cuda::std::fmax(0.0f, 1.0f - p);
 			throughputWeight *= T / (etaRel * etaRel) / bxdfPDF;
 		}
-		stateFlags = wi.z < 0.0f ? stateFlags | static_cast<PathStateFlags>(PathStateFlagBit::INSIDE_OBJECT) : stateFlags & (~static_cast<PathStateFlags>(PathStateFlagBit::INSIDE_OBJECT));
-		stateFlags = stateFlags | PathStateFlagBit::CURRENT_HIT_SPECULAR;
+		stateFlags = wi.z < 0.0f ? stateFlags | PathStateBitfield::INSIDE_OBJECT : stateFlags & (~PathStateBitfield::INSIDE_OBJECT);
+		stateFlags = stateFlags | PathStateBitfield::CURRENT_HIT_SPECULAR;
 		local.fromLocal(wi);
 		rD = wi;
 		return;
@@ -477,7 +550,7 @@ extern "C" __device__ void __direct_callable__DielectricBxDF(const MaterialData&
 		wi = utility::reflect(wo, wm);
 		if (wo.z * wi.z <= 0.0f)
 		{
-			stateFlags = stateFlags | PathStateFlagBit::PATH_TERMINATED;
+			stateFlags = stateFlags | PathStateBitfield::PATH_TERMINATED;
 			return;
 		}
 		microfacet::ContextIncident ctxi{ microfacet::createContextIncident(wi) };
@@ -505,7 +578,7 @@ extern "C" __device__ void __direct_callable__DielectricBxDF(const MaterialData&
 		wi = utility::refract(wo, wm, eta[0], valid, &etaRel);
 		if (wo.z * wi.z >= 0.0f || !valid)
 		{
-			stateFlags = stateFlags | PathStateFlagBit::PATH_TERMINATED;
+			stateFlags = stateFlags | PathStateBitfield::PATH_TERMINATED;
 			return;
 		}
 		microfacet::ContextIncident ctxi{ microfacet::createContextIncident(wi) };
@@ -553,21 +626,21 @@ extern "C" __device__ void __direct_callable__DielectricBxDF(const MaterialData&
 
 	if (bxdfPDF == 0.0f)
 	{
-		stateFlags = stateFlags | PathStateFlagBit::PATH_TERMINATED;
+		stateFlags = stateFlags | PathStateBitfield::PATH_TERMINATED;
 		return;
 	}
 
 	throughputWeight *= condPDFCount * (1.0f / (condPDFSum)) * f * cosFactor;
 
 	glm::vec3 locWi{ wi };
-	stateFlags = locWi.z < 0.0f ? stateFlags | static_cast<PathStateFlags>(PathStateFlagBit::INSIDE_OBJECT) : stateFlags & (~static_cast<PathStateFlags>(PathStateFlagBit::INSIDE_OBJECT));
+	stateFlags = locWi.z < 0.0f ? stateFlags | PathStateBitfield::INSIDE_OBJECT : stateFlags & (~PathStateBitfield::INSIDE_OBJECT);
 	local.fromLocal(locWi);
 	rD = glm::normalize(locWi);
 }
-extern "C" __device__ void __direct_callable__ConductorBxDF(const MaterialData& materialData, const DirectLightSampleData& directLightData, const QRNG::State& qrngState, const glm::vec3& normal,
-	SampledSpectrum& L, SampledWavelengths& wavelengths, SampledSpectrum& throughputWeight, float& bxdfPDF, glm::vec3& rD, PathStateFlags& stateFlags, float& refractionScale, uint32_t depth)
+extern "C" __device__ void __direct_callable__ConductorBxDF(const MaterialData& materialData, const DirectLightSampleData& directLightData, const QRNG::State& qrngState, const glm::quat& shadingFrame,
+	SampledSpectrum& L, SampledWavelengths& wavelengths, SampledSpectrum& throughputWeight, float& bxdfPDF, glm::vec3& rD, PathStateBitfield& stateFlags, float& refractionScale, uint32_t depth)
 {
-	LocalTransform local{ normal } ;
+	LocalTransform local{ shadingFrame } ;
 
 	glm::vec3 locWo{ -rD };
 	glm::vec3 locLi{ directLightData.lightDir };
@@ -575,7 +648,7 @@ extern "C" __device__ void __direct_callable__ConductorBxDF(const MaterialData& 
 
 	if (locWo.z == 0.0f)
 	{
-		stateFlags = stateFlags | PathStateFlagBit::PATH_TERMINATED;
+		stateFlags = stateFlags | PathStateBitfield::PATH_TERMINATED;
 		return;
 	}
 
@@ -584,7 +657,7 @@ extern "C" __device__ void __direct_callable__ConductorBxDF(const MaterialData& 
 
 	float alpha{ utility::roughnessToAlpha(materialData.mfRoughnessValue) };
 	microfacet::Microsurface ms{ .alphaX = alpha, .alphaY = alpha };
-	if (stateFlags & PathStateFlagBit::REGULARIZED)
+	if (static_cast<bool>(stateFlags & PathStateBitfield::REGULARIZED))
 		ms.regularize();
 	glm::vec3 wo{ locWo };
 	glm::vec3 wi{};
@@ -597,7 +670,7 @@ extern "C" __device__ void __direct_callable__ConductorBxDF(const MaterialData& 
 		float absCosTheta{ cuda::std::fabs(LocalTransform::cosTheta(wi)) };
 		throughputWeight *= microfacet::FComplex(absCosTheta, eta, k);
 		bxdfPDF = 1.0f;
-		stateFlags = stateFlags | PathStateFlagBit::CURRENT_HIT_SPECULAR;
+		stateFlags = stateFlags | PathStateBitfield::CURRENT_HIT_SPECULAR;
 		local.fromLocal(wi);
 		rD = glm::normalize(wi);
 		return;
@@ -633,7 +706,7 @@ extern "C" __device__ void __direct_callable__ConductorBxDF(const MaterialData& 
 
 	if (wo.z * wi.z <= 0.0f)
 	{
-		stateFlags = stateFlags | PathStateFlagBit::PATH_TERMINATED;
+		stateFlags = stateFlags | PathStateBitfield::PATH_TERMINATED;
 		return;
 	}
 
@@ -691,11 +764,11 @@ extern "C" __global__ void __raygen__main()
 		float bxdfPDF{ 1.0f };
 		LightType lightType{ LightType::NONE };
 		uint16_t lightIndex{};
-		PathStateFlags stateFlags{ 0 };
+		PathStateBitfield stateFlags{ 0 };
 		uint32_t depth{ 0 };
 		do
 		{
-			uint32_t pl0, pl1, pl2, pl3, pl4, pl5, pl6, pl7;
+			uint32_t pl0, pl1, pl2, pl3, pl4, pl5, pl6, pl7, pl8, pl9, pl10, pl11;
 			optixTrace(OPTIX_PAYLOAD_TYPE_ID_0, //Payload type
 					   parameters.traversable, //Traversable handle
 					   { rO.x, rO.y, rO.z }, //Ray origin
@@ -708,19 +781,24 @@ extern "C" __global__ void __raygen__main()
 					   0, //SBT offset
 					   1, //SBT stride
 					   0, //SBT miss program index
-					   pl0, pl1, pl2, pl3, pl4, pl5, pl6, pl7); //Payload
+					   pl0, pl1, pl2, pl3, pl4, pl5, pl6, pl7, pl8, pl9, pl10, pl11); //Payload
 
 			glm::vec3 hP; //Hit position
-			glm::vec3 hN; //Hit normal
+			uint32_t encHitGNormal;
+			uint32_t primitiveIndex;
+			glm::vec2 barycentrics;
 			MaterialData* material;
-			unpackTraceData(parameters, hP, hN, stateFlags, lightType, lightIndex, &material,
-				pl0, pl1, pl2, pl3, pl4, pl5, pl6, pl7);
+			glm::quat shadingFrame;
+			unpackTraceData(parameters, hP, encHitGNormal,
+					primitiveIndex, barycentrics,
+					lightType, lightIndex, &material, shadingFrame,
+					pl0, pl1, pl2, pl3, pl4, pl5, pl6, pl7, pl8, pl9, pl10, pl11);
 
 			if (lightType == LightType::SKY)
 			{
 				/*SampledSpectrum Lo{ sampleSpectrum(wavelengths) };
 				float emissionWeight{ 1.0f };
-				if (depth != 0 && !(stateFlags & PathStateFlagBit::PREVIOUS_HIT_SPECULAR))
+				if (depth != 0 && !(stateFlags & PathStateBitfield::PREVIOUS_HIT_SPECULAR))
 					emissionWeight = MIS::powerHeuristic(1, bxdfPDF, 1, lightPDF);
 				L += throughputWeight * Lo * emissionWeight;*/
 				
@@ -733,28 +811,33 @@ extern "C" __global__ void __raygen__main()
 					throughputWeight, bxdfPDF,
 					depth, rO, rD, toHit.x * toHit.x + toHit.y * toHit.y + toHit.z * toHit.z);
 
+			glm::vec3 hNG{ utility::octohedral::decodeU32(encHitGNormal)}; //Hit normal geometry
 			DirectLightSampleData directLightData{ sampledLightEval(parameters, wavelengths,
-						hP, hN,
+						hP, hNG,
 						QRNG::Sobol::sample3D(qrngState, QRNG::DimensionOffset::LIGHT)) };
 
 
 			// Launch BxDF evaluation
+			resolveAttributes(*material, barycentrics, primitiveIndex, shadingFrame);
+			if (lightType != LightType::NONE)
+				shadingFrame = glm::quat_cast(LocalTransform::genFromLocalMatrixFromNormal(hNG));
 			optixDirectCall<void, 
 				const MaterialData&, const DirectLightSampleData&, const QRNG::State&,
-				const glm::vec3&,
+				const glm::quat&,
 				SampledSpectrum&, SampledWavelengths&, SampledSpectrum&,
-				float&, glm::vec3&, PathStateFlags&, float&, uint32_t>
+				float&, glm::vec3&, PathStateBitfield&, float&, uint32_t>
 				(material->bxdfIndexSBT,
 				 *material, directLightData, qrngState,
-				 hN,
+				 shadingFrame,
 				 L, wavelengths, throughputWeight,
 				 bxdfPDF, rD, stateFlags, refractionScale, depth);
 
-			rO = utility::offsetRay(hP, stateFlags & PathStateFlagBit::INSIDE_OBJECT ? -hN : hN); // For nested transmissive objects need to implement some kind of object stack or node system
+			rO = utility::offsetRay(hP, static_cast<bool>(stateFlags & PathStateBitfield::INSIDE_OBJECT) ? -hNG : hNG); // For nested transmissive objects need to implement some kind of object stack or node system
+
 
 			qrngState.advanceBounce();
 			updateStateFlags(stateFlags);
-			terminated = stateFlags & PathStateFlagBit::PATH_TERMINATED;
+			terminated = static_cast<bool>(stateFlags & PathStateBitfield::PATH_TERMINATED);
 
 			SampledSpectrum refScaleThroughput{ throughputWeight };
 			if (float tMax{ refScaleThroughput.max() * refractionScale }; tMax < 1.0f && depth > 0)

@@ -20,8 +20,8 @@ namespace filter
 			const float v{ uv.y };
 
 			float m{ sigma * cuda::std::sqrtf(-2.0f * cuda::std::logf(u)) };
-			float nu{ m * cuda::std::cosf(2.0f * glm::pi<float>() * v) };
-			float nv{ m * cuda::std::sinf(2.0f * glm::pi<float>() * v) };
+			float nu{ m * cuda::std::cos(2.0f * glm::pi<float>() * v) };
+			float nv{ m * cuda::std::sin(2.0f * glm::pi<float>() * v) };
 
 			return glm::vec2{nu, nv};
 		}

@@ -10,24 +10,16 @@
 
 #include "../core/util.h"
 
-
-template<typename T, typename... U>
-	concept AllSameAs = (cuda::std::same_as<T, U> && ...);
-
 class LocalTransform
 {
 private:
 	glm::mat3 m_TBN{};
 public:
 	CU_DEVICE CU_INLINE LocalTransform(const glm::vec3& normal)
+		: m_TBN{genToLocalMatrixFromNormal(normal)} {}
+	CU_DEVICE CU_INLINE LocalTransform(const glm::quat& frame)
 	{
-		float sign{ cuda::std::copysignf(1.0f, normal.z) };
-		float a{ -1.0f / (sign + normal.z) };
-		float b{ normal.x * normal.y * a };
-		m_TBN[2] = normal;
-		m_TBN[0] = glm::vec3(1.0f + sign * (normal.x * normal.x) * a, sign * b, -sign * normal.x);
-		m_TBN[1] = glm::vec3(b, sign + (normal.y * normal.y) * a, -normal.y);
-		m_TBN = glm::transpose(m_TBN);
+		m_TBN = glm::transpose(glm::mat3_cast(frame));
 	}
 
 	CU_DEVICE CU_INLINE static float cos2Theta(const glm::vec3& w) { return w.z * w.z; };
@@ -45,6 +37,22 @@ public:
 	CU_DEVICE CU_INLINE static float tanTheta(float cosTh, float sinTh) { return sinTh / cosTh; };
 	CU_DEVICE CU_INLINE static float cosPhi(const glm::vec3& w, float sinTh) { return (sinTh == 0.0f) ? 1.0f : glm::clamp(w.x / sinTh, -1.0f, 1.0f); };
 	CU_DEVICE CU_INLINE static float sinPhi(const glm::vec3& w, float sinTh) { return (sinTh == 0.0f) ? 0.0f : glm::clamp(w.y / sinTh, -1.0f, 1.0f); };
+	
+	CU_DEVICE CU_INLINE static glm::mat3 genToLocalMatrixFromNormal(const glm::vec3& normal)
+	{
+		return glm::transpose(genFromLocalMatrixFromNormal(normal));
+	}
+	CU_DEVICE CU_INLINE static glm::mat3 genFromLocalMatrixFromNormal(const glm::vec3& normal)
+	{
+		float sign{ cuda::std::copysignf(1.0f, normal.z) };
+		float a{ -1.0f / (sign + normal.z) };
+		float b{ normal.x * normal.y * a };
+		glm::mat3 TBN;
+		TBN[2] = normal;
+		TBN[0] = glm::vec3(1.0f + sign * (normal.x * normal.x) * a, sign * b, -sign * normal.x);
+		TBN[1] = glm::vec3(b, sign + (normal.y * normal.y) * a, -normal.y);
+		return TBN;
+	}
 
 	template<typename... Vecs> requires AllSameAs<glm::vec3, Vecs...>
 	CU_DEVICE CU_INLINE void toLocal(Vecs&... vecs)

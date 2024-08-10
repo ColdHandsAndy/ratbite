@@ -39,11 +39,11 @@ namespace utility
 
 	CU_DEVICE CU_INLINE glm::vec2 polarToCartesian(float r, float phi)
 	{
-		return {r * cuda::std::cosf(phi), r * cuda::std::sinf(phi)};
+		return {r * cuda::std::cos(phi), r * cuda::std::sin(phi)};
 	}
 	CU_DEVICE CU_INLINE glm::vec3 polarToCartesian(float r, float phi, float theta)
 	{
-		return {r * cuda::std::sinf(theta) * cuda::std::cosf(phi), r * cuda::std::sinf(theta) * cuda::std::sinf(phi), r * cuda::std::cosf(theta)};
+		return {r * cuda::std::sin(theta) * cuda::std::cos(phi), r * cuda::std::sin(theta) * cuda::std::sin(phi), r * cuda::std::cos(theta)};
 	}
 
 	CU_DEVICE CU_INLINE glm::vec3 reflect(const glm::vec3& v, const glm::vec3& n)
@@ -81,5 +81,60 @@ namespace utility
 	{
 		// return cuda::std::sqrtf(roughness);
 		return roughness;
+	}
+
+	namespace octohedral
+	{
+		CU_DEVICE CU_INLINE glm::vec2 encode(const glm::vec3& vec)
+		{
+			const float& x{ vec.x };
+			const float& y{ vec.y };
+			const float& z{ vec.z };
+
+			glm::vec2 p{ glm::vec2{x, z} * (1.0f / (cuda::std::fabs(x) + cuda::std::fabs(y) + cuda::std::fabs(z))) };
+			glm::vec2 res{
+				y <= 0.0f
+					?
+					(glm::vec2{1.0f} - glm::vec2{cuda::std::fabs(p.y), cuda::std::fabs(p.x)}) * glm::vec2{(p.x >= 0.0f) ? +1.0f : -1.0f, (p.y >= 0.0f) ? +1.0f : -1.0f}
+					:
+					p
+			};
+			return res;
+		}
+		CU_DEVICE CU_INLINE glm::vec3 decode(const glm::vec2& encvec)
+		{
+			const float& u{ encvec.x };
+			const float& v{ encvec.y };
+
+			glm::vec3 vec;
+			vec.y = 1.0f - cuda::std::fabs(u) - cuda::std::fabs(v);
+			vec.x = u;
+			vec.z = v;
+
+			float t{ cuda::std::fmaxf(0.0f, -vec.y) };
+
+			vec.x += vec.x >= 0.0f ? -t : t;
+			vec.z += vec.z >= 0.0f ? -t : t;
+
+			return glm::normalize(vec);
+		}
+
+		CU_DEVICE CU_INLINE uint32_t encodeU32(const glm::vec3& vec)
+		{
+			constexpr float uint16MaxFloat{ 65535.99f };
+			glm::vec2 pre{ encode(vec) };
+			uint32_t x{ static_cast<uint32_t>(glm::clamp(pre.x * 0.5f + 0.5f, 0.0f, 1.0f) * uint16MaxFloat) << 0 };
+			uint32_t y{ static_cast<uint32_t>(glm::clamp(pre.y * 0.5f + 0.5f, 0.0f, 1.0f) * uint16MaxFloat) << 16 };
+			uint32_t res{ y | x };
+			return res;
+		}
+		CU_DEVICE CU_INLINE glm::vec3 decodeU32(uint32_t encvec)
+		{
+			constexpr float uint16MaxFloatNormalizer{ 1.0f / 65535.0f };
+			glm::vec2 pre;
+			pre.x = static_cast<float>(encvec & 0xFFFF) * uint16MaxFloatNormalizer;
+			pre.y = static_cast<float>(encvec >> 16) * uint16MaxFloatNormalizer;
+			return decode(pre * 2.0f - 1.0f);
+		}
 	}
 }

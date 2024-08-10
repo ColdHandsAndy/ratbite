@@ -8,10 +8,10 @@ namespace Program
     static constexpr unsigned int maxDCDepth{ 1 };
     static constexpr unsigned int maxCCDepth{ 0 };
 
-    static constexpr unsigned int payloadValueCount{ 8 };
+    static constexpr unsigned int payloadValueCount{ 12 };
     static constexpr unsigned int payloadSemantics[payloadValueCount]
     {
-        //Position
+        // Position
         OPTIX_PAYLOAD_SEMANTICS_TRACE_CALLER_READ |
         OPTIX_PAYLOAD_SEMANTICS_CH_WRITE          |
         OPTIX_PAYLOAD_SEMANTICS_MS_NONE           |
@@ -29,39 +29,65 @@ namespace Program
         OPTIX_PAYLOAD_SEMANTICS_MS_NONE           |
         OPTIX_PAYLOAD_SEMANTICS_AH_NONE           |
         OPTIX_PAYLOAD_SEMANTICS_IS_WRITE,
-        
-        //Normal
-        OPTIX_PAYLOAD_SEMANTICS_TRACE_CALLER_READ |
-        OPTIX_PAYLOAD_SEMANTICS_CH_WRITE          |
-        OPTIX_PAYLOAD_SEMANTICS_MS_NONE           |
-        OPTIX_PAYLOAD_SEMANTICS_AH_NONE           |
-        OPTIX_PAYLOAD_SEMANTICS_IS_WRITE,
-        
-        OPTIX_PAYLOAD_SEMANTICS_TRACE_CALLER_READ |
-        OPTIX_PAYLOAD_SEMANTICS_CH_WRITE          |
-        OPTIX_PAYLOAD_SEMANTICS_MS_NONE           |
-        OPTIX_PAYLOAD_SEMANTICS_AH_NONE           |
-        OPTIX_PAYLOAD_SEMANTICS_IS_WRITE,
-        
+
+        // Encoded geometry normal
         OPTIX_PAYLOAD_SEMANTICS_TRACE_CALLER_READ |
         OPTIX_PAYLOAD_SEMANTICS_CH_WRITE          |
         OPTIX_PAYLOAD_SEMANTICS_MS_NONE           |
         OPTIX_PAYLOAD_SEMANTICS_AH_NONE           |
         OPTIX_PAYLOAD_SEMANTICS_IS_WRITE,
 
-		//Material + State
+		// Primitive (Light) index
+        OPTIX_PAYLOAD_SEMANTICS_TRACE_CALLER_READ |
+        OPTIX_PAYLOAD_SEMANTICS_CH_WRITE          |
+        OPTIX_PAYLOAD_SEMANTICS_MS_NONE           |
+        OPTIX_PAYLOAD_SEMANTICS_AH_NONE           |
+        OPTIX_PAYLOAD_SEMANTICS_IS_WRITE,
+
+		// Barycentrics
+        OPTIX_PAYLOAD_SEMANTICS_TRACE_CALLER_READ |
+        OPTIX_PAYLOAD_SEMANTICS_CH_WRITE          |
+        OPTIX_PAYLOAD_SEMANTICS_MS_NONE           |
+        OPTIX_PAYLOAD_SEMANTICS_AH_NONE           |
+        OPTIX_PAYLOAD_SEMANTICS_IS_NONE,
+
 		OPTIX_PAYLOAD_SEMANTICS_TRACE_CALLER_READ |
 		OPTIX_PAYLOAD_SEMANTICS_CH_WRITE          |
 		OPTIX_PAYLOAD_SEMANTICS_MS_WRITE          |
 		OPTIX_PAYLOAD_SEMANTICS_AH_NONE           |
-		OPTIX_PAYLOAD_SEMANTICS_IS_WRITE,
+		OPTIX_PAYLOAD_SEMANTICS_IS_NONE,
 
-		//Light
+		// Light Type + Material Index
         OPTIX_PAYLOAD_SEMANTICS_TRACE_CALLER_READ |
         OPTIX_PAYLOAD_SEMANTICS_CH_WRITE          |
         OPTIX_PAYLOAD_SEMANTICS_MS_WRITE          |
         OPTIX_PAYLOAD_SEMANTICS_AH_NONE           |
         OPTIX_PAYLOAD_SEMANTICS_IS_WRITE,
+
+		// Shading frame
+        OPTIX_PAYLOAD_SEMANTICS_TRACE_CALLER_READ |
+        OPTIX_PAYLOAD_SEMANTICS_CH_WRITE          |
+        OPTIX_PAYLOAD_SEMANTICS_MS_NONE           |
+        OPTIX_PAYLOAD_SEMANTICS_AH_NONE           |
+        OPTIX_PAYLOAD_SEMANTICS_IS_NONE,
+
+        OPTIX_PAYLOAD_SEMANTICS_TRACE_CALLER_READ |
+        OPTIX_PAYLOAD_SEMANTICS_CH_WRITE          |
+        OPTIX_PAYLOAD_SEMANTICS_MS_NONE           |
+        OPTIX_PAYLOAD_SEMANTICS_AH_NONE           |
+        OPTIX_PAYLOAD_SEMANTICS_IS_NONE,
+
+        OPTIX_PAYLOAD_SEMANTICS_TRACE_CALLER_READ |
+        OPTIX_PAYLOAD_SEMANTICS_CH_WRITE          |
+        OPTIX_PAYLOAD_SEMANTICS_MS_NONE           |
+        OPTIX_PAYLOAD_SEMANTICS_AH_NONE           |
+        OPTIX_PAYLOAD_SEMANTICS_IS_NONE,
+
+        OPTIX_PAYLOAD_SEMANTICS_TRACE_CALLER_READ |
+        OPTIX_PAYLOAD_SEMANTICS_CH_WRITE          |
+        OPTIX_PAYLOAD_SEMANTICS_MS_NONE           |
+        OPTIX_PAYLOAD_SEMANTICS_AH_NONE           |
+        OPTIX_PAYLOAD_SEMANTICS_IS_NONE,
     };
 
     static constexpr char raygenName[]{ "__raygen__main" };

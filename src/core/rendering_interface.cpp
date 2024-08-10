@@ -70,6 +70,34 @@ void RenderingInterface::fillMaterials(const SceneData& scene)
 		matData[i].bxdfIndexSBT = bxdfTypeToIndex(scene.materialDescriptors[i].bxdf);
 		matData[i].mfRoughnessValue = scene.materialDescriptors[i].roughness;
 	}
+	for(auto& model : scene.models)
+		for(auto& mesh : model.meshes)
+			for(auto& submesh : mesh.submeshes)
+			{
+				MaterialData& mat{ matData[submesh.materialIndex] };
+
+				mat.indexType = submesh.indexType;
+				CUdeviceptr& iBuf{ m_indexBuffers.emplace_back() };
+				size_t iBufferByteSize{ (submesh.indexType == IndexType::UINT_32 ? sizeof(uint32_t) * 3 : sizeof(uint16_t) * 3) * submesh.primitiveCount };
+				CUDA_CHECK(cudaMalloc(reinterpret_cast<void**>(&(iBuf)),
+							iBufferByteSize));
+				CUDA_CHECK(cudaMemcpy(reinterpret_cast<void*>(iBuf), submesh.indices,
+							iBufferByteSize,
+							cudaMemcpyHostToDevice));
+				mat.indices = iBuf;
+
+
+				mat.attributes |= MaterialData::AttributeTypeBitfield::NORMAL;
+
+				CUdeviceptr& aBuf{ m_normalBuffers.emplace_back() };
+				size_t aBufferByteSize{ CONTAINER_ELEMENT_SIZE(submesh.normals) * submesh.normals.size() };
+				CUDA_CHECK(cudaMalloc(reinterpret_cast<void**>(&(aBuf)),
+							aBufferByteSize));
+				CUDA_CHECK(cudaMemcpy(reinterpret_cast<void*>(aBuf), submesh.normals.data(),
+							aBufferByteSize,
+							cudaMemcpyHostToDevice));
+				mat.attributeData = aBuf;
+			}
 	CUDA_CHECK(cudaMalloc(reinterpret_cast<void**>(&m_materialData), sizeof(MaterialData) * matData.size()));
 	CUDA_CHECK(cudaMemcpy(reinterpret_cast<void*>(m_materialData), matData.data(), sizeof(MaterialData) * matData.size(), cudaMemcpyHostToDevice));
 	DenselySampledSpectrum* spectra{ new DenselySampledSpectrum[m_loadedSpectra.size()]};
@@ -146,7 +174,7 @@ void RenderingInterface::fillLightData(const SceneData& scene, const glm::vec3& 
 }
 void RenderingInterface::createAccelerationStructures(const SceneData& scene, const glm::vec3& cameraPosition)
 {
-	buildGeometryAccelerationStructure(scene);
+	buildGeometryAccelerationStructures(scene);
 	buildLightAccelerationStructure(scene, LightType::SPHERE);
 	buildLightAccelerationStructure(scene, LightType::DISK);
 	buildInstanceAccelerationStructure(scene, cameraPosition);
@@ -280,13 +308,17 @@ void RenderingInterface::createSBT(const SceneData& scene)
 	OPTIX_CHECK(optixSbtRecordPackHeader(m_ptProgramGroups[RenderingInterface::DISK], lightHitgroupRecords[1].header));
 
 	//Fill hitgroup records for ordinary geometry (material data) | Trace stride, trace offset and instance offset affects these
-	OptixRecordHitgroup matHitgroupRecords[scene.geometryMaterialCount]{};
-	hitgroupCount += ARRAYSIZE(matHitgroupRecords);
-	OPTIX_CHECK(optixSbtRecordPackHeader(m_ptProgramGroups[RenderingInterface::TRIANGLE], matHitgroupRecords[0].header));
-	for (int i{ 1 }; i < ARRAYSIZE(matHitgroupRecords); ++i)
-		memcpy(matHitgroupRecords[i].header, matHitgroupRecords[0].header, sizeof(matHitgroupRecords[0].header));
-	for (int i{ 0 }; i < ARRAYSIZE(matHitgroupRecords); ++i)
-		matHitgroupRecords[i].data = static_cast<uint32_t>(i);
+	std::vector<OptixRecordHitgroup> matHitgroupRecords{};
+	for(auto& model : scene.models)
+		for(auto& mesh : model.meshes)
+			for(auto& submesh : mesh.submeshes)
+			{
+				OptixRecordHitgroup record{};
+				OPTIX_CHECK(optixSbtRecordPackHeader(m_ptProgramGroups[RenderingInterface::TRIANGLE], record.header));
+				record.data = submesh.materialIndex;
+				matHitgroupRecords.push_back(record);
+			}
+	hitgroupCount += matHitgroupRecords.size();
 
 	OptixRecordHitgroup* hitgroups{ new OptixRecordHitgroup[hitgroupCount] };
 	int i{ 0 };
@@ -410,62 +442,95 @@ void RenderingInterface::prepareDataForPreviewDrawing()
 	glDeleteShader(fragmentShader);
 }
 
-void RenderingInterface::buildGeometryAccelerationStructure(const SceneData& scene)
+void RenderingInterface::buildGeometryAccelerationStructures(const SceneData& scene)
 {
-	if (m_gasBuffer != CUdeviceptr{})
-		CUDA_CHECK(cudaFree(reinterpret_cast<void*>(m_gasBuffer)));
+	for(auto buf : m_gasBuffers)
+		CUDA_CHECK(cudaFree(reinterpret_cast<void*>(buf)));
+	m_gasBuffers.clear();
 
-	CUdeviceptr vertexBuffer{};
-	CUdeviceptr sbtOffsetBuffer{};
 	CUdeviceptr tempBuffer{};
 
-	CUDA_CHECK(cudaMalloc(reinterpret_cast<void**>(&vertexBuffer), sizeof(scene.vertices[0]) * scene.vertices.size()));
-	CUDA_CHECK(cudaMalloc(reinterpret_cast<void**>(&sbtOffsetBuffer), sizeof(scene.SBTIndices[0]) * scene.SBTIndices.size()));
-	CUDA_CHECK(cudaMemcpy(reinterpret_cast<void*>(vertexBuffer), scene.vertices.data(), sizeof(scene.vertices[0]) * scene.vertices.size(), cudaMemcpyHostToDevice));
-	CUDA_CHECK(cudaMemcpy(reinterpret_cast<void*>(sbtOffsetBuffer), scene.SBTIndices.data(), sizeof(scene.SBTIndices[0]) * scene.SBTIndices.size(), cudaMemcpyHostToDevice));
-
-	OptixAccelBuildOptions accelBuildOptions{
-		.buildFlags = OPTIX_BUILD_FLAG_ALLOW_RANDOM_VERTEX_ACCESS | OPTIX_BUILD_FLAG_PREFER_FAST_TRACE | OPTIX_BUILD_FLAG_ALLOW_COMPACTION,
-			.operation = OPTIX_BUILD_OPERATION_BUILD };
-	uint32_t geometryFlags[scene.geometryMaterialCount]{};
-	for (int i{ 0 }; i < ARRAYSIZE(geometryFlags); ++i)
-		geometryFlags[i] = OPTIX_GEOMETRY_FLAG_DISABLE_ANYHIT | OPTIX_GEOMETRY_FLAG_DISABLE_TRIANGLE_FACE_CULLING;
-	OptixBuildInput gasBuildInputs[]{
-		OptixBuildInput{.type = OPTIX_BUILD_INPUT_TYPE_TRIANGLES,
-			.triangleArray = OptixBuildInputTriangleArray{.vertexBuffers = &vertexBuffer,
-				.numVertices = static_cast<unsigned int>(scene.vertices.size()),
-				.vertexFormat = OPTIX_VERTEX_FORMAT_FLOAT3,
-				.vertexStrideInBytes = sizeof(float) * 4,
-				.flags = geometryFlags,
-				.numSbtRecords = scene.geometryMaterialCount,
-				.sbtIndexOffsetBuffer = sbtOffsetBuffer,
-				.sbtIndexOffsetSizeInBytes = sizeof(scene.SBTIndices[0]),
-				.transformFormat = OPTIX_TRANSFORM_FORMAT_NONE } } };
-	OptixAccelBufferSizes computedBufferSizes{};
-	OPTIX_CHECK(optixAccelComputeMemoryUsage(m_context, &accelBuildOptions, gasBuildInputs, ARRAYSIZE(gasBuildInputs), &computedBufferSizes));
-	size_t compactedSizeOffset{ ALIGNED_SIZE(computedBufferSizes.tempSizeInBytes, 8ull) };
-	CUDA_CHECK(cudaMalloc(reinterpret_cast<void**>(&tempBuffer), compactedSizeOffset + sizeof(size_t)));
-	CUDA_CHECK(cudaMalloc(reinterpret_cast<void**>(&m_gasBuffer), computedBufferSizes.outputSizeInBytes));
-	OptixAccelEmitDesc emittedProperty{};
-	emittedProperty.type = OPTIX_PROPERTY_TYPE_COMPACTED_SIZE;
-	emittedProperty.result = reinterpret_cast<CUdeviceptr>(reinterpret_cast<uint8_t*>(tempBuffer) + compactedSizeOffset);
-	OPTIX_CHECK(optixAccelBuild(m_context, 0, &accelBuildOptions,
-				gasBuildInputs, ARRAYSIZE(gasBuildInputs),
-				tempBuffer, computedBufferSizes.tempSizeInBytes,
-				m_gasBuffer, computedBufferSizes.outputSizeInBytes, &m_gasHandle, &emittedProperty, 1));
-	size_t compactedGasSize{};
-	CUDA_CHECK(cudaMemcpy(&compactedGasSize, reinterpret_cast<void*>(emittedProperty.result), sizeof(size_t), cudaMemcpyDeviceToHost));
-	if (compactedGasSize < computedBufferSizes.outputSizeInBytes)
+	for (int i{ 0 }; i < scene.models.size(); ++i)
 	{
-		CUdeviceptr noncompactedGasBuffer{ m_gasBuffer };
-		CUDA_CHECK(cudaMalloc(reinterpret_cast<void**>(&m_gasBuffer), compactedGasSize));
-		OPTIX_CHECK(optixAccelCompact(m_context, 0, m_gasHandle, m_gasBuffer, compactedGasSize, &m_gasHandle));
-		CUDA_CHECK(cudaFree(reinterpret_cast<void*>(noncompactedGasBuffer)));
-	}
+		const SceneData::Model& model{ scene.models[i] };
+		for (int j{ 0 }; j < model.meshes.size(); ++j)
+		{
+			const SceneData::Mesh& mesh{ model.meshes[j] };
+			OptixTraversableHandle gasHandle{};
+			CUdeviceptr gasBuffer{};
 
-	CUDA_CHECK(cudaFree(reinterpret_cast<void*>(vertexBuffer)));
-	CUDA_CHECK(cudaFree(reinterpret_cast<void*>(sbtOffsetBuffer)));
-	CUDA_CHECK(cudaFree(reinterpret_cast<void*>(tempBuffer)));
+			std::vector<OptixBuildInput> gasBuildInputs(mesh.submeshes.size());
+			std::vector<CUdeviceptr> vertexBuffers(mesh.submeshes.size());
+			std::vector<CUdeviceptr> indexBuffers(mesh.submeshes.size());
+
+			for (int k{ 0 }; k < mesh.submeshes.size(); ++k)
+			{
+				const SceneData::Submesh& submesh{ mesh.submeshes[k] };
+				CUDA_CHECK(cudaMalloc(reinterpret_cast<void**>(&(vertexBuffers[k])), sizeof(decltype(submesh.vertices)::value_type) * submesh.vertices.size()));
+				CUDA_CHECK(cudaMemcpy(
+							reinterpret_cast<void*>(vertexBuffers[k]), submesh.vertices.data(),
+							sizeof(decltype(submesh.vertices)::value_type) * submesh.vertices.size(),
+							cudaMemcpyHostToDevice));
+				CUDA_CHECK(cudaMalloc(reinterpret_cast<void**>(&(indexBuffers[k])), (submesh.indexType == IndexType::UINT_32 ? sizeof(uint32_t) * 3 : sizeof(uint16_t) * 3) * submesh.primitiveCount));
+				CUDA_CHECK(cudaMemcpy(
+							reinterpret_cast<void*>(indexBuffers[k]), submesh.indices,
+							(submesh.indexType == IndexType::UINT_32 ? sizeof(uint32_t) * 3 : sizeof(uint16_t) * 3) * submesh.primitiveCount,
+							cudaMemcpyHostToDevice));
+
+				OptixIndicesFormat indexFormat{ submesh.indexType == IndexType::UINT_32 ? OPTIX_INDICES_FORMAT_UNSIGNED_INT3 : OPTIX_INDICES_FORMAT_UNSIGNED_SHORT3 };
+				uint32_t indexStride{ static_cast<uint32_t>(submesh.indexType == IndexType::UINT_32 ? sizeof(uint32_t) * 3 : sizeof(uint16_t) * 3) };
+				uint32_t flags{ OPTIX_GEOMETRY_FLAG_DISABLE_ANYHIT | OPTIX_GEOMETRY_FLAG_DISABLE_TRIANGLE_FACE_CULLING };
+
+				gasBuildInputs[k] = OptixBuildInput{.type = OPTIX_BUILD_INPUT_TYPE_TRIANGLES,
+							.triangleArray = OptixBuildInputTriangleArray{
+								.vertexBuffers = &(vertexBuffers[k]),
+								.numVertices = static_cast<uint32_t>(submesh.vertices.size()),
+								.vertexFormat = OPTIX_VERTEX_FORMAT_FLOAT3,
+								.vertexStrideInBytes = sizeof(decltype(submesh.vertices)::value_type),
+								.indexBuffer = indexBuffers[k],
+								.numIndexTriplets = submesh.primitiveCount,
+								.indexFormat = indexFormat,
+								.indexStrideInBytes = indexStride,
+								.flags = &flags,
+								.numSbtRecords = 1,
+								.transformFormat = OPTIX_TRANSFORM_FORMAT_NONE}};
+			}
+
+			OptixAccelBuildOptions accelBuildOptions{
+				.buildFlags = OPTIX_BUILD_FLAG_ALLOW_RANDOM_VERTEX_ACCESS | OPTIX_BUILD_FLAG_PREFER_FAST_TRACE | OPTIX_BUILD_FLAG_ALLOW_COMPACTION,
+				.operation = OPTIX_BUILD_OPERATION_BUILD };
+			OptixAccelBufferSizes computedBufferSizes{};
+			OPTIX_CHECK(optixAccelComputeMemoryUsage(m_context, &accelBuildOptions, gasBuildInputs.data(), gasBuildInputs.size(), &computedBufferSizes));
+			size_t compactedSizeOffset{ ALIGNED_SIZE(computedBufferSizes.tempSizeInBytes, 8ull) };
+			CUDA_CHECK(cudaMalloc(reinterpret_cast<void**>(&tempBuffer), compactedSizeOffset + sizeof(size_t)));
+			CUDA_CHECK(cudaMalloc(reinterpret_cast<void**>(&gasBuffer), computedBufferSizes.outputSizeInBytes));
+			OptixAccelEmitDesc emittedProperty{};
+			emittedProperty.type = OPTIX_PROPERTY_TYPE_COMPACTED_SIZE;
+			emittedProperty.result = reinterpret_cast<CUdeviceptr>(reinterpret_cast<uint8_t*>(tempBuffer) + compactedSizeOffset);
+			OPTIX_CHECK(optixAccelBuild(m_context, 0, &accelBuildOptions,
+						gasBuildInputs.data(), gasBuildInputs.size(),
+						tempBuffer, computedBufferSizes.tempSizeInBytes,
+						gasBuffer, computedBufferSizes.outputSizeInBytes, &gasHandle, &emittedProperty, 1));
+			size_t compactedGasSize{};
+			CUDA_CHECK(cudaMemcpy(&compactedGasSize, reinterpret_cast<void*>(emittedProperty.result), sizeof(size_t), cudaMemcpyDeviceToHost));
+			if (compactedGasSize < computedBufferSizes.outputSizeInBytes)
+			{
+				CUdeviceptr noncompactedGasBuffer{ gasBuffer };
+				CUDA_CHECK(cudaMalloc(reinterpret_cast<void**>(&gasBuffer), compactedGasSize));
+				OPTIX_CHECK(optixAccelCompact(m_context, 0, gasHandle, gasBuffer, compactedGasSize, &gasHandle));
+				CUDA_CHECK(cudaFree(reinterpret_cast<void*>(noncompactedGasBuffer)));
+			}
+			CUDA_CHECK(cudaFree(reinterpret_cast<void*>(tempBuffer)));
+
+			for(auto buf : vertexBuffers)
+				CUDA_CHECK(cudaFree(reinterpret_cast<void*>(buf)));
+			for(auto buf : indexBuffers)
+				CUDA_CHECK(cudaFree(reinterpret_cast<void*>(buf)));
+
+			m_gasHandles.push_back(gasHandle);
+			m_gasBuffers.push_back(gasBuffer);
+		}
+	}
 }
 void RenderingInterface::buildLightAccelerationStructure(const SceneData& scene, LightType type)
 {
@@ -612,12 +677,14 @@ void RenderingInterface::buildInstanceAccelerationStructure(const SceneData& sce
 	if (m_iasBuffer != CUdeviceptr{})
 		CUDA_CHECK(cudaFree(reinterpret_cast<void*>(m_iasBuffer)));
 
-	CUdeviceptr instanceBuffer{};
 	CUdeviceptr tempBuffer{};
 
-	constexpr uint32_t instanceCount{ 3 };
+	uint32_t instanceCount{ 2 }; // Non-triangle primitives instances
+	for(auto& model : scene.models)
+		instanceCount += model.instances.size();
 
 	OptixInstance* instances{};
+	CUdeviceptr instanceBuffer{};
 	CUDA_CHECK(cudaHostAlloc(&instances, sizeof(OptixInstance) * instanceCount, cudaHostAllocMapped));
 	CUDA_CHECK(cudaHostGetDevicePointer(reinterpret_cast<void**>(&instanceBuffer), instances, 0));
 	instances[0].instanceId = 0;
@@ -654,30 +721,40 @@ void RenderingInterface::buildInstanceAccelerationStructure(const SceneData& sce
 	instances[1].transform[9]  = 0.0f;
 	instances[1].transform[10] = 1.0f;
 	instances[1].transform[11] = -cameraPosition.z;
-	instances[2].instanceId = 2;
-	instances[2].sbtOffset = m_spherePrimitiveSBTRecordCount + m_customPrimitiveSBTRecordCount;
-	instances[2].traversableHandle = m_gasHandle;
-	instances[2].visibilityMask = 0xFF;
-	instances[2].flags = OPTIX_INSTANCE_FLAG_NONE;
-	instances[2].transform[0]  = 1.0f;
-	instances[2].transform[1]  = 0.0f;
-	instances[2].transform[2]  = 0.0f;
-	instances[2].transform[3]  = -cameraPosition.x;
-	instances[2].transform[4]  = 0.0f;
-	instances[2].transform[5]  = 1.0f;
-	instances[2].transform[6]  = 0.0f;
-	instances[2].transform[7]  = -cameraPosition.y;
-	instances[2].transform[8]  = 0.0f;
-	instances[2].transform[9]  = 0.0f;
-	instances[2].transform[10] = 1.0f;
-	instances[2].transform[11] = -cameraPosition.z;
+	int inst{ 2 };
+	int sbtOffset{ 0 };
+	for(auto& model : scene.models)
+	{
+		for(auto& instance : model.instances)
+		{
+			instances[inst].instanceId = inst;
+			instances[inst].sbtOffset = m_spherePrimitiveSBTRecordCount + m_customPrimitiveSBTRecordCount + sbtOffset;
+			instances[inst].traversableHandle = m_gasHandles[instance.meshIndex];
+			instances[inst].visibilityMask = 0xFF;
+			instances[inst].flags = OPTIX_INSTANCE_FLAG_NONE;
+			instances[inst].transform[0]  = instance.transform[0][0];
+			instances[inst].transform[1]  = instance.transform[0][1];
+			instances[inst].transform[2]  = instance.transform[0][2];
+			instances[inst].transform[3]  = -cameraPosition.x + instance.transform[0][3];
+			instances[inst].transform[4]  = instance.transform[1][0];
+			instances[inst].transform[5]  = instance.transform[1][1];
+			instances[inst].transform[6]  = instance.transform[1][2];
+			instances[inst].transform[7]  = -cameraPosition.y + instance.transform[1][3];
+			instances[inst].transform[8]  = instance.transform[2][0];
+			instances[inst].transform[9]  = instance.transform[2][1];
+			instances[inst].transform[10] = instance.transform[2][2];
+			instances[inst].transform[11] = -cameraPosition.z + instance.transform[2][3];
+			sbtOffset += model.meshes[instance.meshIndex].submeshes.size();
+			++inst;
+		}
+	}
 	OptixBuildInput iasBuildInputs[]{
 		OptixBuildInput{ .type = OPTIX_BUILD_INPUT_TYPE_INSTANCES,
 			.instanceArray = OptixBuildInputInstanceArray{ .instances = instanceBuffer, .numInstances = instanceCount } } };
 
 	OptixAccelBuildOptions accelBuildOptions{
 		.buildFlags = OPTIX_BUILD_FLAG_ALLOW_RANDOM_INSTANCE_ACCESS | OPTIX_BUILD_FLAG_PREFER_FAST_TRACE | OPTIX_BUILD_FLAG_ALLOW_COMPACTION,
-			.operation = OPTIX_BUILD_OPERATION_BUILD };
+		.operation = OPTIX_BUILD_OPERATION_BUILD };
 	OptixAccelBufferSizes computedBufferSizes{};
 	OPTIX_CHECK(optixAccelComputeMemoryUsage(m_context, &accelBuildOptions, iasBuildInputs, ARRAYSIZE(iasBuildInputs), &computedBufferSizes));
 	CUDA_CHECK(cudaMalloc(reinterpret_cast<void**>(&tempBuffer), computedBufferSizes.tempSizeInBytes));
@@ -713,6 +790,7 @@ void RenderingInterface::changeMaterial(int index, const SceneData::MaterialDesc
 			}
 		} };
 	MaterialData matData{};
+	CUDA_CHECK(cudaMemcpy(&matData, reinterpret_cast<MaterialData*>(m_materialData) + index, sizeof(MaterialData), cudaMemcpyDeviceToHost));
 	matData.bxdfIndexSBT = static_cast<uint32_t>(bxdfTypeToIndex(desc.bxdf));
 	matData.mfRoughnessValue = desc.roughness;
 	if (desc.baseIOR != prevDesc.baseIOR)
@@ -747,7 +825,7 @@ void RenderingInterface::changeMaterial(int index, const SceneData::MaterialDesc
 }
 void RenderingInterface::addMaterial(const SceneData::MaterialDescriptor& desc)
 {
-	R_ASSERT_LOG(false, "Adding materials is not implemented yet. Should not happen");
+	R_ERR_LOG("Adding materials is not implemented yet. Should not happen");
 	// MaterialData matData{};
 	// matData.bxdfIndexSBT = static_cast<uint32_t>(bxdfTypeToIndex(desc.bxdf));
 	// matData.mfRoughnessValue = desc.roughness;
@@ -987,7 +1065,12 @@ void RenderingInterface::cleanup()
 	CUDA_CHECK(cudaFree(reinterpret_cast<void*>(m_sbt.missRecordBase)));
 	CUDA_CHECK(cudaFree(reinterpret_cast<void*>(m_sbt.hitgroupRecordBase)));
 	CUDA_CHECK(cudaFree(reinterpret_cast<void*>(m_sbt.callablesRecordBase)));
-	CUDA_CHECK(cudaFree(reinterpret_cast<void*>(m_gasBuffer)));
+	for(auto buf : m_gasBuffers)
+		CUDA_CHECK(cudaFree(reinterpret_cast<void*>(buf)));
+	for(auto buf : m_indexBuffers)
+		CUDA_CHECK(cudaFree(reinterpret_cast<void*>(buf)));
+	for(auto buf : m_normalBuffers)
+		CUDA_CHECK(cudaFree(reinterpret_cast<void*>(buf)));
 	CUDA_CHECK(cudaFree(reinterpret_cast<void*>(m_customPrimBuffer)));
 	CUDA_CHECK(cudaFree(reinterpret_cast<void*>(m_spherePrimBuffer)));
 	CUDA_CHECK(cudaFree(reinterpret_cast<void*>(m_iasBuffer)));

@@ -8,8 +8,8 @@
 
 #include "../core/util.h"
 
-#define TONEMAP_ACES 1
-#define TONEMAP_AGX 0
+#define TONEMAP_ACES 0
+#define TONEMAP_AGX 1
 #define TONEMAP_UCHIMURA 0
 
 CU_DEVICE CU_INLINE void gammaCorrect(glm::vec3& col)

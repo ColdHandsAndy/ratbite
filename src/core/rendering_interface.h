@@ -17,16 +17,23 @@ class RenderingInterface
 private:
 	OptixDeviceContext m_context{};
 	OptixPipeline m_pipeline{};
+
 	OptixModule m_ptModule{};
 	OptixModule m_builtInSphereModule{};
-	OptixTraversableHandle m_gasHandle{};
-	CUdeviceptr m_gasBuffer{};
+
 	OptixTraversableHandle m_customPrimHandle{};
 	CUdeviceptr m_customPrimBuffer{};
 	CUdeviceptr m_spherePrimitiveHandle{};
 	CUdeviceptr m_spherePrimBuffer{};
+
+	std::vector<OptixTraversableHandle> m_gasHandles{};
+	std::vector<CUdeviceptr> m_gasBuffers{};
+	std::vector<CUdeviceptr> m_indexBuffers{};
+	std::vector<CUdeviceptr> m_normalBuffers{};
+
 	OptixTraversableHandle m_iasHandle{};
 	CUdeviceptr m_iasBuffer{};
+
 	CUdeviceptr m_materialData{};
 	CUdeviceptr m_spectralData{};
 	CUdeviceptr m_sensorSpectralCurvesData{};
@@ -48,9 +55,9 @@ private:
 	static constexpr uint32_t m_ptProgramGroupCount{ ALL_GROUPS };
 	OptixProgramGroup m_ptProgramGroups[m_ptProgramGroupCount]{};
 	OptixShaderBindingTable m_sbt{};
-	const uint32_t m_spherePrimitiveSBTRecordCount{ 1 };
-	const uint32_t m_customPrimitiveSBTRecordCount{ 1 };
-	const uint32_t m_trianglePrimitiveSBTRecordOffest{ m_spherePrimitiveSBTRecordCount + m_customPrimitiveSBTRecordCount };
+	static constexpr uint32_t m_spherePrimitiveSBTRecordCount{ 1 };
+	static constexpr uint32_t m_customPrimitiveSBTRecordCount{ 1 };
+	static constexpr uint32_t m_trianglePrimitiveSBTRecordOffest{ m_spherePrimitiveSBTRecordCount + m_customPrimitiveSBTRecordCount };
 
 	CUmodule m_imageModule{};
 	CUfunction m_resolveRenderDataFunc{};
@@ -104,17 +111,17 @@ private:
 	typedef Record<RecordDataPack32> OptixRecordHitgroup;
 
 	void createOptixContext();
-	void fillMaterials(const SceneData& scene);
-	void fillLightData(const SceneData& scene, const glm::vec3& cameraPosition);
+	void createRenderResolveProgram();
 	void createAccelerationStructures(const SceneData& scene, const glm::vec3& cameraPosition);
 	void createModulesProgramGroupsPipeline();
-	void createRenderResolveProgram();
+	void fillMaterials(const SceneData& scene);
 	void createSBT(const SceneData& scene);
 	void fillSpectralCurvesData();
+	void fillLightData(const SceneData& scene, const glm::vec3& cameraPosition);
 	void prepareDataForRendering(const Camera& camera, const RenderContext& renderContext);
 	void prepareDataForPreviewDrawing();
 
-	void buildGeometryAccelerationStructure(const SceneData& scene);
+	void buildGeometryAccelerationStructures(const SceneData& scene);
 	void buildLightAccelerationStructure(const SceneData& scene, LightType type);
 	void buildInstanceAccelerationStructure(const SceneData& scene, const glm::vec3& cameraPosition);
 	void changeMaterial(int index, const SceneData::MaterialDescriptor& desc, const SceneData::MaterialDescriptor& prevDesc);

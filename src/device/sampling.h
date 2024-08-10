@@ -28,15 +28,15 @@ namespace sampling
 				r = uv.y;
 				theta = (glm::pi<float>() / 2.0f) - (glm::pi<float>() / 4.0f) * (uv.x / uv.y);
 			}
-			uv.x = r * cuda::std::cosf(theta);
-			uv.y = r * cuda::std::sinf(theta);
+			uv.x = r * cuda::std::cos(theta);
+			uv.y = r * cuda::std::sin(theta);
 			return uv;
 		}
 		CU_DEVICE CU_INLINE glm::vec2 sampleUniform2DPolar(const glm::vec2& uv)
 		{
 			float r{ cuda::std::sqrtf(uv.x) };
 			float theta{ 2.0f * glm::pi<float>() * uv.y };
-			return glm::vec2{r * cuda::std::cosf(theta), r * cuda::std::sinf(theta) };
+			return glm::vec2{r * cuda::std::cos(theta), r * cuda::std::sin(theta) };
 		}
 		CU_DEVICE CU_INLINE glm::vec3 sampleUniform3D(const glm::vec2& uv, const glm::quat& frame)
 		{
@@ -70,7 +70,7 @@ namespace sampling
 			if (sin2ThetaMax < 0.00068523f)
 			{
 				sin2Theta = sin2ThetaMax * uv.x;
-				cosTheta = std::sqrt(1.0f - sin2Theta);
+				cosTheta = cuda::std::sqrtf(1.0f - sin2Theta);
 				oneMinusCosThetaMax = sin2ThetaMax / 2.0f;
 			}
 
@@ -78,7 +78,7 @@ namespace sampling
 			float sinAlpha{ cuda::std::fmaxf(0.0f, cuda::std::sqrtf(1.0f - (cosAlpha * cosAlpha))) };
 
 			float phi{ uv.y * 2.0f * glm::pi<float>() };
-			glm::vec3 w{ sinAlpha * cuda::std::cosf(phi), sinAlpha * cuda::std::sinf(phi), cosAlpha };
+			glm::vec3 w{ sinAlpha * cuda::std::cos(phi), sinAlpha * cuda::std::sin(phi), cosAlpha };
 
 			glm::vec3 u{}, v{};
 			utility::createOrthonormalBasis(cToO, u, v);
