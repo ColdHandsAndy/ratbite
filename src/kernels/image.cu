@@ -7,15 +7,12 @@
 #include <glm/vec3.hpp>
 
 #include "../core/util.h"
+#include "../device/color.h"
 
 #define TONEMAP_ACES 0
 #define TONEMAP_AGX 1
 #define TONEMAP_UCHIMURA 0
 
-CU_DEVICE CU_INLINE void gammaCorrect(glm::vec3& col)
-{
-	col = glm::vec3{cuda::std::pow(col.x, 1.0f / 2.2f), cuda::std::pow(col.y, 1.0f / 2.2f), cuda::std::pow(col.z, 1.0f / 2.2f)};
-}
 CU_DEVICE CU_INLINE void tonemap(glm::vec3& col)
 {
 #if TONEMAP_ACES
@@ -26,7 +23,7 @@ CU_DEVICE CU_INLINE void tonemap(glm::vec3& col)
 	float e{ 0.14f }; 
 	col = glm::clamp((col * (a * col + b)) / (col * (c * col + d) + e), 0.0f, 1.0f);
 
-	gammaCorrect(col);
+	col = color::sRGBfromLinearRGB(col);
 #elif TONEMAP_AGX
 	col = glm::clamp(col, 0.0f, 1.0f);
 	const glm::mat3 agx_mat{
@@ -88,11 +85,11 @@ CU_DEVICE CU_INLINE void tonemap(glm::vec3& col)
 	} };
 
 	col = {lmbd(col.x), lmbd(col.y), lmbd(col.z)};
-	gammaCorrect(col);
+	col = color::sRGBfromLinearRGB(col);
 #endif
 }
 
-extern "C" __global__ void renderResolve(const uint32_t winWidth, const uint32_t winHeight, const glm::mat3 colorspaceTransform, const glm::dvec4* renderData, cudaSurfaceObject_t presentData)
+extern "C" __global__ void renderResolve(const uint32_t winWidth, const uint32_t winHeight, const glm::mat3 colorspaceTransform, float exposure, const glm::dvec4* renderData, cudaSurfaceObject_t presentData)
 {
 	uint32_t x{ blockIdx.x * blockDim.x + threadIdx.x };
 	uint32_t y{ blockIdx.y * blockDim.y + threadIdx.y };
@@ -106,6 +103,8 @@ extern "C" __global__ void renderResolve(const uint32_t winWidth, const uint32_t
 						  static_cast<float>(data.z * normval) };
 
 	glm::vec3 color{ colorspaceTransform * normalized };
+
+	color = glm::max(color, 0.0f) * cuda::std::pow(2.0f, exposure);
 
 	tonemap(color);
 

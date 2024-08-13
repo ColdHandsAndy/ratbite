@@ -9,7 +9,8 @@
 #include <optix.h>
 
 #define CUDA_CHECK(call)			checkCUDA(call, #call, __FILE__, __LINE__)
-#define CUDA_SYNC_CHECK()			cudaSyncCheck(__FILE__, __LINE__)
+#define CUDA_SYNC_DEVICE()			cudaSyncCheck(__FILE__, __LINE__)
+#define CUDA_SYNC_STREAM(stream)	static_assert(std::is_same<std::decay_t<decltype(stream)>, cudaStream_t>::value, "Stream should be of type (cudaStream_t)"); cudaSyncStream(__FILE__, __LINE__, stream);
 #define OPTIX_CHECK(call)			checkOptix(call, #call, __FILE__, __LINE__)
 #define OPTIX_CHECK_LOG(call)		{ char OPTIX_LOG[2048]{}; size_t OPTIX_LOG_SIZE{}; checkOptixLog(call, OPTIX_LOG, OPTIX_LOG_SIZE, #call, __FILE__, __LINE__); }
 
@@ -54,6 +55,13 @@ inline void checkCUDA(CUresult error, const char* call, const char* file, uint32
 inline void cudaSyncCheck(const char* file, uint32_t line)
 {
 	cudaDeviceSynchronize();
+	cudaError_t error{ cudaGetLastError() };
+	if (error != cudaSuccess)
+		std::cerr << std::format("CUDA error.\n\tFile: {}\n\tLine: {}\n", cudaGetErrorString(error), file, line);
+}
+inline void cudaSyncStream(const char* file, uint32_t line, cudaStream_t stream)
+{
+	cudaStreamSynchronize(stream);
 	cudaError_t error{ cudaGetLastError() };
 	if (error != cudaSuccess)
 		std::cerr << std::format("CUDA error.\n\tFile: {}\n\tLine: {}\n", cudaGetErrorString(error), file, line);

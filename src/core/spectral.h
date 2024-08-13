@@ -4,6 +4,7 @@
 #include <array>
 
 #include "../core/spectral_settings.h"
+#include "../core/debug_macros.h"
 
 class PiecewiseLinearSpectrum
 {
@@ -110,6 +111,18 @@ namespace SpectralData
 		SpectralDataType::D_GLASS_F10_IOR,
 		SpectralDataType::D_GLASS_F11_IOR,
 		}) };
+	static_assert(dielectricSpectraNames.size() == dielectricIORSpectraTypes.size());
+	inline uint32_t dielectricIndexFromType(SpectralDataType type)
+	{
+		constexpr uint32_t typeCount{ dielectricIORSpectraTypes.size() };
+		for (uint32_t i{ 0 }; i < typeCount; ++i)
+		{
+			if (type == dielectricIORSpectraTypes[i])
+				return i;
+		}
+		R_ERR_LOG("Unknown type passed");
+		return 0;
+	}
 	static constexpr std::array conductorSpectraNames{ std::to_array<const char*>({
 		"Metal Ag",
 		"Metal Al",
@@ -137,6 +150,18 @@ namespace SpectralData
 		SpectralDataType::C_METAL_MGO_AC,
 		SpectralDataType::C_METAL_TIO2_AC,
 		}) };
+	static_assert(conductorSpectraNames.size() == conductorIORSpectraTypes.size() && conductorIORSpectraTypes.size() == conductorACSpectraTypes.size());
+	inline uint32_t conductorIndexFromType(SpectralDataType type)
+	{
+		constexpr uint32_t typeCount{ conductorIORSpectraTypes.size() };
+		for (uint32_t i{ 0 }; i < typeCount; ++i)
+		{
+			if (type == conductorIORSpectraTypes[i] || type == conductorACSpectraTypes[i])
+				return i;
+		}
+		R_ERR_LOG("Unknown type passed");
+		return 0;
+	}
 	static constexpr std::array emissionSpectraNames{ std::to_array<const char*>({
 		"Illum D65",
 		"Illum F1",
@@ -167,6 +192,18 @@ namespace SpectralData
 		SpectralDataType::ILLUM_F11,
 		SpectralDataType::ILLUM_F12,
 		}) };
+	static_assert(emissionSpectraNames.size() == emissionSpectraTypes.size());
+	inline uint32_t emitterIndexFromType(SpectralDataType type)
+	{
+		constexpr uint32_t typeCount{ emissionSpectraTypes.size() };
+		for (uint32_t i{ 0 }; i < typeCount; ++i)
+		{
+			if (type == emissionSpectraTypes[i])
+				return i;
+		}
+		R_ERR_LOG("Unknown type passed");
+		return 0;
+	}
 
     namespace CIE
     {
@@ -174,6 +211,9 @@ namespace SpectralData
         const DenselySampledSpectrum& X();
         const DenselySampledSpectrum& Y();
         const DenselySampledSpectrum& Z();
+        const DenselySampledSpectrum& BasisR();
+        const DenselySampledSpectrum& BasisG();
+        const DenselySampledSpectrum& BasisB();
     }
 
     DenselySampledSpectrum loadSpectrum(SpectralDataType sdt);

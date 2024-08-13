@@ -23,8 +23,8 @@ private:
 	int m_pathLength{};
 	int m_sampleCount{};
 	glm::mat3 m_colorspaceTransform{};
-	// Filter
-	// Tonemapper
+	float m_imageExposure{ 0.0f };
+
 	bool m_changesMade{ true };
 	bool m_paused{ false };
 public:
@@ -51,6 +51,7 @@ public:
 	float getRenderInvHeight() const { return m_renderInvHeight; }
 	int getPathLength() const { return m_pathLength; }
 	int getSampleCount() const { return m_sampleCount; }
+	float getImageExposure() const { return m_imageExposure; }
 	bool changesMade() const { return m_changesMade; }
 	bool paused() const { return m_paused; }
 
@@ -61,6 +62,7 @@ public:
 	void setRenderHeight(int h) { m_renderHeight = h; float ih{ 1.0f / h }; m_renderInvHeight = ih; m_changesMade = true; }
 	void setPathLength(int pl) { m_pathLength = pl; m_changesMade = true; }
 	void setSampleCount(int sc) { m_sampleCount = sc; m_changesMade = true; }
+	void setImageExposure(float exp) { m_imageExposure = exp; m_changesMade = true; }
 	void setPause(bool pause) { m_paused = pause; }
 private:
 	void acceptChanges() { m_changesMade = false; }

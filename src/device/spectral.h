@@ -3,10 +3,13 @@
 #include <cuda_runtime.h>
 #include <cuda/std/cmath>
 
+#include <glm/vec3.hpp>
 #include <glm/common.hpp>
 
 #include "../core/spectral_settings.h"
 #include "../core/util.h"
+
+class SampledWavelengths;
 
 class SampledSpectrum
 {
@@ -25,6 +28,7 @@ public:
 		for (int i{ 0 }; i < SpectralSettings::KSpectralSamplesNumber; ++i)
 			spectrum[i] = s.spectrum[i];
 	}
+
 	CU_DEVICE CU_INLINE SampledSpectrum& operator=(const SampledSpectrum& s)
 	{
 		for (int i{ 0 }; i < SpectralSettings::KSpectralSamplesNumber; ++i)

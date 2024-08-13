@@ -722,6 +722,9 @@ extern "C" __device__ void __direct_callable__ConductorBxDF(const MaterialData& 
 	local.fromLocal(locWi);
 	rD = glm::normalize(locWi);
 }
+extern "C" __device__ void __direct_callable__DielectricAbsorbingBxDF(const MaterialData& materialData, const DirectLightSampleData& directLightData, const QRNG::State& qrngState, const glm::quat& shadingFrame,
+		SampledSpectrum& L, SampledWavelengths& wavelengths, SampledSpectrum& throughputWeight, float& bxdfPDF, glm::vec3& rD, PathStateBitfield& stateFlags, float& refractionScale, uint32_t depth)
+{}
 
 extern "C" __global__ void __raygen__main()
 {

@@ -60,5 +60,9 @@ struct LaunchParameters
 	CUPTR(DenseSpectrum) sensorSpectralCurveB{};
 	CUPTR(DenseSpectrum) sensorSpectralCurveC{};
 
+	CUPTR(DenseSpectrum) spectralBasisR{};
+	CUPTR(DenseSpectrum) spectralBasisG{};
+	CUPTR(DenseSpectrum) spectralBasisB{};
+
 	OptixTraversableHandle traversable{};
 };

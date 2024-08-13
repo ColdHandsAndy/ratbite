@@ -98,4 +98,5 @@ namespace Program
 	static constexpr char closehitSphereName[]{ "__closesthit__sphere" };
     static constexpr char conductorBxDFName[]{ "__direct_callable__ConductorBxDF" };
     static constexpr char dielectricBxDFName[]{  "__direct_callable__DielectricBxDF" };
+    static constexpr char dielectricAbsorbingBxDFName[]{  "__direct_callable__DielectricAbsorbingBxDF" };
 }

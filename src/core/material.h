@@ -38,5 +38,19 @@ struct MaterialData
 	uint16_t emissionSpectrumDataIndex{};
 	
 	float mfRoughnessValue{};
+
+	// Any
+		// Frame -> Normal: texture
+	// BxDF (Trowbridge-Reitz)
+		// Roughness: value, texture
+	// BxDF (Trowbridge-Reitz - Absorbing Dielectric)
+		// Color: value, attribute, texture
+		// IOR: value
+
+	// Attributes (Normal and Frame are interchangeable)
+		// Color: 1 U32
+		// Normal: 2 U32 (Orthographic)
+		// Frame: 4 U32 (Quaternion 'w' sign stores handedness)
+		// TexCoords: 2 F
 };
 ENABLE_ENUM_BITWISE_OPERATORS(MaterialData::AttributeTypeBitfield);

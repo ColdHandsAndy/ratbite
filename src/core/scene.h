@@ -24,7 +24,8 @@ struct SceneData
 	enum class BxDF
 	{
 		CONDUCTOR,
-		DIELECTIRIC,
+		DIELECTRIC,
+		DIELECTRIC_ABSORBING,
 		DESC
 	};
 	struct MaterialDescriptor //We need 'MaterialDescrioptor' to find material data before rendering
@@ -38,10 +39,8 @@ struct SceneData
 	};
 	std::vector<MaterialDescriptor> materialDescriptors{};
 
-	bool materialDescriptorChangesMade{ false };
 	bool newMaterialDescriptorAdded{ false };
-	int changedMaterialDescriptorIndex{};
-	MaterialDescriptor tempDescriptor{};
+	std::vector<std::pair<MaterialDescriptor, int>> changedDescriptors{};
 
 
 	// TODO: Need to free index buffer before deleting a submesh
@@ -261,13 +260,14 @@ struct SceneData
 	std::vector<SceneData::SphereLight> sphereLights{};
 	uint32_t lightCount{};
 
-	bool lightDataChangesMade{ false };
-	LightType changedLightType{};
+	bool sphereLightsChanged{ false };
+	bool diskLightsChanged{ false };
 	// bool lightDataAABBChanged{ false };
 	// int changedLightIndex{};
 
-
-	bool changesMade() const { return materialDescriptorChangesMade || lightDataChangesMade; }
+	bool lightChangesMade() const { return sphereLightsChanged || diskLightsChanged; }
+	bool changesMade() const { return (changedDescriptors.size() != 0) || lightChangesMade(); }
+	void acceptChanges() { sphereLightsChanged = false; diskLightsChanged = false; changedDescriptors.clear(); }
 
 	SceneData()
 	{
@@ -278,9 +278,9 @@ struct SceneData
 			.baseAC = SpectralData::SpectralDataType::C_METAL_AL_AC,
 			.baseEmission = SpectralData::SpectralDataType::NONE,
 			.roughness = 1.0f} };
-		loadModel("A:/Models/gltf/deccer cubes/deccer_cubes.gltf", &mat);
+		// loadModel("A:/Models/gltf/deccer cubes/deccer_cubes.gltf", &mat);
 		// loadModel("A:/Models/gltf/cornell_scene/cornell_scene.gltf", &mat);
-		// loadModel("A:/Models/gltf/prism/prism.gltf", &mat);
+		loadModel("A:/Models/gltf/knob_box/scene.gltf", &mat);
 
 
 		int matIndex{};

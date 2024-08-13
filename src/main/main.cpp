@@ -101,6 +101,10 @@ void menu(UI& ui, Camera& camera, RenderContext& rContext, SceneData& scene, int
 		if ((renderHeight != rContext.getRenderHeight()) && !ui.keyboardIsCaptured())
 			rContext.setRenderHeight(renderHeight);
 
+		constexpr float exposureParameterization{ 10.0f };
+		static float exposure{ rContext.getImageExposure() * (1.0f / exposureParameterization) };
+		changed = ImGui::SliderFloat("Image exposure", &exposure, -1.0f, 1.0f, "%.5f", ImGuiSliderFlags_AlwaysClamp | ImGuiSliderFlags_Logarithmic);
+		if (changed) rContext.setImageExposure(exposure * exposureParameterization);
 
 		ImGui::SeparatorText("Camera settings");
 		static bool checkbox{ camera.depthOfFieldEnabled() };
@@ -120,7 +124,6 @@ void menu(UI& ui, Camera& camera, RenderContext& rContext, SceneData& scene, int
 
 		ImGui::SeparatorText("Lights settings");
 		bool lightsChanged{ false };
-		scene.changedLightType = LightType::NONE;
 		if (ImGui::TreeNode("Sphere lights"))
 		{
 			if (scene.sphereLights.size() == 0)
@@ -164,8 +167,8 @@ void menu(UI& ui, Camera& camera, RenderContext& rContext, SceneData& scene, int
 					}
 				}
 			}
-			if (lightsChanged && scene.changedLightType == LightType::NONE)
-				scene.changedLightType = LightType::SPHERE;
+			if (lightsChanged)
+				scene.sphereLightsChanged = true;
 			ImGui::TreePop();
 		}
 		if (ImGui::TreeNode("Disk lights"))
@@ -226,11 +229,10 @@ void menu(UI& ui, Camera& camera, RenderContext& rContext, SceneData& scene, int
 					}
 				}
 			}
-			if (lightsChanged && scene.changedLightType == LightType::NONE)
-				scene.changedLightType = LightType::DISK;
+			if (lightsChanged)
+				scene.diskLightsChanged = true;
 			ImGui::TreePop();
 		}
-		scene.lightDataChangesMade = lightsChanged;
 
 
 		ImGui::SeparatorText("Change material");
@@ -251,17 +253,27 @@ void menu(UI& ui, Camera& camera, RenderContext& rContext, SceneData& scene, int
 				}
 				ImGui::EndCombo();
 			}
-			scene.changedMaterialDescriptorIndex = currentItem;
-			scene.tempDescriptor = scene.materialDescriptors[currentItem];
-			scene.newMaterialDescriptorAdded = false;
+			SceneData::MaterialDescriptor* currentDesc{ nullptr };
+			for (int i{ 0 }; i < scene.changedDescriptors.size(); ++i)
+			{
+				if (currentItem == scene.changedDescriptors[i].second)
+					currentDesc = &(scene.changedDescriptors[i].first);
+			}
+			SceneData::MaterialDescriptor tempDescriptor{};
+			if (currentDesc != nullptr)
+				tempDescriptor = *currentDesc;
+			else
+				tempDescriptor = scene.materialDescriptors[currentItem];
+
+			bool materialChanged{ false };
 
 			int rb{};
-			switch (scene.tempDescriptor.bxdf)
+			switch (tempDescriptor.bxdf)
 			{
 				case SceneData::BxDF::CONDUCTOR:
 					rb = 0;
 					break;
-				case SceneData::BxDF::DIELECTIRIC:
+				case SceneData::BxDF::DIELECTRIC:
 					rb = 1;
 					break;
 				default:
@@ -278,54 +290,80 @@ void menu(UI& ui, Camera& camera, RenderContext& rContext, SceneData& scene, int
 					bx = SceneData::BxDF::CONDUCTOR;
 					break;
 				case 1:
-					bx = SceneData::BxDF::DIELECTIRIC;
+					bx = SceneData::BxDF::DIELECTRIC;
 					break;
 				default:
 					R_ERR_LOG("Unknown output.")
 					break;
 			}
-			if (bx != scene.tempDescriptor.bxdf)
+			if (bx != tempDescriptor.bxdf)
 			{
-				scene.materialDescriptorChangesMade = true;
+				materialChanged = true;
 
-				scene.tempDescriptor.bxdf = bx;
-				if (scene.tempDescriptor.bxdf == SceneData::BxDF::CONDUCTOR)
+				tempDescriptor.bxdf = bx;
+				if (tempDescriptor.bxdf == SceneData::BxDF::CONDUCTOR)
 				{
-					scene.tempDescriptor.baseIOR = SpectralData::SpectralDataType::C_METAL_AL_IOR;
-					scene.tempDescriptor.baseAC = SpectralData::SpectralDataType::C_METAL_AL_AC;
+					tempDescriptor.baseIOR = SpectralData::SpectralDataType::C_METAL_AL_IOR;
+					tempDescriptor.baseAC = SpectralData::SpectralDataType::C_METAL_AL_AC;
 				}
-				else if (scene.tempDescriptor.bxdf == SceneData::BxDF::DIELECTIRIC)
+				else if (tempDescriptor.bxdf == SceneData::BxDF::DIELECTRIC)
 				{
-					scene.tempDescriptor.baseIOR = SpectralData::SpectralDataType::D_GLASS_F5_IOR;
-					scene.tempDescriptor.baseAC = SpectralData::SpectralDataType::NONE;
+					tempDescriptor.baseIOR = SpectralData::SpectralDataType::D_GLASS_F5_IOR;
+					tempDescriptor.baseAC = SpectralData::SpectralDataType::NONE;
 				}
 			}
 
-			if (scene.tempDescriptor.bxdf == SceneData::BxDF::CONDUCTOR)
+			if (tempDescriptor.bxdf == SceneData::BxDF::CONDUCTOR)
 			{
-				static int currentSpectrum{ 0 };
+				int32_t currentSpectrum{ static_cast<int32_t>(SpectralData::conductorIndexFromType(tempDescriptor.baseIOR)) };
 				if (ImGui::ListBox("Conductor type", &currentSpectrum, SpectralData::conductorSpectraNames.data(), SpectralData::conductorSpectraNames.size(), 3))
 				{
-					scene.materialDescriptorChangesMade = true;
+					materialChanged = true;
 
-					scene.tempDescriptor.baseIOR = SpectralData::conductorIORSpectraTypes[currentSpectrum];
-					scene.tempDescriptor.baseAC = SpectralData::conductorACSpectraTypes[currentSpectrum];
+					tempDescriptor.baseIOR = SpectralData::conductorIORSpectraTypes[currentSpectrum];
+					tempDescriptor.baseAC = SpectralData::conductorACSpectraTypes[currentSpectrum];
 				}
 			}
-			else if (scene.tempDescriptor.bxdf == SceneData::BxDF::DIELECTIRIC)
+			else if (tempDescriptor.bxdf == SceneData::BxDF::DIELECTRIC)
 			{
-				static int currentSpectrum{ 0 };
+				int32_t currentSpectrum{ static_cast<int32_t>(SpectralData::dielectricIndexFromType(tempDescriptor.baseIOR)) };
 				if (ImGui::ListBox("Dielectric type", &currentSpectrum, SpectralData::dielectricSpectraNames.data(), SpectralData::dielectricSpectraNames.size(), 3))
 				{
-					scene.materialDescriptorChangesMade = true;
+					materialChanged = true;
 
-					scene.tempDescriptor.baseIOR = SpectralData::dielectricIORSpectraTypes[currentSpectrum];
-					scene.tempDescriptor.baseAC = SpectralData::SpectralDataType::NONE;
+					tempDescriptor.baseIOR = SpectralData::dielectricIORSpectraTypes[currentSpectrum];
+					tempDescriptor.baseAC = SpectralData::SpectralDataType::NONE;
 				}
 			}
 
-			if (ImGui::DragFloat("Roughness", &scene.tempDescriptor.roughness, 0.002f, 0.0f, 1.0f))
-				scene.materialDescriptorChangesMade = true;
+			if (tempDescriptor.baseEmission != SpectralData::SpectralDataType::NONE)
+			{
+				int32_t currentSpectrum{ static_cast<int32_t>(SpectralData::emitterIndexFromType(tempDescriptor.baseEmission)) };
+				if (ImGui::ListBox("Emitter type", &currentSpectrum, SpectralData::emissionSpectraNames.data(), SpectralData::emissionSpectraNames.size(), 3))
+				{
+					materialChanged = true;
+
+					tempDescriptor.baseEmission = SpectralData::emissionSpectraTypes[currentSpectrum];
+				}
+			}
+
+			if (ImGui::DragFloat("Roughness", &tempDescriptor.roughness, 0.002f, 0.0f, 1.0f))
+				materialChanged = true;
+
+			if (materialChanged)
+			{
+				if (!currentDesc)
+				{
+					auto& cd{ scene.changedDescriptors.emplace_back() };
+					cd.second = currentItem;
+					cd.first = tempDescriptor;
+				}
+				else
+				{
+					*currentDesc = tempDescriptor;
+				}
+			}
+
 		}
 	}
 
@@ -400,9 +438,10 @@ void input(Window& window, UI& ui, Camera& camera, RenderContext& rContext)
 int main(int argc, char** argv)
 {
 	// TODO:
-	// OBJ loading
+	// Texture support (Texture loading, Ray differentials)
+	// Dynamic asset loading
+	// RGB base BxDF
 	// Adaptive sampling
-	// More BxDFs
 
 	initialize();
 

@@ -38,6 +38,7 @@ void RenderingInterface::createOptixContext()
 
 #ifdef _DEBUG
 	options.validationMode = OPTIX_DEVICE_CONTEXT_VALIDATION_MODE_ALL;
+	// options.validationMode = OPTIX_DEVICE_CONTEXT_VALIDATION_MODE_OFF;
 #endif
 
 	OPTIX_CHECK(optixDeviceContextCreate(0, &options, &m_context));
@@ -217,13 +218,30 @@ void RenderingInterface::createModulesProgramGroupsPipeline()
 	OptixProgramGroupOptions programGroupOptions{ .payloadType = payloadTypes + 0 };
 	{
 		OptixProgramGroupDesc descs[m_ptProgramGroupCount]{};
-		descs[RenderingInterface::RAYGEN] = OptixProgramGroupDesc{ .kind = OPTIX_PROGRAM_GROUP_KIND_RAYGEN, .raygen = {.module = optixModule, .entryFunctionName = Program::raygenName} };
-		descs[RenderingInterface::MISS] = OptixProgramGroupDesc{ .kind = OPTIX_PROGRAM_GROUP_KIND_MISS, .raygen = {.module = optixModule, .entryFunctionName = Program::missName} };
-		descs[RenderingInterface::TRIANGLE] = OptixProgramGroupDesc{ .kind = OPTIX_PROGRAM_GROUP_KIND_HITGROUP, .hitgroup = {.moduleCH = optixModule, .entryFunctionNameCH = Program::closehitTriangleName} };
-		descs[RenderingInterface::DISK] = OptixProgramGroupDesc{ .kind = OPTIX_PROGRAM_GROUP_KIND_HITGROUP, .hitgroup = {.moduleCH = optixModule, .entryFunctionNameCH = Program::closehitDiskName, .moduleIS = optixModule, .entryFunctionNameIS = Program::intersectionDiskName} };
-		descs[RenderingInterface::SPHERE] = OptixProgramGroupDesc{ .kind = OPTIX_PROGRAM_GROUP_KIND_HITGROUP, .hitgroup = {.moduleCH = optixModule, .entryFunctionNameCH = Program::closehitSphereName, .moduleIS = m_builtInSphereModule} };
-		descs[RenderingInterface::CALLABLE_CONDUCTOR_BXDF] = OptixProgramGroupDesc{ .kind = OPTIX_PROGRAM_GROUP_KIND_CALLABLES, .callables = {.moduleDC = optixModule, .entryFunctionNameDC = Program::conductorBxDFName} };
-		descs[RenderingInterface::CALLABLE_DIELECTRIC_BXDF] = OptixProgramGroupDesc{ .kind = OPTIX_PROGRAM_GROUP_KIND_CALLABLES, .callables = {.moduleDC = optixModule, .entryFunctionNameDC = Program::dielectricBxDFName} };
+		descs[RenderingInterface::RAYGEN] = OptixProgramGroupDesc{
+			.kind = OPTIX_PROGRAM_GROUP_KIND_RAYGEN,
+			.raygen = {.module = optixModule, .entryFunctionName = Program::raygenName} };
+		descs[RenderingInterface::MISS] = OptixProgramGroupDesc{
+			.kind = OPTIX_PROGRAM_GROUP_KIND_MISS,
+			.raygen = {.module = optixModule, .entryFunctionName = Program::missName} };
+		descs[RenderingInterface::TRIANGLE] = OptixProgramGroupDesc{
+			.kind = OPTIX_PROGRAM_GROUP_KIND_HITGROUP,
+			.hitgroup = {.moduleCH = optixModule, .entryFunctionNameCH = Program::closehitTriangleName} };
+		descs[RenderingInterface::DISK] = OptixProgramGroupDesc{
+			.kind = OPTIX_PROGRAM_GROUP_KIND_HITGROUP,
+			.hitgroup = {.moduleCH = optixModule, .entryFunctionNameCH = Program::closehitDiskName, .moduleIS = optixModule,.entryFunctionNameIS = Program::intersectionDiskName} };
+		descs[RenderingInterface::SPHERE] = OptixProgramGroupDesc{
+			.kind = OPTIX_PROGRAM_GROUP_KIND_HITGROUP,
+			.hitgroup = {.moduleCH = optixModule, .entryFunctionNameCH = Program::closehitSphereName, .moduleIS = m_builtInSphereModule} };
+		descs[RenderingInterface::CALLABLE_CONDUCTOR_BXDF] = OptixProgramGroupDesc{
+			.kind = OPTIX_PROGRAM_GROUP_KIND_CALLABLES,
+			.callables = {.moduleDC = optixModule, .entryFunctionNameDC = Program::conductorBxDFName} };
+		descs[RenderingInterface::CALLABLE_DIELECTRIC_BXDF] = OptixProgramGroupDesc{
+			.kind = OPTIX_PROGRAM_GROUP_KIND_CALLABLES,
+			.callables = {.moduleDC = optixModule, .entryFunctionNameDC = Program::dielectricBxDFName} };
+		descs[RenderingInterface::CALLABLE_DIELECTRIC_ABSORBING_BXDF] = OptixProgramGroupDesc{
+			.kind = OPTIX_PROGRAM_GROUP_KIND_CALLABLES,
+			.callables = {.moduleDC = optixModule, .entryFunctionNameDC = Program::dielectricAbsorbingBxDFName} };
 		OPTIX_CHECK_LOG(optixProgramGroupCreate(m_context, descs, ARRAYSIZE(descs),
 					&programGroupOptions,
 					OPTIX_LOG, &OPTIX_LOG_SIZE,
@@ -291,13 +309,14 @@ void RenderingInterface::createSBT(const SceneData& scene)
 	CUDA_CHECK(cudaMemcpy(reinterpret_cast<void*>(m_sbt.missRecordBase), &missRecord, m_sbt.missRecordStrideInBytes * m_sbt.missRecordCount, cudaMemcpyHostToDevice));
 
 	//Fill callable records (bxdfs)
-	constexpr int callableCount{ 2 };
+	constexpr int callableCount{ 3 };
 	m_sbt.callablesRecordCount = callableCount;
 	m_sbt.callablesRecordStrideInBytes = sizeof(OptixRecordCallable);
 	CUDA_CHECK(cudaMalloc(reinterpret_cast<void**>(&m_sbt.callablesRecordBase), m_sbt.callablesRecordStrideInBytes * m_sbt.callablesRecordCount));
 	OptixRecordCallable callableRecords[callableCount]{};
 	OPTIX_CHECK(optixSbtRecordPackHeader(m_ptProgramGroups[RenderingInterface::CALLABLE_CONDUCTOR_BXDF], callableRecords + bxdfTypeToIndex(SceneData::BxDF::CONDUCTOR)));
-	OPTIX_CHECK(optixSbtRecordPackHeader(m_ptProgramGroups[RenderingInterface::CALLABLE_DIELECTRIC_BXDF], callableRecords + bxdfTypeToIndex(SceneData::BxDF::DIELECTIRIC)));
+	OPTIX_CHECK(optixSbtRecordPackHeader(m_ptProgramGroups[RenderingInterface::CALLABLE_DIELECTRIC_BXDF], callableRecords + bxdfTypeToIndex(SceneData::BxDF::DIELECTRIC)));
+	OPTIX_CHECK(optixSbtRecordPackHeader(m_ptProgramGroups[RenderingInterface::CALLABLE_DIELECTRIC_ABSORBING_BXDF], callableRecords + bxdfTypeToIndex(SceneData::BxDF::DIELECTRIC_ABSORBING)));
 	CUDA_CHECK(cudaMemcpy(reinterpret_cast<void*>(m_sbt.callablesRecordBase), callableRecords, m_sbt.callablesRecordStrideInBytes * m_sbt.callablesRecordCount, cudaMemcpyHostToDevice));
 
 	uint32_t hitgroupCount{ 0 };
@@ -337,6 +356,10 @@ void RenderingInterface::fillSpectralCurvesData()
 	DenselySampledSpectrum sensorSpectralCurves[]{ SpectralData::CIE::X(), SpectralData::CIE::Y(), SpectralData::CIE::Z() };
 	CUDA_CHECK(cudaMalloc(reinterpret_cast<void**>(&m_sensorSpectralCurvesData), sizeof(DenselySampledSpectrum) * ARRAYSIZE(sensorSpectralCurves)));
 	CUDA_CHECK(cudaMemcpy(reinterpret_cast<void*>(m_sensorSpectralCurvesData), sensorSpectralCurves, sizeof(DenselySampledSpectrum) * ARRAYSIZE(sensorSpectralCurves), cudaMemcpyHostToDevice));
+
+	DenselySampledSpectrum spectralBasis[]{ SpectralData::CIE::BasisR(), SpectralData::CIE::BasisG(), SpectralData::CIE::BasisB() };
+	CUDA_CHECK(cudaMalloc(reinterpret_cast<void**>(&m_spectralBasisData), sizeof(DenselySampledSpectrum) * ARRAYSIZE(spectralBasis)));
+	CUDA_CHECK(cudaMemcpy(reinterpret_cast<void*>(m_spectralBasisData), spectralBasis, sizeof(DenselySampledSpectrum) * ARRAYSIZE(spectralBasis), cudaMemcpyHostToDevice));
 }
 void RenderingInterface::prepareDataForRendering(const Camera& camera, const RenderContext& renderContext)
 {
@@ -345,6 +368,7 @@ void RenderingInterface::prepareDataForRendering(const Camera& camera, const Ren
 	m_pathLength = renderContext.getPathLength();
 	m_launchWidth = renderContext.getRenderWidth();
 	m_launchHeight = renderContext.getRenderHeight();
+	m_imageExposure = renderContext.getImageExposure();
 	CUDA_CHECK(cudaMalloc(reinterpret_cast<void**>(&m_renderData),
 				m_rDataComponentSize * m_rDataComponentCount * renderContext.getRenderWidth() * renderContext.getRenderHeight()));
 
@@ -373,6 +397,9 @@ void RenderingInterface::prepareDataForRendering(const Camera& camera, const Ren
 	m_launchParameters.sensorSpectralCurveA = m_sensorSpectralCurvesData + sizeof(DenselySampledSpectrum) * 0;
 	m_launchParameters.sensorSpectralCurveB = m_sensorSpectralCurvesData + sizeof(DenselySampledSpectrum) * 1;
 	m_launchParameters.sensorSpectralCurveC = m_sensorSpectralCurvesData + sizeof(DenselySampledSpectrum) * 2;
+	m_launchParameters.spectralBasisR = m_spectralBasisData + sizeof(DenselySampledSpectrum) * 0;
+	m_launchParameters.spectralBasisG = m_spectralBasisData + sizeof(DenselySampledSpectrum) * 1;
+	m_launchParameters.spectralBasisB = m_spectralBasisData + sizeof(DenselySampledSpectrum) * 2;
 	m_launchParameters.traversable = m_iasBuffer;
 
 	CUDA_CHECK(cudaMalloc(reinterpret_cast<void**>(&m_lpBuffer), sizeof(LaunchParameters)));
@@ -891,8 +918,11 @@ int RenderingInterface::bxdfTypeToIndex(SceneData::BxDF type)
 		case SceneData::BxDF::CONDUCTOR:
 			return 0;
 			break;
-		case SceneData::BxDF::DIELECTIRIC:
+		case SceneData::BxDF::DIELECTRIC:
 			return 1;
+			break;
+		case SceneData::BxDF::DIELECTRIC_ABSORBING:
+			return 2;
 			break;
 		default:
 			R_ERR_LOG("Unknown BxDF type.")
@@ -909,7 +939,7 @@ void RenderingInterface::resolveRender(const glm::mat3& colorspaceTransform)
 	CUDA_CHECK(cudaCreateSurfaceObject(&m_imageCudaSurface, &resDesc));
 
 	glm::mat3 colspTransform{ colorspaceTransform };
-	void* params[]{ &m_launchWidth, &m_launchHeight, &colspTransform, &m_renderData, &m_imageCudaSurface };
+	void* params[]{ &m_launchWidth, &m_launchHeight, &colspTransform, &m_imageExposure, &m_renderData, &m_imageCudaSurface };
 	CUDA_CHECK(cuLaunchKernel(m_resolveRenderDataFunc,
 				DISPATCH_SIZE(m_launchWidth, 16), DISPATCH_SIZE(m_launchHeight, 16), 1, 
 				16, 16, 1,
@@ -960,7 +990,9 @@ void RenderingInterface::processChanges(RenderContext& renderContext, Camera& ca
 		glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, m_launchWidth, m_launchHeight, 0, GL_RGBA, GL_UNSIGNED_BYTE, nullptr);
 		CUDA_CHECK(cudaGraphicsGLRegisterImage(&m_graphicsResource, m_glTexture, GL_TEXTURE_2D, cudaGraphicsRegisterFlagsSurfaceLoadStore));
 		glBindTexture(GL_TEXTURE_2D, 0);
-	}	
+	}
+	if (m_imageExposure != renderContext.getImageExposure())
+		m_imageExposure = renderContext.getImageExposure();
 
 	if (camera.orientationChanged())
 	{
@@ -975,29 +1007,34 @@ void RenderingInterface::processChanges(RenderContext& renderContext, Camera& ca
 		m_launchParameters.cameraState.focusDistance = camera.getFocusDistance();
 	}
 
-	bool refillLightData{ camera.positionChanged() || scene.lightDataChangesMade };
+	bool refillLightData{ camera.positionChanged() || scene.lightChangesMade() };
 	if (refillLightData)
 		fillLightData(scene, camera.getPosition());
 
-	bool rebuildLightAS{ scene.lightDataChangesMade };
+	bool rebuildLightAS{ scene.lightChangesMade() };
 	if (rebuildLightAS)
-		buildLightAccelerationStructure(scene, scene.changedLightType);
+	{
+		if (scene.sphereLightsChanged)
+			buildLightAccelerationStructure(scene, LightType::SPHERE);
+		if (scene.diskLightsChanged)
+			buildLightAccelerationStructure(scene, LightType::DISK);
+	}
 
-	bool rebuildInstanceAS{ camera.positionChanged() || scene.lightDataChangesMade };
+	bool rebuildInstanceAS{ camera.positionChanged() || scene.lightChangesMade() };
 	if (rebuildInstanceAS)
 		buildInstanceAccelerationStructure(scene, camera.getPosition());
 
-	if (scene.materialDescriptorChangesMade)
+	for (auto& cd : scene.changedDescriptors)
 	{
 		if (scene.newMaterialDescriptorAdded)
 		{
-			addMaterial(scene.tempDescriptor);
+			addMaterial(cd.first);
 		}
 		else
 		{
-			SceneData::MaterialDescriptor& prevDesc{ scene.materialDescriptors[scene.changedMaterialDescriptorIndex] };
-			changeMaterial(scene.changedMaterialDescriptorIndex, scene.tempDescriptor, scene.materialDescriptors[scene.changedMaterialDescriptorIndex]);
-			prevDesc = scene.tempDescriptor;
+			SceneData::MaterialDescriptor& prevDesc{ scene.materialDescriptors[cd.second] };
+			changeMaterial(cd.second, cd.first, prevDesc);
+			prevDesc = cd.first;
 		}
 	}
 
@@ -1007,8 +1044,7 @@ void RenderingInterface::processChanges(RenderContext& renderContext, Camera& ca
 	m_currentSampleOffset = 0;
 	m_processedSampleCount = 0;
 
-	scene.materialDescriptorChangesMade = false;
-	scene.lightDataChangesMade = false;
+	scene.acceptChanges();
 	renderContext.acceptChanges();
 	camera.acceptChanges();
 	m_renderingIsFinished = false;
@@ -1043,6 +1079,7 @@ void RenderingInterface::updateSamplingState()
 void RenderingInterface::launch()
 {
 	OPTIX_CHECK(optixLaunch(m_pipeline, m_streams[1], m_lpBuffer, sizeof(LaunchParameters), &m_sbt, m_launchWidth, m_launchHeight, 1));
+	CUDA_CHECK(cudaEventRecord(m_execEvent, m_streams[1]));
 }
 void RenderingInterface::cleanup()
 {
@@ -1053,6 +1090,7 @@ void RenderingInterface::cleanup()
 	OPTIX_CHECK(optixProgramGroupDestroy(m_ptProgramGroups[DISK]));
 	OPTIX_CHECK(optixProgramGroupDestroy(m_ptProgramGroups[CALLABLE_CONDUCTOR_BXDF]));
 	OPTIX_CHECK(optixProgramGroupDestroy(m_ptProgramGroups[CALLABLE_DIELECTRIC_BXDF]));
+	OPTIX_CHECK(optixProgramGroupDestroy(m_ptProgramGroups[CALLABLE_DIELECTRIC_ABSORBING_BXDF]));
 	OPTIX_CHECK(optixModuleDestroy(m_ptModule));
 	OPTIX_CHECK(optixDeviceContextDestroy(m_context));
 
@@ -1075,6 +1113,7 @@ void RenderingInterface::cleanup()
 	CUDA_CHECK(cudaFree(reinterpret_cast<void*>(m_spherePrimBuffer)));
 	CUDA_CHECK(cudaFree(reinterpret_cast<void*>(m_iasBuffer)));
 	CUDA_CHECK(cudaFree(reinterpret_cast<void*>(m_sensorSpectralCurvesData)));
+	CUDA_CHECK(cudaFree(reinterpret_cast<void*>(m_spectralBasisData)));
 	CUDA_CHECK(cudaFree(reinterpret_cast<void*>(m_lpBuffer)));
 	CUDA_CHECK(cudaFree(reinterpret_cast<void*>(m_renderData)));
 	if (m_launchParameters.lights.orderedCount != CUdeviceptr{})
@@ -1102,7 +1141,7 @@ RenderingInterface::RenderingInterface(const Camera& camera, const RenderContext
 	prepareDataForRendering(camera, renderContext);
 	prepareDataForPreviewDrawing();
 
-	CUDA_CHECK(cudaEventCreateWithFlags(&m_exexEvent, cudaEventDisableTiming));
+	CUDA_CHECK(cudaEventCreateWithFlags(&m_execEvent, cudaEventDisableTiming));
 	int lowP;
 	int highP;
 	CUDA_CHECK(cudaDeviceGetStreamPriorityRange(&lowP, &highP));
@@ -1112,7 +1151,7 @@ RenderingInterface::RenderingInterface(const Camera& camera, const RenderContext
 
 void RenderingInterface::render(RenderContext& renderContext, Camera& camera, SceneData& scene, bool changesMade)
 {
-	if (cudaEventQuery(m_exexEvent) != cudaSuccess)
+	if (cudaEventQuery(m_execEvent) != cudaSuccess)
 		return;
 
 	static bool first{ true };
@@ -1121,7 +1160,7 @@ void RenderingInterface::render(RenderContext& renderContext, Camera& camera, Sc
 	else
 	{
 		resolveRender(renderContext.getColorspaceTransform());
-		CUDA_SYNC_CHECK();
+		CUDA_SYNC_STREAM(m_streams[0]);
 	}
 	if (changesMade)
 		processChanges(renderContext, camera, scene);

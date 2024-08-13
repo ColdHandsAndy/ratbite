@@ -37,6 +37,7 @@ private:
 	CUdeviceptr m_materialData{};
 	CUdeviceptr m_spectralData{};
 	CUdeviceptr m_sensorSpectralCurvesData{};
+	CUdeviceptr m_spectralBasisData{};
 	CUdeviceptr m_diskLights{};
 	CUdeviceptr m_sphereLights{};
 	CUdeviceptr m_lpBuffer{};
@@ -50,6 +51,7 @@ private:
 		SPHERE,
 		CALLABLE_CONDUCTOR_BXDF,
 		CALLABLE_DIELECTRIC_BXDF,
+		CALLABLE_DIELECTRIC_ABSORBING_BXDF,
 		ALL_GROUPS
 	};
 	static constexpr uint32_t m_ptProgramGroupCount{ ALL_GROUPS };
@@ -69,7 +71,7 @@ private:
 	cudaArray_t m_imageCudaArray{};
 	cudaSurfaceObject_t m_imageCudaSurface{};
 
-	cudaEvent_t m_exexEvent{};
+	cudaEvent_t m_execEvent{};
 	cudaStream_t m_streams[5]{};
 
 	LaunchParameters m_launchParameters{};
@@ -81,6 +83,7 @@ private:
 	int m_launchHeight{};
 	int m_sampleCount{};
 	int m_pathLength{};
+	float m_imageExposure{ 0.0f };
 
 	int m_currentSampleOffset{ 0 };
 	int m_currentSampleCount{ 1 };
