@@ -2,6 +2,7 @@
 
 #include <cuda/std/cstdint>
 #include <cuda.h>
+#include <texture_types.h>
 
 #include "../core/util.h"
 
@@ -17,11 +18,21 @@ struct MaterialData
 {
 	enum class AttributeTypeBitfield : uint32_t
 	{
-		NONE      = 0,
-		NORMAL    = 1 << 0,
-		FRAME     = 1 << 1,
-		COLOR     = 1 << 2,
-		TEX_COORD = 1 << 3,
+		NONE        = 0,
+		NORMAL      = 1 << 0,
+		FRAME       = 1 << 1,
+		COLOR       = 1 << 2,
+		TEX_COORD_1 = 1 << 3,
+		TEX_COORD_2 = 1 << 4,
+
+		DESC
+	};
+	enum class TextureTypeBitfield : uint32_t
+	{
+		NONE          = 0,
+		BASE_COLOR    = 1 << 0,
+		NORMAL        = 1 << 1,
+		PBR_MET_ROUGH = 1 << 2,
 
 		DESC
 	};
@@ -29,8 +40,14 @@ struct MaterialData
 	uint32_t bxdfIndexSBT{};
 
 	IndexType indexType{};
-	CUPTR(void) indices{};
+	CUPTR(uint8_t) indices{};
 	AttributeTypeBitfield attributes{};
+	uint8_t attributeStride{};
+	uint8_t normalOffset{};
+	uint8_t frameOffset{};
+	uint8_t colorOffset{};
+	uint8_t texCoord1Offset{};
+	uint8_t texCoord2Offset{};
 	CUPTR(uint8_t) attributeData{};
 
 	uint16_t indexOfRefractSpectrumDataIndex{};
@@ -39,18 +56,13 @@ struct MaterialData
 	
 	float mfRoughnessValue{};
 
-	// Any
-		// Frame -> Normal: texture
-	// BxDF (Trowbridge-Reitz)
-		// Roughness: value, texture
-	// BxDF (Trowbridge-Reitz - Absorbing Dielectric)
-		// Color: value, attribute, texture
-		// IOR: value
-
-	// Attributes (Normal and Frame are interchangeable)
-		// Color: 1 U32
-		// Normal: 2 U32 (Orthographic)
-		// Frame: 4 U32 (Quaternion 'w' sign stores handedness)
-		// TexCoords: 2 F
+	TextureTypeBitfield textures{};
+	bool bcTexCoordSetIndex{};
+	bool mrTexCoordSetIndex{};
+	bool nmTexCoordSetIndex{};
+	cudaTextureObject_t baseColorTexture{};
+	cudaTextureObject_t normalTexture{};
+	cudaTextureObject_t pbrMetalRoughnessTexture{};
 };
 ENABLE_ENUM_BITWISE_OPERATORS(MaterialData::AttributeTypeBitfield);
+ENABLE_ENUM_BITWISE_OPERATORS(MaterialData::TextureTypeBitfield);

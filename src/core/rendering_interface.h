@@ -6,11 +6,12 @@
 #include <glm/vec3.hpp>
 #include <glm/mat3x3.hpp>
 
-#include "scene.h"
-#include "window.h"
-#include "camera.h"
-#include "render_context.h"
-#include "launch_parameters.h"
+#include "../core/scene.h"
+#include "../core/window.h"
+#include "../core/camera.h"
+#include "../core/render_context.h"
+#include "../core/launch_parameters.h"
+#include "../core/texture.h"
 
 class RenderingInterface
 {
@@ -29,7 +30,9 @@ private:
 	std::vector<OptixTraversableHandle> m_gasHandles{};
 	std::vector<CUdeviceptr> m_gasBuffers{};
 	std::vector<CUdeviceptr> m_indexBuffers{};
-	std::vector<CUdeviceptr> m_normalBuffers{};
+	std::vector<CUdeviceptr> m_attributeBuffers{};
+	std::vector<CudaImage> m_images{};
+	std::vector<CudaTexture> m_textures{};
 
 	OptixTraversableHandle m_iasHandle{};
 	CUdeviceptr m_iasBuffer{};
@@ -117,7 +120,7 @@ private:
 	void createRenderResolveProgram();
 	void createAccelerationStructures(const SceneData& scene, const glm::vec3& cameraPosition);
 	void createModulesProgramGroupsPipeline();
-	void fillMaterials(const SceneData& scene);
+	void fillMaterials(SceneData& scene);
 	void createSBT(const SceneData& scene);
 	void fillSpectralCurvesData();
 	void fillLightData(const SceneData& scene, const glm::vec3& cameraPosition);
@@ -137,7 +140,7 @@ private:
 	void resolveRender(const glm::mat3& colorspaceTransform);
 	void launch();
 public:
-	RenderingInterface(const Camera& camera, const RenderContext& renderContext, const SceneData& scener);
+	RenderingInterface(const Camera& camera, const RenderContext& renderContext, SceneData& scener);
 	RenderingInterface() = delete;
 	RenderingInterface(RenderingInterface&&) = delete;
 	RenderingInterface(const RenderingInterface&) = delete;

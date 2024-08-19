@@ -23,16 +23,14 @@
 
 enum class PathStateBitfield : uint32_t
 {
-	NO_FLAGS = 0u,
-	PREVIOUS_HIT_SPECULAR = 1u,
-	CURRENT_HIT_SPECULAR = 2u,
-	MISS = 4u,
-	TRANSMISSION = 8u,
-	EMISSIVE_OBJECT_HIT = 16u,
-	REGULARIZED = 32u,
-	SECONDARY_SPECTRAL_SAMPLES_TERMINATED = 64u,
-	INSIDE_OBJECT = 128u,
-	PATH_TERMINATED = 256u,
+	NO_FLAGS              = 0,
+	PREVIOUS_HIT_SPECULAR = 1 << 0,
+	CURRENT_HIT_SPECULAR  = 1 << 1,
+	REGULARIZED           = 1 << 2,
+	INSIDE_OBJECT         = 1 << 3,
+	PATH_TERMINATED       = 1 << 4,
+	TRIANGULAR_GEOMETRY   = 1 << 5,
+	RIGHT_HANDED_FRAME    = 1 << 6,
 };
 ENABLE_ENUM_BITWISE_OPERATORS(PathStateBitfield);
 
@@ -50,6 +48,7 @@ struct DirectLightSampleData
 };
 
 CU_DEVICE CU_INLINE void unpackTraceData(const LaunchParameters& params, glm::vec3& hP, uint32_t& encHGN,
+		PathStateBitfield& stateFlags,
 		uint32_t& primitiveIndex, glm::vec2& barycentrics,
 		LightType& lightType, uint16_t& lightIndex,
 		MaterialData** materialDataPtr,
@@ -60,14 +59,15 @@ CU_DEVICE CU_INLINE void unpackTraceData(const LaunchParameters& params, glm::ve
 	encHGN = pl3;
 	uint32_t matIndex{ pl7 & 0xFFFF };
 	*materialDataPtr = params.materials + matIndex;
-	lightType = static_cast<LightType>(pl7 >> 16);
-	if (lightType != LightType::NONE)
-		lightIndex = pl4;
-	else
+	stateFlags |= static_cast<PathStateBitfield>((pl7 >> 16) & 0xFF);
+	lightType = static_cast<LightType>(pl7 >> 24);
+	if (static_cast<bool>(stateFlags & PathStateBitfield::TRIANGULAR_GEOMETRY))
 	{
 		primitiveIndex = pl4;
 		barycentrics = {__uint_as_float(pl5), __uint_as_float(pl6)};
 	}
+	else
+		lightIndex = pl4;
 	shadingFrame.x = __uint_as_float(pl8);
 	shadingFrame.y = __uint_as_float(pl9);
 	shadingFrame.z = __uint_as_float(pl10);
@@ -75,7 +75,7 @@ CU_DEVICE CU_INLINE void unpackTraceData(const LaunchParameters& params, glm::ve
 }
 CU_DEVICE CU_INLINE void updateStateFlags(PathStateBitfield& stateFlags)
 {
-	PathStateBitfield excludeFlags{ PathStateBitfield::EMISSIVE_OBJECT_HIT | PathStateBitfield::CURRENT_HIT_SPECULAR };
+	PathStateBitfield excludeFlags{ PathStateBitfield::CURRENT_HIT_SPECULAR | PathStateBitfield::TRIANGULAR_GEOMETRY | PathStateBitfield::RIGHT_HANDED_FRAME };
 	PathStateBitfield includeFlags{ static_cast<bool>(stateFlags & PathStateBitfield::CURRENT_HIT_SPECULAR) ?
 		PathStateBitfield::PREVIOUS_HIT_SPECULAR : PathStateBitfield::REGULARIZED };
 
@@ -88,27 +88,79 @@ CU_DEVICE CU_INLINE void resolveSample(SampledSpectrum& L, const SampledSpectrum
 		L[i] = pdf[i] != 0.0f ? L[i] / pdf[i] : 0.0f;
 	}
 }
-CU_DEVICE CU_INLINE void resolveAttributes(const MaterialData& material, const glm::vec2& barycentrics, uint32_t primitiveIndex, glm::quat& shadingFrame)
+CU_DEVICE CU_INLINE void resolveAttributes(const MaterialData& material, const PathStateBitfield& stateFlags, const glm::vec2& barycentrics, uint32_t primitiveIndex, glm::vec2& texCoord1, glm::vec2& texCoord2)
 {
-	// uint8_t* attribBuffer{ material.attributeData };
-	// glm::uvec3 indices;
-	// switch (material.indexType)
-	// {
-	// 	case IndexType::UINT_16:
-	// 		{
-	// 			uint16_t* idata{ reinterpret_cast<uint16_t*>(material.indices) + primitiveIndex * 3 };
-	// 			indices = glm::uvec3{idata[0], idata[1], idata[2]};
-	// 		}
-	// 		break;
-	// 	case IndexType::UINT_32:
-	// 		{
-	// 			uint32_t* idata{ reinterpret_cast<uint32_t*>(material.indices) + primitiveIndex * 3 };
-	// 			indices = glm::uvec3{idata[0], idata[1], idata[2]};
-	// 		}
-	// 		break;
-	// 	default:
-	// 		break;
-	// }
+	float baryWeights[3]{ 1.0f - barycentrics.x - barycentrics.y, barycentrics.x, barycentrics.y };
+	uint32_t indices[3];
+	switch (material.indexType)
+	{
+		case IndexType::UINT_16:
+			{
+				uint16_t* idata{ reinterpret_cast<uint16_t*>(material.indices) + primitiveIndex * 3 };
+				indices[0] = idata[0];
+				indices[1] = idata[1];
+				indices[2] = idata[2];
+			}
+			break;
+		case IndexType::UINT_32:
+			{
+				uint32_t* idata{ reinterpret_cast<uint32_t*>(material.indices) + primitiveIndex * 3 };
+				indices[0] = idata[0];
+				indices[1] = idata[1];
+				indices[2] = idata[2];
+			}
+			break;
+		default:
+			break;
+	}
+	uint8_t* attribBuffer{ material.attributeData };
+	uint32_t attributesStride{ material.attributeStride };
+
+	uint8_t* attr;
+
+	// attr = material.attributeData + material.colorOffset;
+	// if (static_cast<bool>(material.attributes & MaterialData::AttributeTypeBitfield::COLOR))
+	// 	;
+	if (static_cast<bool>(material.attributes & MaterialData::AttributeTypeBitfield::TEX_COORD_1))
+	{
+		attr = attribBuffer + material.texCoord1Offset;
+		texCoord1 =
+			baryWeights[0] * (*reinterpret_cast<glm::vec2*>(attr + indices[0] * attributesStride)) +
+			baryWeights[1] * (*reinterpret_cast<glm::vec2*>(attr + indices[1] * attributesStride)) +
+			baryWeights[2] * (*reinterpret_cast<glm::vec2*>(attr + indices[2] * attributesStride));
+	}
+	if (static_cast<bool>(material.attributes & MaterialData::AttributeTypeBitfield::TEX_COORD_2))
+	{
+		attr = attribBuffer + material.texCoord2Offset;
+		texCoord2 =
+			baryWeights[0] * (*reinterpret_cast<glm::vec2*>(attr + indices[0] * attributesStride)) +
+			baryWeights[1] * (*reinterpret_cast<glm::vec2*>(attr + indices[1] * attributesStride)) +
+			baryWeights[2] * (*reinterpret_cast<glm::vec2*>(attr + indices[2] * attributesStride));
+	}
+}
+CU_DEVICE CU_INLINE void resolveTextures(const MaterialData& material,
+		const PathStateBitfield& stateFlags,
+		const glm::vec2& texCoords1, const glm::vec2& texCoords2, const glm::vec3& geometryNormal, const glm::quat& shadingFrame,
+		LocalTransform& localTransform)
+{
+	if (static_cast<bool>(material.textures & MaterialData::TextureTypeBitfield::NORMAL))
+	{
+		float2 uv{ material.nmTexCoordSetIndex ? float2{texCoords2.x, texCoords2.y} : float2{texCoords1.x, texCoords1.y} };
+		float4 nm{ tex2D<float4>(material.normalTexture, uv.x, uv.y) };
+		glm::vec3 n{ glm::normalize(glm::vec3{nm.y * 2.0f - 1.0f, nm.x * 2.0f - 1.0f, nm.z * 2.0f - 1.0f}) };
+		glm::mat3 frame{ glm::mat3_cast(shadingFrame) };
+		n = frame * n;
+
+		glm::vec3 shadingBitangent{ glm::normalize(glm::cross(frame[1], n)) };
+		if (static_cast<bool>(stateFlags & PathStateBitfield::RIGHT_HANDED_FRAME)) shadingBitangent = -shadingBitangent;
+		glm::vec3 shadingTangent{ glm::normalize(glm::cross(n, shadingBitangent)) };
+		frame = glm::mat3{shadingBitangent, shadingTangent, n};
+		localTransform = LocalTransform{frame};
+	}
+	else
+	{
+		localTransform = LocalTransform{shadingFrame};
+	}
 }
 
 CU_DEVICE CU_INLINE SampledSpectrum emittedLightEval(const LaunchParameters& params, const SampledWavelengths& wavelengths, PathStateBitfield stateFlags,
@@ -280,42 +332,100 @@ extern "C" __global__ void __closesthit__triangle()
 
 
 	const MaterialData& material{ parameters.materials[materialIndex] };
-	uint8_t* attribBuffer{ material.attributeData };
-	glm::uvec3 indices;
+	uint32_t indices[3];
 	switch (material.indexType)
 	{
 		case IndexType::UINT_16:
 			{
 				uint16_t* idata{ reinterpret_cast<uint16_t*>(material.indices) + primitiveIndex * 3 };
-				indices = glm::uvec3{idata[0], idata[1], idata[2]};
+				indices[0] = idata[0];
+				indices[1] = idata[1];
+				indices[2] = idata[2];
 			}
 			break;
 		case IndexType::UINT_32:
 			{
 				uint32_t* idata{ reinterpret_cast<uint32_t*>(material.indices) + primitiveIndex * 3 };
-				indices = glm::uvec3{idata[0], idata[1], idata[2]};
+				indices[0] = idata[0];
+				indices[1] = idata[1];
+				indices[2] = idata[2];
 			}
 			break;
 		default:
 			break;
 	}
-	// Normals
-	constexpr uint32_t attributesStride{ sizeof(glm::vec4) };
-	constexpr uint32_t attribOffset{ 0 };
-	uint8_t* normalAtt{ attribBuffer + attribOffset };
-	glm::vec3 shadingNormal{
-		(1.0f - barycentrics.x - barycentrics.y) * (*reinterpret_cast<glm::vec3*>(normalAtt + attributesStride * indices[0]))
-		+
-		barycentrics.x * (*reinterpret_cast<glm::vec3*>(normalAtt + attributesStride * indices[1]))
-		+
-		barycentrics.y * (*reinterpret_cast<glm::vec3*>(normalAtt + attributesStride * indices[2])) };
 
-	float3 sNW{ optixTransformNormalFromObjectToWorldSpace(float3{shadingNormal.x, shadingNormal.y, shadingNormal.z}) };
-	shadingNormal = glm::normalize(glm::vec3{sNW.x, sNW.y, sNW.z});
+	uint8_t* attribBuffer{ material.attributeData };
+	uint32_t attributesStride{ material.attributeStride };
+	glm::mat3 frameMat;
+	bool rhFrame{ false };
+	if (static_cast<bool>(material.attributes & (MaterialData::AttributeTypeBitfield::NORMAL | MaterialData::AttributeTypeBitfield::FRAME)))
+	{
+		glm::vec3 shadingNormal{};
+		glm::vec3 shadingTangent{};
+		if (static_cast<bool>(material.attributes & MaterialData::AttributeTypeBitfield::FRAME))
+		{
+			uint32_t attribOffset{ material.frameOffset };
+			uint8_t* frameAtt{ attribBuffer + attribOffset };
 
-	glm::mat3 frameMat{ LocalTransform::genFromLocalMatrixFromNormal(shadingNormal) };
+			glm::quat frames[3]{
+				*reinterpret_cast<glm::quat*>(frameAtt + attributesStride * indices[0]),
+				*reinterpret_cast<glm::quat*>(frameAtt + attributesStride * indices[1]),
+				*reinterpret_cast<glm::quat*>(frameAtt + attributesStride * indices[2]), };
+			rhFrame = cuda::std::signbit(frames[0].w);
+			glm::mat3 frameMats[3]{
+				glm::mat3_cast(frames[0]),
+				glm::mat3_cast(frames[1]),
+				glm::mat3_cast(frames[2]), };
+			glm::vec3 normals[3]{ frameMats[0][1], frameMats[1][1], frameMats[2][1] };
+			glm::vec3 tangents[3]{ frameMats[0][0], frameMats[1][0], frameMats[2][0] };
+			shadingTangent =
+				(1.0f - barycentrics.x - barycentrics.y) * tangents[0]
+				+
+				barycentrics.x * tangents[1]
+				+
+				barycentrics.y * tangents[2];
+			shadingNormal = glm::vec3{
+				(1.0f - barycentrics.x - barycentrics.y) * normals[0]
+				+
+				barycentrics.x * normals[1]
+				+
+				barycentrics.y * normals[2] };
+		}
+		else
+		{
+			uint32_t attribOffset{ material.normalOffset };
+			uint8_t* normalAtt{ attribBuffer + attribOffset };
+			glm::vec3 normals[3]{
+				utility::octohedral::decode(*reinterpret_cast<glm::vec2*>(normalAtt + attributesStride * indices[0])),
+				utility::octohedral::decode(*reinterpret_cast<glm::vec2*>(normalAtt + attributesStride * indices[1])),
+				utility::octohedral::decode(*reinterpret_cast<glm::vec2*>(normalAtt + attributesStride * indices[2])), };
+			shadingNormal = glm::vec3{
+				(1.0f - barycentrics.x - barycentrics.y) * normals[0]
+				+
+				barycentrics.x * normals[1]
+				+
+				barycentrics.y * normals[2] };
+			float sign{ cuda::std::copysignf(1.0f, shadingNormal.z) };
+			float a{ -1.0f / (sign + shadingNormal.z) };
+			float b{ shadingNormal.x * shadingNormal.y * a };
+			shadingTangent = glm::vec3(1.0f + sign * (shadingNormal.x * shadingNormal.x) * a, sign * b, -sign * shadingNormal.x);
+		}
+		float3 sNW{ optixTransformNormalFromObjectToWorldSpace(float3{shadingNormal.x, shadingNormal.y, shadingNormal.z}) };
+		shadingNormal = glm::normalize(glm::vec3{sNW.x, sNW.y, sNW.z});
+		float3 tNW{ optixTransformNormalFromObjectToWorldSpace(float3{shadingTangent.x, shadingTangent.y, shadingTangent.z}) };
+		shadingTangent = glm::normalize(glm::vec3{tNW.x, tNW.y, tNW.z});
+
+		glm::vec3 shadingBitangent{ glm::normalize(glm::cross(shadingTangent, shadingNormal)) };
+		shadingTangent = glm::normalize(glm::cross(shadingNormal, shadingBitangent));
+
+		frameMat = glm::mat3{shadingBitangent, shadingTangent, shadingNormal};
+	}
+	else
+	{
+		frameMat = LocalTransform::genFromLocalMatrixFromNormal(glm::vec3{geometryNormal.x, geometryNormal.y, geometryNormal.z});
+	}
 	glm::quat frame{ glm::quat_cast(frameMat) };
-
 
 	optixSetPayload_0(__float_as_uint(hpos.x));
 	optixSetPayload_1(__float_as_uint(hpos.y));
@@ -324,7 +434,10 @@ extern "C" __global__ void __closesthit__triangle()
 	optixSetPayload_4(primitiveIndex);
 	optixSetPayload_5(__float_as_uint(barycentrics.x));
 	optixSetPayload_6(__float_as_uint(barycentrics.y));
-	optixSetPayload_7((static_cast<uint32_t>(LightType::NONE) << 16u) | (materialIndex & 0xFFFF));
+	optixSetPayload_7(
+			(static_cast<uint32_t>(LightType::NONE) << 24) |
+			(static_cast<uint32_t>((rhFrame ? PathStateBitfield::RIGHT_HANDED_FRAME : PathStateBitfield::NO_FLAGS) | PathStateBitfield::TRIANGULAR_GEOMETRY) << 16) |
+			(materialIndex & 0xFFFF));
 	optixSetPayload_8(__float_as_uint(frame.x));
 	optixSetPayload_9(__float_as_uint(frame.y));
 	optixSetPayload_10(__float_as_uint(frame.z));
@@ -365,7 +478,7 @@ extern "C" __global__ void __intersection__disk()
 		optixSetPayload_2(__float_as_uint(hP.z));
 		optixSetPayload_3(encGeometryNormal);
 		optixSetPayload_4(lightIndex);
-		optixSetPayload_7((static_cast<uint32_t>(LightType::DISK) << 16u) | (dl.materialIndex & 0xFFFF));
+		optixSetPayload_7((static_cast<uint32_t>(LightType::DISK) << 24) | (dl.materialIndex & 0xFFFF));
 		optixReportIntersection(t, 0);
 	}
 }
@@ -401,20 +514,18 @@ extern "C" __global__ void __closesthit__sphere()
 	optixSetPayload_2(__float_as_uint(hP.z));
 	optixSetPayload_3(encGeometryNormal);
 	optixSetPayload_4(lightIndex);
-	optixSetPayload_7((static_cast<uint32_t>(LightType::SPHERE) << 16u) | (sl.materialIndex & 0xFFFF));
+	optixSetPayload_7((static_cast<uint32_t>(LightType::SPHERE) << 24) | (sl.materialIndex & 0xFFFF));
 }
 
 extern "C" __global__ void __miss__miss()
 {
 	optixSetPayloadTypes(OPTIX_PAYLOAD_TYPE_ID_0); 
-	optixSetPayload_7(static_cast<uint32_t>(LightType::SKY) << 16);
+	optixSetPayload_7(static_cast<uint32_t>(LightType::SKY) << 24);
 }
 
-extern "C" __device__ void __direct_callable__DielectricBxDF(const MaterialData& materialData, const DirectLightSampleData& directLightData, const QRNG::State& qrngState, const glm::quat& shadingFrame,
+extern "C" __device__ void __direct_callable__DielectricBxDF(const MaterialData& materialData, const DirectLightSampleData& directLightData, const QRNG::State& qrngState, const LocalTransform& local,
 	SampledSpectrum& L, SampledWavelengths& wavelengths, SampledSpectrum& throughputWeight, float& bxdfPDF, glm::vec3& rD, PathStateBitfield& stateFlags, float& refractionScale, uint32_t depth)
 {
-	LocalTransform local{ shadingFrame } ;
-
 	glm::vec3 locWo{ -rD };
 	glm::vec3 locLi{ directLightData.lightDir };
 	local.toLocal(locWo, locLi);
@@ -637,11 +748,9 @@ extern "C" __device__ void __direct_callable__DielectricBxDF(const MaterialData&
 	local.fromLocal(locWi);
 	rD = glm::normalize(locWi);
 }
-extern "C" __device__ void __direct_callable__ConductorBxDF(const MaterialData& materialData, const DirectLightSampleData& directLightData, const QRNG::State& qrngState, const glm::quat& shadingFrame,
+extern "C" __device__ void __direct_callable__ConductorBxDF(const MaterialData& materialData, const DirectLightSampleData& directLightData, const QRNG::State& qrngState, const LocalTransform& local,
 	SampledSpectrum& L, SampledWavelengths& wavelengths, SampledSpectrum& throughputWeight, float& bxdfPDF, glm::vec3& rD, PathStateBitfield& stateFlags, float& refractionScale, uint32_t depth)
 {
-	LocalTransform local{ shadingFrame } ;
-
 	glm::vec3 locWo{ -rD };
 	glm::vec3 locLi{ directLightData.lightDir };
 	local.toLocal(locWo, locLi);
@@ -722,7 +831,7 @@ extern "C" __device__ void __direct_callable__ConductorBxDF(const MaterialData& 
 	local.fromLocal(locWi);
 	rD = glm::normalize(locWi);
 }
-extern "C" __device__ void __direct_callable__DielectricAbsorbingBxDF(const MaterialData& materialData, const DirectLightSampleData& directLightData, const QRNG::State& qrngState, const glm::quat& shadingFrame,
+extern "C" __device__ void __direct_callable__DielectricAbsorbingBxDF(const MaterialData& materialData, const DirectLightSampleData& directLightData, const QRNG::State& qrngState, const LocalTransform& local,
 		SampledSpectrum& L, SampledWavelengths& wavelengths, SampledSpectrum& throughputWeight, float& bxdfPDF, glm::vec3& rD, PathStateBitfield& stateFlags, float& refractionScale, uint32_t depth)
 {}
 
@@ -793,6 +902,7 @@ extern "C" __global__ void __raygen__main()
 			MaterialData* material;
 			glm::quat shadingFrame;
 			unpackTraceData(parameters, hP, encHitGNormal,
+					stateFlags,
 					primitiveIndex, barycentrics,
 					lightType, lightIndex, &material, shadingFrame,
 					pl0, pl1, pl2, pl3, pl4, pl5, pl6, pl7, pl8, pl9, pl10, pl11);
@@ -821,17 +931,25 @@ extern "C" __global__ void __raygen__main()
 
 
 			// Launch BxDF evaluation
-			resolveAttributes(*material, barycentrics, primitiveIndex, shadingFrame);
-			if (lightType != LightType::NONE)
-				shadingFrame = glm::quat_cast(LocalTransform::genFromLocalMatrixFromNormal(hNG));
+			LocalTransform localTransform;
+			if (static_cast<bool>(stateFlags & PathStateBitfield::TRIANGULAR_GEOMETRY))
+			{
+				glm::vec2 texC1;
+				glm::vec2 texC2;
+				resolveAttributes(*material, stateFlags, barycentrics, primitiveIndex, texC1, texC2);
+				resolveTextures(*material, stateFlags, texC1, texC2, hNG, shadingFrame, localTransform);
+			}
+			else
+				localTransform = LocalTransform{hNG};
+
 			optixDirectCall<void, 
 				const MaterialData&, const DirectLightSampleData&, const QRNG::State&,
-				const glm::quat&,
+				const LocalTransform&,
 				SampledSpectrum&, SampledWavelengths&, SampledSpectrum&,
 				float&, glm::vec3&, PathStateBitfield&, float&, uint32_t>
 				(material->bxdfIndexSBT,
 				 *material, directLightData, qrngState,
-				 shadingFrame,
+				 localTransform,
 				 L, wavelengths, throughputWeight,
 				 bxdfPDF, rD, stateFlags, refractionScale, depth);
 

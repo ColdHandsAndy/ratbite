@@ -16,6 +16,7 @@
 #include "../core/debug_macros.h"
 #include "../core/material.h"
 #include "../core/spectral.h"
+#include "../core/texture.h"
 #include "../core/light.h"
 #include "../core/util.h"
 
@@ -32,16 +33,56 @@ struct SceneData
 	{
 		std::string name{};
 		BxDF bxdf{};
+		// Spectral Material
 		SpectralData::SpectralDataType baseIOR{};
 		SpectralData::SpectralDataType baseAC{};
 		SpectralData::SpectralDataType baseEmission{};
 		float roughness{};
+		// Triplet Material
+		float ior{ 1.5f };
+		int baseColorTextureIndex{ -1 };
+		int bcTexCoordIndex{};
+		int metalRoughnessTextureIndex{ -1 };
+		int mrTexCoordIndex{};
+		int normalTextureIndex{ -1 };
+		int nmTexCoordIndex{};
 	};
 	std::vector<MaterialDescriptor> materialDescriptors{};
 
 	bool newMaterialDescriptorAdded{ false };
 	std::vector<std::pair<MaterialDescriptor, int>> changedDescriptors{};
 
+	struct ImageData
+	{
+		void* data{};
+		uint32_t width{};
+		uint32_t height{};
+		size_t byteSize{};
+	};
+	std::vector<ImageData> imageData{};
+	struct TextureData
+	{
+		int imageIndex{};
+		bool sRGB{};
+		TextureFilter filter{};
+		TextureAddress addressX{};
+		TextureAddress addressY{};
+	};
+	std::vector<TextureData> textureData{};
+	int addTextureData(void* data, uint32_t width, uint32_t height, size_t byteSize)
+	{
+		imageData.emplace_back(data, width, height, byteSize);
+		return imageData.size() - 1;
+	}
+	void clearImageData()
+	{
+		for(auto& tD : imageData)
+		{
+			free(tD.data);
+		}
+		imageData.clear();
+		textureData.clear();
+	}
 
 	// TODO: Need to free index buffer before deleting a submesh
 	struct Submesh
@@ -49,9 +90,11 @@ struct SceneData
 		IndexType indexType{};
 		uint32_t primitiveCount{};
 		void* indices{};
+		uint32_t vertexCount{};
 		std::vector<glm::vec4> vertices{};
 		std::vector<glm::vec4> normals{};
-		// std::vector<glm::quat> frame{};
+		std::vector<glm::vec4> tangents{};
+		std::vector<std::vector<glm::vec2>> texCoordsSets{};
 		int materialIndex{};
 		static Submesh createSubmesh(size_t indexCount, IndexType indexType, size_t vertexCount, int materialIndex)
 		{
@@ -78,10 +121,26 @@ struct SceneData
 			}
 			smesh.indices = malloc(indexCount * tSize);
 
+			smesh.vertexCount = vertexCount;
 			smesh.vertices.resize(vertexCount);
-			smesh.normals.resize(vertexCount);
 
 			return smesh;
+		}
+		void addNormals()
+		{
+			normals.resize(vertexCount);
+		}
+		void addTangents()
+		{
+			tangents.resize(vertexCount);
+		}
+		void addTexCoordsSet(int index)
+		{
+			if (index >= texCoordsSets.size())
+			{
+				texCoordsSets.resize(index + 1);
+			}
+			texCoordsSets[index] = std::vector<glm::vec2>(vertexCount);
 		}
 	};
 	struct Mesh
@@ -279,8 +338,8 @@ struct SceneData
 			.baseEmission = SpectralData::SpectralDataType::NONE,
 			.roughness = 1.0f} };
 		// loadModel("A:/Models/gltf/deccer cubes/deccer_cubes.gltf", &mat);
-		// loadModel("A:/Models/gltf/cornell_scene/cornell_scene.gltf", &mat);
-		loadModel("A:/Models/gltf/knob_box/scene.gltf", &mat);
+		loadModel("A:/Models/gltf/cornell_scene/cornell_scene.gltf", &mat);
+		// loadModel("A:/Models/gltf/cornell_knob/scene.gltf", &mat);
 
 
 		int matIndex{};

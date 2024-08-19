@@ -12,11 +12,16 @@
 
 class LocalTransform
 {
-private:
+public:
 	glm::mat3 m_TBN{};
 public:
+	CU_DEVICE CU_INLINE LocalTransform() = default;
 	CU_DEVICE CU_INLINE LocalTransform(const glm::vec3& normal)
 		: m_TBN{genToLocalMatrixFromNormal(normal)} {}
+	CU_DEVICE CU_INLINE LocalTransform(const glm::mat3& frameMat)
+	{
+		m_TBN = glm::transpose(frameMat);
+	}
 	CU_DEVICE CU_INLINE LocalTransform(const glm::quat& frame)
 	{
 		m_TBN = glm::transpose(glm::mat3_cast(frame));
@@ -55,34 +60,34 @@ public:
 	}
 
 	template<typename... Vecs> requires AllSameAs<glm::vec3, Vecs...>
-	CU_DEVICE CU_INLINE void toLocal(Vecs&... vecs)
+	CU_DEVICE CU_INLINE void toLocal(Vecs&... vecs) const
 	{
 		transform(vecs...);
 	}
 	template<typename... Vecs> requires AllSameAs<glm::vec3, Vecs...>
-	CU_DEVICE CU_INLINE void fromLocal(Vecs&... vecs)
+	CU_DEVICE CU_INLINE void fromLocal(Vecs&... vecs) const
 	{
 		glm::mat3 invTBN{ glm::transpose(m_TBN) };
 		transformInv(invTBN, vecs...);
 	}
 private:
 	template<typename... Vecs>
-	CU_DEVICE CU_INLINE void transform(glm::vec3& vec, Vecs&... vecs)
+	CU_DEVICE CU_INLINE void transform(glm::vec3& vec, Vecs&... vecs) const
 	{
 		vec = m_TBN * vec;
 		transform(vecs...);
 	}
-	CU_DEVICE CU_INLINE void transform(glm::vec3& vec)
+	CU_DEVICE CU_INLINE void transform(glm::vec3& vec) const
 	{
 		vec = m_TBN * vec;
 	}
 	template<typename... Vecs>
-	CU_DEVICE CU_INLINE void transformInv(const glm::mat3& invTBN, glm::vec3& vec, Vecs&... vecs)
+	CU_DEVICE CU_INLINE void transformInv(const glm::mat3& invTBN, glm::vec3& vec, Vecs&... vecs) const
 	{
 		vec = invTBN * vec;
 		transform(invTBN, vecs...);
 	}
-	CU_DEVICE CU_INLINE void transformInv(const glm::mat3& invTBN, glm::vec3& vec)
+	CU_DEVICE CU_INLINE void transformInv(const glm::mat3& invTBN, glm::vec3& vec) const
 	{
 		vec = invTBN * vec;
 	}

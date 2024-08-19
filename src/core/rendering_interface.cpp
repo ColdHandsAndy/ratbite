@@ -43,8 +43,22 @@ void RenderingInterface::createOptixContext()
 
 	OPTIX_CHECK(optixDeviceContextCreate(0, &options, &m_context));
 }
-void RenderingInterface::fillMaterials(const SceneData& scene)
+void RenderingInterface::fillMaterials(SceneData& scene)
 {
+	// Uploading images and textures
+	for(auto& imData : scene.imageData)
+	{
+		m_images.emplace_back(imData.width, imData.height, TextureType::R8G8B8A8_UNORM)
+			.fill(imData.data, 0, 0, imData.width, imData.height, cudaMemcpyHostToDevice);
+	}
+	for(auto& texData : scene.textureData)
+	{
+		m_textures.emplace_back(m_images[texData.imageIndex], texData.addressX, texData.addressY,
+				texData.filter, texData.sRGB);
+	}
+	scene.clearImageData();
+
+	// Uploading spectra and converting "MaterialDescriptor" to "MaterialData"
 	std::vector<MaterialData> matData(scene.materialDescriptors.size());
 	std::function addSpec{ [this](const SpectralData::SpectralDataType sdt, uint16_t& spectrumIndex)
 		{
@@ -65,12 +79,35 @@ void RenderingInterface::fillMaterials(const SceneData& scene)
 		} };
 	for (int i{ 0 }; i < scene.materialDescriptors.size(); ++i)
 	{
-		addSpec(scene.materialDescriptors[i].baseIOR, matData[i].indexOfRefractSpectrumDataIndex);
-		addSpec(scene.materialDescriptors[i].baseAC, matData[i].absorpCoefSpectrumDataIndex);
-		addSpec(scene.materialDescriptors[i].baseEmission, matData[i].emissionSpectrumDataIndex);
-		matData[i].bxdfIndexSBT = bxdfTypeToIndex(scene.materialDescriptors[i].bxdf);
-		matData[i].mfRoughnessValue = scene.materialDescriptors[i].roughness;
+		const SceneData::MaterialDescriptor desc{ scene.materialDescriptors[i] };
+		MaterialData& mat{ matData[i] };
+		mat.bxdfIndexSBT = bxdfTypeToIndex(desc.bxdf);
+		// Spectral Material
+		mat.mfRoughnessValue = desc.roughness;
+		addSpec(desc.baseIOR, mat.indexOfRefractSpectrumDataIndex);
+		addSpec(desc.baseAC, mat.absorpCoefSpectrumDataIndex);
+		addSpec(desc.baseEmission, mat.emissionSpectrumDataIndex);
+		// Triplet Material
+		if (desc.baseColorTextureIndex != -1)
+		{
+			mat.textures |= MaterialData::TextureTypeBitfield::BASE_COLOR;
+			mat.baseColorTexture = m_textures[desc.baseColorTextureIndex].getTextureObject();
+			mat.bcTexCoordSetIndex = desc.bcTexCoordIndex == 1; // Only two texture coordinate sets supported
+		}
+		if (desc.metalRoughnessTextureIndex != -1)
+		{
+			mat.textures |= MaterialData::TextureTypeBitfield::PBR_MET_ROUGH;
+			mat.pbrMetalRoughnessTexture = m_textures[desc.metalRoughnessTextureIndex].getTextureObject();
+			mat.mrTexCoordSetIndex = desc.mrTexCoordIndex == 1;
+		}
+		if (desc.normalTextureIndex != -1)
+		{
+			mat.textures |= MaterialData::TextureTypeBitfield::NORMAL;
+			mat.normalTexture = m_textures[desc.normalTextureIndex].getTextureObject();
+			mat.nmTexCoordSetIndex = desc.nmTexCoordIndex == 1;
+		}
 	}
+	// Uploading vertex attributes
 	for(auto& model : scene.models)
 		for(auto& mesh : model.meshes)
 			for(auto& submesh : mesh.submeshes)
@@ -88,17 +125,108 @@ void RenderingInterface::fillMaterials(const SceneData& scene)
 				mat.indices = iBuf;
 
 
-				mat.attributes |= MaterialData::AttributeTypeBitfield::NORMAL;
+				uint8_t attributeOffset{ 0 };
+				CUdeviceptr& aBuf{ m_attributeBuffers.emplace_back() };
+				void* packedAttribBuf{};
+				bool normalAttr{ false };
+				bool frameAttr{ false };
+				bool colorAttr{ false };
+				bool texCoordsAttr1{ false };
+				bool texCoordsAttr2{ false };
+				if (submesh.normals.size() != 0 && submesh.tangents.size() != 0)
+				{
+					frameAttr = true;
+					mat.attributes |= MaterialData::AttributeTypeBitfield::FRAME;
+					mat.frameOffset = attributeOffset;
+					attributeOffset += sizeof(float) * 4;
+				}
+				else if (submesh.normals.size() != 0)
+				{
+					normalAttr = true;
+					mat.attributes |= MaterialData::AttributeTypeBitfield::NORMAL;
+					mat.normalOffset = attributeOffset;
+					attributeOffset += sizeof(float) * 2;
+				}
+				if (submesh.texCoordsSets.size() >= 1)
+				{
+					texCoordsAttr1 = true;
+					mat.attributes |= MaterialData::AttributeTypeBitfield::TEX_COORD_1;
+					mat.texCoord1Offset = attributeOffset;
+					attributeOffset += sizeof(float) * 2;
+				}
+				if (submesh.texCoordsSets.size() >= 2)
+				{
+					texCoordsAttr2 = true;
+					mat.attributes |= MaterialData::AttributeTypeBitfield::TEX_COORD_2;
+					mat.texCoord2Offset = attributeOffset;
+					attributeOffset += sizeof(float) * 2;
+				}
+				mat.attributeStride = attributeOffset;
+				packedAttribBuf = malloc(mat.attributeStride * submesh.vertexCount);
+				uint8_t* attr{ reinterpret_cast<uint8_t*>(packedAttribBuf) };
+				auto encodeNormal{ [](const glm::vec3& vec) {
+					const float& x{ vec.x };
+					const float& y{ vec.y };
+					const float& z{ vec.z };
 
-				CUdeviceptr& aBuf{ m_normalBuffers.emplace_back() };
-				size_t aBufferByteSize{ CONTAINER_ELEMENT_SIZE(submesh.normals) * submesh.normals.size() };
+					glm::vec2 p{ glm::vec2{x, z} * (1.0f / (std::fabs(x) + std::fabs(y) + std::fabs(z))) };
+					glm::vec2 res{
+						y <= 0.0f
+							?
+							(glm::vec2{1.0f} - glm::vec2{std::fabs(p.y), std::fabs(p.x)}) * glm::vec2{(p.x >= 0.0f) ? +1.0f : -1.0f, (p.y >= 0.0f) ? +1.0f : -1.0f}
+						:
+							p
+					};
+					return res;
+				} };
+				for (uint32_t i{ 0 }; i < submesh.vertexCount; ++i)
+				{
+					if (normalAttr)
+						*reinterpret_cast<glm::vec2*>(attr + mat.normalOffset) = encodeNormal(submesh.normals[i]);
+					if (frameAttr)
+					{
+						glm::quat frame{ glm::quat_cast( glm::mat3{
+								submesh.tangents[i],
+								submesh.normals[i],
+								glm::cross(glm::vec3{submesh.tangents[i]}, glm::vec3{submesh.normals[i]})}) };
+						if (frame.w == 0.0f)
+						{
+							union
+							{
+								float f;
+								uint32_t u;
+							} signAdjustedFloat{};
+							signAdjustedFloat.f = frame.w;
+							if (submesh.tangents[i].w > 0.0f)
+								signAdjustedFloat.u = signAdjustedFloat.u & 0x7FFFFFFF;
+							else
+								signAdjustedFloat.u = signAdjustedFloat.u | 0x80000000;
+							frame.w = signAdjustedFloat.f;
+						}
+						else if (frame.w * submesh.tangents[i].w < 0.0f)
+							frame = -frame;
+						*reinterpret_cast<glm::quat*>(attr + mat.frameOffset) = frame;
+					}
+					// if (colorAttr)
+					// 	*reinterpret_cast<*>() = ;
+					if (texCoordsAttr1)
+						*reinterpret_cast<glm::vec2*>(attr + mat.texCoord1Offset) = submesh.texCoordsSets[0][i];
+					if (texCoordsAttr2)
+						*reinterpret_cast<glm::vec2*>(attr + mat.texCoord2Offset) = submesh.texCoordsSets[1][i];
+
+					attr = attr + mat.attributeStride;
+				}
+
+				size_t aBufferByteSize{ mat.attributeStride * submesh.vertexCount };
 				CUDA_CHECK(cudaMalloc(reinterpret_cast<void**>(&(aBuf)),
 							aBufferByteSize));
-				CUDA_CHECK(cudaMemcpy(reinterpret_cast<void*>(aBuf), submesh.normals.data(),
+				CUDA_CHECK(cudaMemcpy(reinterpret_cast<void*>(aBuf), packedAttribBuf,
 							aBufferByteSize,
 							cudaMemcpyHostToDevice));
 				mat.attributeData = aBuf;
+				free(packedAttribBuf);
 			}
+
 	CUDA_CHECK(cudaMalloc(reinterpret_cast<void**>(&m_materialData), sizeof(MaterialData) * matData.size()));
 	CUDA_CHECK(cudaMemcpy(reinterpret_cast<void*>(m_materialData), matData.data(), sizeof(MaterialData) * matData.size(), cudaMemcpyHostToDevice));
 	DenselySampledSpectrum* spectra{ new DenselySampledSpectrum[m_loadedSpectra.size()]};
@@ -1080,6 +1208,8 @@ void RenderingInterface::launch()
 {
 	OPTIX_CHECK(optixLaunch(m_pipeline, m_streams[1], m_lpBuffer, sizeof(LaunchParameters), &m_sbt, m_launchWidth, m_launchHeight, 1));
 	CUDA_CHECK(cudaEventRecord(m_execEvent, m_streams[1]));
+	if (m_mode == RenderContext::Mode::RENDER)
+		CUDA_SYNC_DEVICE();
 }
 void RenderingInterface::cleanup()
 {
@@ -1107,7 +1237,7 @@ void RenderingInterface::cleanup()
 		CUDA_CHECK(cudaFree(reinterpret_cast<void*>(buf)));
 	for(auto buf : m_indexBuffers)
 		CUDA_CHECK(cudaFree(reinterpret_cast<void*>(buf)));
-	for(auto buf : m_normalBuffers)
+	for(auto buf : m_attributeBuffers)
 		CUDA_CHECK(cudaFree(reinterpret_cast<void*>(buf)));
 	CUDA_CHECK(cudaFree(reinterpret_cast<void*>(m_customPrimBuffer)));
 	CUDA_CHECK(cudaFree(reinterpret_cast<void*>(m_spherePrimBuffer)));
@@ -1128,7 +1258,7 @@ void RenderingInterface::cleanup()
 		CUDA_CHECK(cudaFree(reinterpret_cast<void*>(m_sphereLights)));
 }
 
-RenderingInterface::RenderingInterface(const Camera& camera, const RenderContext& renderContext, const SceneData& scene)
+RenderingInterface::RenderingInterface(const Camera& camera, const RenderContext& renderContext, SceneData& scene)
 {
 	createOptixContext();
 	createRenderResolveProgram();

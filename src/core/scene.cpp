@@ -1,16 +1,18 @@
 #include "../core/scene.h"
 
+#include <fstream>
 #include <filesystem>
 
 #define CGLTF_IMPLEMENTATION
 #include <cgltf/cgltf.h>
 #undef CGLTF_IMPLEMENTATION
+#include <stb/stb_image.h>
 
 #include "../core/debug_macros.h"
 
 namespace
 {
-	void processGLTFNode(const cgltf_node* node, std::vector<SceneData::Instance>& instances, cgltf_mesh* firstMesh, size_t meshCount, const glm::mat4& transform)
+	void processGLTFNode(const cgltf_data* modelData, const cgltf_node* node, std::vector<SceneData::Instance>& instances, cgltf_mesh* firstMesh, size_t meshCount, const glm::mat4& transform)
 	{
 		cgltf_float localMat[16]{};
 		cgltf_node_transform_local(node, localMat);
@@ -22,8 +24,7 @@ namespace
 
 		if (node->mesh != nullptr)
 		{
-			size_t index{ static_cast<size_t>(node->mesh - firstMesh) };
-			R_ASSERT_LOG(index < meshCount, "Invalid mesh index from a pointer.");
+			size_t index{ cgltf_mesh_index(modelData, node->mesh) };
 			instances.emplace_back(static_cast<int>(index),
 					glm::mat3x4{
 					glm::vec4{world[0][0], world[1][0], world[2][0], world[3][0]},
@@ -34,16 +35,20 @@ namespace
 		for (int i{ 0 }; i < node->children_count; ++i)
 		{
 			const cgltf_node* child{ node->children[i] };
-			processGLTFNode(child, instances, firstMesh, meshCount, world);
+			processGLTFNode(modelData, child, instances, firstMesh, meshCount, world);
 		}
 	}
-	void processGLTFScene(const cgltf_scene* scene, std::vector<SceneData::Instance>& instances, cgltf_mesh* firstMesh, size_t meshCount, const glm::mat4& transform)
+	void processGLTFScene(const cgltf_data* modelData, const cgltf_scene* scene, std::vector<SceneData::Instance>& instances, cgltf_mesh* firstMesh, size_t meshCount, const glm::mat4& transform)
 	{
 		for (int i{ 0 }; i < scene->nodes_count; ++i)
-			processGLTFNode(scene->nodes[i], instances, firstMesh, meshCount, transform);
+			processGLTFNode(modelData, scene->nodes[i], instances, firstMesh, meshCount, transform);
 	}
 
-	SceneData::Model loadGLTF(const std::filesystem::path& path, std::vector<SceneData::MaterialDescriptor>& materialDescriptors, const SceneData::MaterialDescriptor* assignedDescriptor)
+	SceneData::Model loadGLTF(const std::filesystem::path& path,
+			std::vector<SceneData::ImageData>& imageData,
+			std::vector<SceneData::TextureData>& textureData,
+			std::vector<SceneData::MaterialDescriptor>& materialDescriptors,
+			const SceneData::MaterialDescriptor* assignedDescriptor)
 	{
 		SceneData::Model model{};
 		model.path = path;
@@ -56,12 +61,95 @@ namespace
 
 		result = cgltf_parse_file(&options, path.string().c_str(), &data);
 		R_ASSERT_LOG(result == cgltf_result_success, "Parsing GLTF file failed");
+		R_ASSERT_LOG(data->meshes_count != 0, "Model doesn't contain any meshes");
 
 		cgltf_load_buffers(&options, data, path.string().c_str());
 
-		R_ASSERT_LOG(data->meshes_count != 0, "Model doesn't contain any meshes");
-		firstMesh = data->meshes;
+		auto loadImage( [&](const char* uri, const cgltf_buffer_view* bufferView) -> int{
+				int index{};
+				if (uri)
+				{
+					if (strncmp(uri, "data:", 5) == 0)
+					{
+						// URI is "data:"
+						// const char* comma{ strchr(uri, ',') };
+						// if (comma && comma - uri >= 7 && strncmp(comma - 7, ";base64", 7) == 0)
+						// 	cgltf_load_buffer_base64(&options, /*Image byte size*/, comma + 1, &data);
+						R_ERR_LOG("GLTF image data is base64 encoded. Not supported yet");
+					}
+					else
+					{
+						// URI is path
+						char* pathToTex{ new char[path.string().length() + strlen(uri) + 1] };
+						cgltf_combine_paths(pathToTex, path.string().c_str(), uri);
+						cgltf_decode_uri(pathToTex + strlen(pathToTex) - strlen(uri));
 
+						int x{};
+						int y{};
+						int c{};
+						constexpr int texChannelCount{ 4 };
+						unsigned char* image{ stbi_load(pathToTex, &x, &y, &c, texChannelCount) };
+
+						size_t byteSize{ static_cast<size_t>(x * y * texChannelCount) };
+						void* data{ malloc(byteSize) };
+						memcpy(data, image, byteSize);
+						index = imageData.size();
+						imageData.emplace_back(data, x, y, byteSize);
+
+						stbi_image_free(image);
+
+						delete[] pathToTex;
+					}
+				}
+				else
+				{
+					int x{};
+					int y{};
+					int c{};
+					constexpr int texChannelCount{ 4 };
+					unsigned char* image{ stbi_load_from_memory(reinterpret_cast<unsigned char*>(bufferView->buffer->data) + bufferView->offset, bufferView->size, &x, &y, &c, texChannelCount) };
+
+					size_t byteSize{ static_cast<size_t>(x * y * texChannelCount) };
+					void* data{ malloc(byteSize) };
+					memcpy(data, image, byteSize);
+					index = imageData.size();
+					imageData.emplace_back(data, x, y, byteSize);
+
+					stbi_image_free(image);
+				}
+				return index;
+			} );
+		for (int i{ 0 }; i < data->images_count; ++i)
+			loadImage(data->images[i].uri, data->images[i].buffer_view);
+		for (int i{ 0 }; i < data->textures_count; ++i)
+		{
+			const cgltf_texture* tex{ data->textures + i };
+			TextureFilter filter{ TextureFilter::LINEAR };
+
+			TextureAddress addressX{};
+			if (tex->sampler->wrap_s == 10497)
+				addressX = TextureAddress::WRAP;
+			else if (tex->sampler->wrap_s == 33071)
+				addressX = TextureAddress::CLAMP;
+			else if (tex->sampler->wrap_s == 33648)
+				addressX = TextureAddress::MIRROR;
+			else
+				addressX = TextureAddress::WRAP;
+
+			TextureAddress addressY{};
+			if (tex->sampler->wrap_t == 10497)
+				addressY = TextureAddress::WRAP;
+			else if (tex->sampler->wrap_t == 33071)
+				addressY = TextureAddress::CLAMP;
+			else if (tex->sampler->wrap_t == 33648)
+				addressY = TextureAddress::MIRROR;
+			else
+				addressY = TextureAddress::WRAP;
+
+			textureData.emplace_back(static_cast<int>(cgltf_image_index(data, tex->image)), false, filter, addressX, addressY);
+		}
+
+		firstMesh = data->meshes;
 		size_t meshCount{ data->meshes_count };
 		for (int i{ 0 }; i < meshCount; ++i)
 		{
@@ -81,12 +169,32 @@ namespace
 
 				int matIndex{};
 				if (assignedDescriptor == nullptr)
-					R_ERR_LOG("Materials from GLTF are not supported yet.")
+				{
+					R_ERR_LOG("Assigned Descriptor is missing");
+				}
 				else
 				{
+					const cgltf_material* material{ primitive.material };
 					matIndex = materialDescriptors.size();
 					SceneData::MaterialDescriptor descriptor{ *assignedDescriptor };
 					descriptor.name = descriptor.name + ' ' + '(' + mesh.name + ' ' + std::to_string(j) + ')';
+					if (material != nullptr)
+					{
+						descriptor.ior = material->has_ior ? material->ior.ior : 1.5f;
+						if (material->has_pbr_metallic_roughness)
+						{
+							textureData[cgltf_texture_index(data, material->pbr_metallic_roughness.base_color_texture.texture)].sRGB = true;
+							descriptor.baseColorTextureIndex = cgltf_texture_index(data, material->pbr_metallic_roughness.base_color_texture.texture);
+							descriptor.bcTexCoordIndex = material->pbr_metallic_roughness.base_color_texture.texcoord;
+							descriptor.metalRoughnessTextureIndex = cgltf_texture_index(data, material->pbr_metallic_roughness.metallic_roughness_texture.texture);
+							descriptor.mrTexCoordIndex = material->pbr_metallic_roughness.metallic_roughness_texture.texcoord;
+						}
+						if (material->normal_texture.texture != nullptr)
+						{
+							descriptor.normalTextureIndex = cgltf_texture_index(data, material->normal_texture.texture);
+							descriptor.nmTexCoordIndex = material->normal_texture.texcoord;
+						}
+					}
 					materialDescriptors.push_back(descriptor);
 				}
 
@@ -154,11 +262,52 @@ namespace
 							break;
 						case cgltf_attribute_type_normal:
 							{
+								sceneSubmesh.addNormals();
 								for (size_t i{ 0 }; i < attribute.data->count; ++i)
 								{
 									uint8_t* bufferData{ reinterpret_cast<uint8_t*>(attribute.data->buffer_view->buffer->data) };
 									float* vec{ reinterpret_cast<float*>(bufferData + offset + i * stride) };
 									sceneSubmesh.normals[i] = glm::vec4{-vec[0], vec[1], vec[2], 0.0f};
+								}
+							}
+							break;
+						case cgltf_attribute_type_tangent:
+							{
+								sceneSubmesh.addTangents();
+								for (size_t i{ 0 }; i < attribute.data->count; ++i)
+								{
+									uint8_t* bufferData{ reinterpret_cast<uint8_t*>(attribute.data->buffer_view->buffer->data) };
+									float* vec{ reinterpret_cast<float*>(bufferData + offset + i * stride) };
+									sceneSubmesh.tangents[i] = glm::vec4{-vec[0], vec[1], vec[2], vec[3]};
+								}
+							}
+							break;
+						case cgltf_attribute_type_texcoord:
+							{
+								sceneSubmesh.addTexCoordsSet(attribute.index);
+								for (size_t i{ 0 }; i < attribute.data->count; ++i)
+								{
+									uint8_t* bufferData{ reinterpret_cast<uint8_t*>(attribute.data->buffer_view->buffer->data) };
+									glm::vec2 vec{};
+									switch (attribute.data->component_type)
+									{
+										case cgltf_component_type_r_8u:
+											bufferData = bufferData + offset + i * stride;
+											vec = glm::vec2{reinterpret_cast<uint8_t*>(bufferData)[0] * (1.0f / 255.0f), reinterpret_cast<uint8_t*>(bufferData)[1] * (1.0f / 255.0f)};
+											break;
+										case cgltf_component_type_r_16u:
+											bufferData = bufferData + offset + i * stride;
+											vec = glm::vec2{reinterpret_cast<uint16_t*>(bufferData)[0] * (1.0f / 65535.0f), reinterpret_cast<uint16_t*>(bufferData)[1] * (1.0f / 65535.0f)};
+											break;
+										case cgltf_component_type_r_32f:
+											bufferData = bufferData + offset + i * stride;
+											vec = glm::vec2{reinterpret_cast<float*>(bufferData)[0], reinterpret_cast<float*>(bufferData)[1]};
+											break;
+										default:
+											R_ERR_LOG("Unsupported component type");
+											break;
+									}
+									sceneSubmesh.texCoordsSets[attribute.index][i] = vec;
 								}
 							}
 							break;
@@ -176,7 +325,7 @@ namespace
 		transform[2] *= 150.0f;
 		transform[3] += glm::vec4{-200.0f, 0.0f, 0.0f, 0.0f};
 
-		processGLTFScene(data->scene, model.instances, firstMesh, meshCount, transform);
+		processGLTFScene(data, data->scene, model.instances, firstMesh, meshCount, transform);
 
 		cgltf_free(data);
 
@@ -189,7 +338,7 @@ void SceneData::loadModel(const std::filesystem::path& path, const MaterialDescr
 	const std::string ext{ path.extension().string() };
 
 	if (ext == ".gltf" || ext == ".glb")
-		models.push_back(loadGLTF(path, materialDescriptors, assignedDescriptor));
+		models.push_back(loadGLTF(path, imageData, textureData, materialDescriptors, assignedDescriptor));
 	else
 		R_LOG("Unknown model extension");
 }
