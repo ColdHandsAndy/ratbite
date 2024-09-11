@@ -48,6 +48,7 @@ namespace
 			std::vector<SceneData::ImageData>& imageData,
 			std::vector<SceneData::TextureData>& textureData,
 			std::vector<SceneData::MaterialDescriptor>& materialDescriptors,
+			const glm::mat4& transform,
 			const SceneData::MaterialDescriptor* assignedDescriptor)
 	{
 		SceneData::Model model{};
@@ -87,14 +88,15 @@ namespace
 						int x{};
 						int y{};
 						int c{};
-						constexpr int texChannelCount{ 4 };
-						unsigned char* image{ stbi_load(pathToTex, &x, &y, &c, texChannelCount) };
+						stbi_info(pathToTex, &x, &y, &c);
+						int cNum{ c == 1 ? c : 4 };
+						unsigned char* image{ stbi_load(pathToTex, &x, &y, &x, cNum) };
 
-						size_t byteSize{ static_cast<size_t>(x * y * texChannelCount) };
+						size_t byteSize{ static_cast<size_t>(x * y * cNum) };
 						void* data{ malloc(byteSize) };
 						memcpy(data, image, byteSize);
 						index = imageData.size();
-						imageData.emplace_back(data, x, y, byteSize);
+						imageData.emplace_back(data, x, y, cNum, byteSize);
 
 						stbi_image_free(image);
 
@@ -106,14 +108,15 @@ namespace
 					int x{};
 					int y{};
 					int c{};
-					constexpr int texChannelCount{ 4 };
-					unsigned char* image{ stbi_load_from_memory(reinterpret_cast<unsigned char*>(bufferView->buffer->data) + bufferView->offset, bufferView->size, &x, &y, &c, texChannelCount) };
+					stbi_info_from_memory(reinterpret_cast<unsigned char*>(bufferView->buffer->data) + bufferView->offset, bufferView->size, &x, &y, &c);
+					int cNum{ c == 1 ? c : 4 };
+					unsigned char* image{ stbi_load_from_memory(reinterpret_cast<unsigned char*>(bufferView->buffer->data) + bufferView->offset, bufferView->size, &x, &y, &c, cNum) };
 
-					size_t byteSize{ static_cast<size_t>(x * y * texChannelCount) };
+					size_t byteSize{ static_cast<size_t>(x * y * cNum) };
 					void* data{ malloc(byteSize) };
 					memcpy(data, image, byteSize);
 					index = imageData.size();
-					imageData.emplace_back(data, x, y, byteSize);
+					imageData.emplace_back(data, x, y, cNum, byteSize);
 
 					stbi_image_free(image);
 				}
@@ -125,6 +128,10 @@ namespace
 		{
 			const cgltf_texture* tex{ data->textures + i };
 			TextureFilter filter{ TextureFilter::LINEAR };
+			if (tex->sampler->mag_filter == 9728)
+				filter = TextureFilter::NEAREST;
+			else if (tex->sampler->mag_filter == 9729)
+				filter = TextureFilter::LINEAR;
 
 			TextureAddress addressX{};
 			if (tex->sampler->wrap_s == 10497)
@@ -170,7 +177,76 @@ namespace
 				int matIndex{};
 				if (assignedDescriptor == nullptr)
 				{
-					R_ERR_LOG("Assigned Descriptor is missing");
+					const cgltf_material* material{ primitive.material };
+					matIndex = materialDescriptors.size();
+					SceneData::MaterialDescriptor descriptor{};
+					descriptor.bxdf = SceneData::BxDF::COMPLEX_SURFACE;
+					descriptor.name = descriptor.name + ' ' + '(' + mesh.name + ' ' + std::to_string(j) + ')';
+					if (material != nullptr)
+					{
+						descriptor.doubleSided = material->double_sided;
+						descriptor.ior = material->has_ior ? material->ior.ior : 1.5f;
+						if (material->has_pbr_metallic_roughness)
+						{
+							if (material->pbr_metallic_roughness.base_color_texture.texture != nullptr)
+							{
+								textureData[cgltf_texture_index(data, material->pbr_metallic_roughness.base_color_texture.texture)].sRGB = true;
+								descriptor.baseColorTextureIndex = cgltf_texture_index(data, material->pbr_metallic_roughness.base_color_texture.texture);
+								descriptor.bcTexCoordIndex = material->pbr_metallic_roughness.base_color_texture.texcoord;
+								if (material->alpha_mode != cgltf_alpha_mode_opaque)
+								{
+									descriptor.alphaCutoffPresent = true;
+									descriptor.alphaCutoff = material->alpha_cutoff;
+								}
+							}
+							if (material->pbr_metallic_roughness.base_color_factor[0] != 1.0f ||
+									material->pbr_metallic_roughness.base_color_factor[1] != 1.0f ||
+									material->pbr_metallic_roughness.base_color_factor[2] != 1.0f ||
+									material->pbr_metallic_roughness.base_color_factor[3] != 1.0f)
+							{
+								descriptor.bcFactorPresent = true;
+								descriptor.baseColorFactor[0] = material->pbr_metallic_roughness.base_color_factor[0];
+								descriptor.baseColorFactor[1] = material->pbr_metallic_roughness.base_color_factor[1];
+								descriptor.baseColorFactor[2] = material->pbr_metallic_roughness.base_color_factor[2];
+								descriptor.baseColorFactor[3] = material->pbr_metallic_roughness.base_color_factor[3];
+							}
+							if (material->pbr_metallic_roughness.metallic_factor != 1.0f)
+							{
+								descriptor.metFactorPresent = true;
+								descriptor.metalnessFactor = material->pbr_metallic_roughness.metallic_factor;
+							}
+							if (material->pbr_metallic_roughness.roughness_factor != 1.0f)
+							{
+								descriptor.roughFactorPresent = true;
+								descriptor.roughnessFactor = material->pbr_metallic_roughness.roughness_factor;
+							}
+
+							if (material->pbr_metallic_roughness.metallic_roughness_texture.texture != nullptr)
+							{
+								descriptor.metalRoughnessTextureIndex = cgltf_texture_index(data, material->pbr_metallic_roughness.metallic_roughness_texture.texture);
+								descriptor.mrTexCoordIndex = material->pbr_metallic_roughness.metallic_roughness_texture.texcoord;
+							}
+						}
+						if (material->has_transmission)
+						{
+							if (material->transmission.transmission_texture.texture != nullptr)
+							{
+								descriptor.transmissionTextureIndex = cgltf_texture_index(data, material->transmission.transmission_texture.texture);
+								descriptor.trTexCoordIndex = material->transmission.transmission_texture.texcoord;
+							}
+							if (material->transmission.transmission_factor != 0.0f)
+							{
+								descriptor.transmitFactorPresent = true;
+								descriptor.transmitFactor = material->transmission.transmission_factor;
+							}
+						}
+						if (material->normal_texture.texture != nullptr)
+						{
+							descriptor.normalTextureIndex = cgltf_texture_index(data, material->normal_texture.texture);
+							descriptor.nmTexCoordIndex = material->normal_texture.texcoord;
+						}
+					}
+					materialDescriptors.push_back(descriptor);
 				}
 				else
 				{
@@ -183,11 +259,17 @@ namespace
 						descriptor.ior = material->has_ior ? material->ior.ior : 1.5f;
 						if (material->has_pbr_metallic_roughness)
 						{
-							textureData[cgltf_texture_index(data, material->pbr_metallic_roughness.base_color_texture.texture)].sRGB = true;
-							descriptor.baseColorTextureIndex = cgltf_texture_index(data, material->pbr_metallic_roughness.base_color_texture.texture);
-							descriptor.bcTexCoordIndex = material->pbr_metallic_roughness.base_color_texture.texcoord;
-							descriptor.metalRoughnessTextureIndex = cgltf_texture_index(data, material->pbr_metallic_roughness.metallic_roughness_texture.texture);
-							descriptor.mrTexCoordIndex = material->pbr_metallic_roughness.metallic_roughness_texture.texcoord;
+							if (material->pbr_metallic_roughness.base_color_texture.texture != nullptr)
+							{
+								textureData[cgltf_texture_index(data, material->pbr_metallic_roughness.base_color_texture.texture)].sRGB = true;
+								descriptor.baseColorTextureIndex = cgltf_texture_index(data, material->pbr_metallic_roughness.base_color_texture.texture);
+								descriptor.bcTexCoordIndex = material->pbr_metallic_roughness.base_color_texture.texcoord;
+							}
+							if (material->pbr_metallic_roughness.metallic_roughness_texture.texture != nullptr)
+							{
+								descriptor.metalRoughnessTextureIndex = cgltf_texture_index(data, material->pbr_metallic_roughness.metallic_roughness_texture.texture);
+								descriptor.mrTexCoordIndex = material->pbr_metallic_roughness.metallic_roughness_texture.texcoord;
+							}
 						}
 						if (material->normal_texture.texture != nullptr)
 						{
@@ -319,12 +401,6 @@ namespace
 			}
 		}
 
-		glm::mat4 transform{ glm::identity<glm::mat4>() };
-		transform[0] *= 150.0f;
-		transform[1] *= 150.0f;
-		transform[2] *= 150.0f;
-		transform[3] += glm::vec4{-200.0f, 0.0f, 0.0f, 0.0f};
-
 		processGLTFScene(data, data->scene, model.instances, firstMesh, meshCount, transform);
 
 		cgltf_free(data);
@@ -333,12 +409,12 @@ namespace
 	}
 }
 
-void SceneData::loadModel(const std::filesystem::path& path, const MaterialDescriptor* assignedDescriptor)
+void SceneData::loadModel(const std::filesystem::path& path, const glm::mat4& transform, const MaterialDescriptor* assignedDescriptor)
 {
 	const std::string ext{ path.extension().string() };
 
 	if (ext == ".gltf" || ext == ".glb")
-		models.push_back(loadGLTF(path, imageData, textureData, materialDescriptors, assignedDescriptor));
+		models.push_back(loadGLTF(path, imageData, textureData, materialDescriptors, transform, assignedDescriptor));
 	else
 		R_LOG("Unknown model extension");
 }

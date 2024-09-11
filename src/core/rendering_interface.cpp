@@ -38,7 +38,6 @@ void RenderingInterface::createOptixContext()
 
 #ifdef _DEBUG
 	options.validationMode = OPTIX_DEVICE_CONTEXT_VALIDATION_MODE_ALL;
-	// options.validationMode = OPTIX_DEVICE_CONTEXT_VALIDATION_MODE_OFF;
 #endif
 
 	OPTIX_CHECK(optixDeviceContextCreate(0, &options, &m_context));
@@ -48,12 +47,19 @@ void RenderingInterface::fillMaterials(SceneData& scene)
 	// Uploading images and textures
 	for(auto& imData : scene.imageData)
 	{
-		m_images.emplace_back(imData.width, imData.height, TextureType::R8G8B8A8_UNORM)
-			.fill(imData.data, 0, 0, imData.width, imData.height, cudaMemcpyHostToDevice);
+		TextureType texType{};
+		if (imData.channelCount == 1)
+			texType = TextureType::R8_UNORM;
+		else if (imData.channelCount == 4)
+			texType = TextureType::R8G8B8A8_UNORM;
+		else
+			R_ERR_LOG("Invalid image channel count\n");
+		m_images.emplace_back(imData.width, imData.height, 1, texType)
+			.fill(imData.data, 0, 0, 0, imData.width, imData.height, 1, cudaMemcpyHostToDevice);
 	}
 	for(auto& texData : scene.textureData)
 	{
-		m_textures.emplace_back(m_images[texData.imageIndex], texData.addressX, texData.addressY,
+		m_textures.emplace_back(m_images[texData.imageIndex], texData.addressX, texData.addressY, TextureAddress::CLAMP,
 				texData.filter, texData.sRGB);
 	}
 	scene.clearImageData();
@@ -82,6 +88,9 @@ void RenderingInterface::fillMaterials(SceneData& scene)
 		const SceneData::MaterialDescriptor desc{ scene.materialDescriptors[i] };
 		MaterialData& mat{ matData[i] };
 		mat.bxdfIndexSBT = bxdfTypeToIndex(desc.bxdf);
+
+		mat.doubleSided = desc.doubleSided;
+
 		// Spectral Material
 		mat.mfRoughnessValue = desc.roughness;
 		addSpec(desc.baseIOR, mat.indexOfRefractSpectrumDataIndex);
@@ -94,11 +103,34 @@ void RenderingInterface::fillMaterials(SceneData& scene)
 			mat.baseColorTexture = m_textures[desc.baseColorTextureIndex].getTextureObject();
 			mat.bcTexCoordSetIndex = desc.bcTexCoordIndex == 1; // Only two texture coordinate sets supported
 		}
+		if (desc.bcFactorPresent)
+		{
+			mat.factors |= MaterialData::FactorTypeBitfield::BASE_COLOR;
+			mat.baseColorFactor[0] = desc.baseColorFactor[0];
+			mat.baseColorFactor[1] = desc.baseColorFactor[1];
+			mat.baseColorFactor[2] = desc.baseColorFactor[2];
+			mat.baseColorFactor[3] = desc.baseColorFactor[3];
+		}
+		if (desc.alphaCutoffPresent)
+		{
+			mat.factors |= MaterialData::FactorTypeBitfield::CUTOFF;
+			mat.alphaCutoff = desc.alphaCutoff;
+		}
 		if (desc.metalRoughnessTextureIndex != -1)
 		{
-			mat.textures |= MaterialData::TextureTypeBitfield::PBR_MET_ROUGH;
+			mat.textures |= MaterialData::TextureTypeBitfield::MET_ROUGH;
 			mat.pbrMetalRoughnessTexture = m_textures[desc.metalRoughnessTextureIndex].getTextureObject();
 			mat.mrTexCoordSetIndex = desc.mrTexCoordIndex == 1;
+		}
+		if (desc.metFactorPresent)
+		{
+			mat.factors |= MaterialData::FactorTypeBitfield::METALNESS;
+			mat.metalnessFactor = desc.metalnessFactor;
+		}
+		if (desc.roughFactorPresent)
+		{
+			mat.factors |= MaterialData::FactorTypeBitfield::ROUGHNESS;
+			mat.roughnessFactor = desc.roughnessFactor;
 		}
 		if (desc.normalTextureIndex != -1)
 		{
@@ -106,6 +138,18 @@ void RenderingInterface::fillMaterials(SceneData& scene)
 			mat.normalTexture = m_textures[desc.normalTextureIndex].getTextureObject();
 			mat.nmTexCoordSetIndex = desc.nmTexCoordIndex == 1;
 		}
+		if (desc.transmissionTextureIndex != -1)
+		{
+			mat.textures |= MaterialData::TextureTypeBitfield::TRANSMISSION;
+			mat.transmissionTexture = m_textures[desc.transmissionTextureIndex].getTextureObject();
+			mat.trTexCoordSetIndex = desc.trTexCoordIndex == 1;
+		}
+		if (desc.transmitFactorPresent)
+		{
+			mat.factors |= MaterialData::FactorTypeBitfield::TRANSMISSION;
+			mat.transmissionFactor = desc.transmitFactor;
+		}
+		mat.ior = desc.ior;
 	}
 	// Uploading vertex attributes
 	for(auto& model : scene.models)
@@ -361,15 +405,15 @@ void RenderingInterface::createModulesProgramGroupsPipeline()
 		descs[RenderingInterface::SPHERE] = OptixProgramGroupDesc{
 			.kind = OPTIX_PROGRAM_GROUP_KIND_HITGROUP,
 			.hitgroup = {.moduleCH = optixModule, .entryFunctionNameCH = Program::closehitSphereName, .moduleIS = m_builtInSphereModule} };
-		descs[RenderingInterface::CALLABLE_CONDUCTOR_BXDF] = OptixProgramGroupDesc{
+		descs[RenderingInterface::PURE_CONDUCTOR_BXDF] = OptixProgramGroupDesc{
 			.kind = OPTIX_PROGRAM_GROUP_KIND_CALLABLES,
-			.callables = {.moduleDC = optixModule, .entryFunctionNameDC = Program::conductorBxDFName} };
-		descs[RenderingInterface::CALLABLE_DIELECTRIC_BXDF] = OptixProgramGroupDesc{
+			.callables = {.moduleDC = optixModule, .entryFunctionNameDC = Program::pureConductorBxDFName} };
+		descs[RenderingInterface::PURE_DIELECTRIC_BXDF] = OptixProgramGroupDesc{
 			.kind = OPTIX_PROGRAM_GROUP_KIND_CALLABLES,
-			.callables = {.moduleDC = optixModule, .entryFunctionNameDC = Program::dielectricBxDFName} };
-		descs[RenderingInterface::CALLABLE_DIELECTRIC_ABSORBING_BXDF] = OptixProgramGroupDesc{
+			.callables = {.moduleDC = optixModule, .entryFunctionNameDC = Program::pureDielectricBxDFName} };
+		descs[RenderingInterface::COMPLEX_SURFACE_BXDF] = OptixProgramGroupDesc{
 			.kind = OPTIX_PROGRAM_GROUP_KIND_CALLABLES,
-			.callables = {.moduleDC = optixModule, .entryFunctionNameDC = Program::dielectricAbsorbingBxDFName} };
+			.callables = {.moduleDC = optixModule, .entryFunctionNameDC = Program::complexSurfaceBxDFName} };
 		OPTIX_CHECK_LOG(optixProgramGroupCreate(m_context, descs, ARRAYSIZE(descs),
 					&programGroupOptions,
 					OPTIX_LOG, &OPTIX_LOG_SIZE,
@@ -442,9 +486,9 @@ void RenderingInterface::createSBT(const SceneData& scene)
 	m_sbt.callablesRecordStrideInBytes = sizeof(OptixRecordCallable);
 	CUDA_CHECK(cudaMalloc(reinterpret_cast<void**>(&m_sbt.callablesRecordBase), m_sbt.callablesRecordStrideInBytes * m_sbt.callablesRecordCount));
 	OptixRecordCallable callableRecords[callableCount]{};
-	OPTIX_CHECK(optixSbtRecordPackHeader(m_ptProgramGroups[RenderingInterface::CALLABLE_CONDUCTOR_BXDF], callableRecords + bxdfTypeToIndex(SceneData::BxDF::CONDUCTOR)));
-	OPTIX_CHECK(optixSbtRecordPackHeader(m_ptProgramGroups[RenderingInterface::CALLABLE_DIELECTRIC_BXDF], callableRecords + bxdfTypeToIndex(SceneData::BxDF::DIELECTRIC)));
-	OPTIX_CHECK(optixSbtRecordPackHeader(m_ptProgramGroups[RenderingInterface::CALLABLE_DIELECTRIC_ABSORBING_BXDF], callableRecords + bxdfTypeToIndex(SceneData::BxDF::DIELECTRIC_ABSORBING)));
+	OPTIX_CHECK(optixSbtRecordPackHeader(m_ptProgramGroups[RenderingInterface::PURE_CONDUCTOR_BXDF], callableRecords + bxdfTypeToIndex(SceneData::BxDF::PURE_CONDUCTOR)));
+	OPTIX_CHECK(optixSbtRecordPackHeader(m_ptProgramGroups[RenderingInterface::PURE_DIELECTRIC_BXDF], callableRecords + bxdfTypeToIndex(SceneData::BxDF::PURE_DIELECTRIC)));
+	OPTIX_CHECK(optixSbtRecordPackHeader(m_ptProgramGroups[RenderingInterface::COMPLEX_SURFACE_BXDF], callableRecords + bxdfTypeToIndex(SceneData::BxDF::COMPLEX_SURFACE)));
 	CUDA_CHECK(cudaMemcpy(reinterpret_cast<void*>(m_sbt.callablesRecordBase), callableRecords, m_sbt.callablesRecordStrideInBytes * m_sbt.callablesRecordCount, cudaMemcpyHostToDevice));
 
 	uint32_t hitgroupCount{ 0 };
@@ -456,9 +500,9 @@ void RenderingInterface::createSBT(const SceneData& scene)
 
 	//Fill hitgroup records for ordinary geometry (material data) | Trace stride, trace offset and instance offset affects these
 	std::vector<OptixRecordHitgroup> matHitgroupRecords{};
-	for(auto& model : scene.models)
-		for(auto& mesh : model.meshes)
-			for(auto& submesh : mesh.submeshes)
+	for (auto& model : scene.models)
+		for (auto& instance : model.instances)
+			for (auto& submesh : model.meshes[instance.meshIndex].submeshes)
 			{
 				OptixRecordHitgroup record{};
 				OPTIX_CHECK(optixSbtRecordPackHeader(m_ptProgramGroups[RenderingInterface::TRIANGLE], record.header));
@@ -488,6 +532,87 @@ void RenderingInterface::fillSpectralCurvesData()
 	DenselySampledSpectrum spectralBasis[]{ SpectralData::CIE::BasisR(), SpectralData::CIE::BasisG(), SpectralData::CIE::BasisB() };
 	CUDA_CHECK(cudaMalloc(reinterpret_cast<void**>(&m_spectralBasisData), sizeof(DenselySampledSpectrum) * ARRAYSIZE(spectralBasis)));
 	CUDA_CHECK(cudaMemcpy(reinterpret_cast<void*>(m_spectralBasisData), spectralBasis, sizeof(DenselySampledSpectrum) * ARRAYSIZE(spectralBasis), cudaMemcpyHostToDevice));
+}
+void RenderingInterface::loadLookUpTables()
+{
+	constexpr uint32_t lutWidth{ 32 };
+	constexpr uint32_t lutHeight{ 32 };
+	constexpr uint32_t lutDepth2D{ 1 };
+	constexpr uint32_t lutDepth3D{ 32 };
+	std::ifstream ifstr{};
+	CudaCombinedTexture* lut{};
+	size_t inputSize{};
+	char* input{};
+
+	lut = &m_lookUpTables[LookUpTable::CONDUCTOR_ALBEDO];
+	*lut = CudaCombinedTexture{lutWidth, lutHeight, lutDepth2D, TextureType::R32_FLOAT,
+			TextureAddress::CLAMP, TextureAddress::CLAMP, TextureAddress::CLAMP,
+			TextureFilter::LINEAR, false};
+	ifstr.open(getExeDir() / "bin/albedoConductorLUT.bin", std::ios_base::binary | std::ios_base::ate);
+	inputSize = static_cast<size_t>(ifstr.tellg());
+	input = new char[inputSize];
+	ifstr.seekg(0);
+	ifstr.read(input, inputSize);
+	ifstr.close();
+	lut->image.fill(input, 0, 0, 0, lutWidth, lutHeight, lutDepth2D, cudaMemcpyHostToDevice);
+	delete[] input;
+	m_launchParameters.LUTs.conductorAlbedo = m_lookUpTables[LookUpTable::CONDUCTOR_ALBEDO].texture.getTextureObject();
+
+	lut = &m_lookUpTables[LookUpTable::DIELECTRIC_OUTER_ALBEDO];
+	*lut = CudaCombinedTexture{lutWidth, lutHeight, lutDepth3D, TextureType::R32_FLOAT,
+			TextureAddress::CLAMP, TextureAddress::CLAMP, TextureAddress::CLAMP,
+			TextureFilter::LINEAR, false};
+	ifstr.open(getExeDir() / "bin/albedoDielectricOuterLUT.bin", std::ios_base::binary | std::ios_base::ate);
+	inputSize = static_cast<size_t>(ifstr.tellg());
+	input = new char[inputSize];
+	ifstr.seekg(0);
+	ifstr.read(input, inputSize);
+	ifstr.close();
+	lut->image.fill(input, 0, 0, 0, lutWidth, lutHeight, lutDepth3D, cudaMemcpyHostToDevice);
+	delete[] input;
+	m_launchParameters.LUTs.dielectricOuterAlbedo = m_lookUpTables[LookUpTable::DIELECTRIC_OUTER_ALBEDO].texture.getTextureObject();
+
+	lut = &m_lookUpTables[LookUpTable::DIELECTRIC_INNER_ALBEDO];
+	*lut = CudaCombinedTexture{lutWidth, lutHeight, lutDepth3D, TextureType::R32_FLOAT,
+			TextureAddress::CLAMP, TextureAddress::CLAMP, TextureAddress::CLAMP,
+			TextureFilter::LINEAR, false};
+	ifstr.open(getExeDir() / "bin/albedoDielectricInnerLUT.bin", std::ios_base::binary | std::ios_base::ate);
+	inputSize = static_cast<size_t>(ifstr.tellg());
+	input = new char[inputSize];
+	ifstr.seekg(0);
+	ifstr.read(input, inputSize);
+	ifstr.close();
+	lut->image.fill(input, 0, 0, 0, lutWidth, lutHeight, lutDepth3D, cudaMemcpyHostToDevice);
+	delete[] input;
+	m_launchParameters.LUTs.dielectricInnerAlbedo = m_lookUpTables[LookUpTable::DIELECTRIC_INNER_ALBEDO].texture.getTextureObject();
+
+	lut = &m_lookUpTables[LookUpTable::REFLECTIVE_DIELECTRIC_OUTER_ALBEDO];
+	*lut = CudaCombinedTexture{lutWidth, lutHeight, lutDepth3D, TextureType::R32_FLOAT,
+			TextureAddress::CLAMP, TextureAddress::CLAMP, TextureAddress::CLAMP,
+			TextureFilter::LINEAR, false};
+	ifstr.open(getExeDir() / "bin/albedoDielectricReflectiveOuterLUT.bin", std::ios_base::binary | std::ios_base::ate);
+	inputSize = static_cast<size_t>(ifstr.tellg());
+	input = new char[inputSize];
+	ifstr.seekg(0);
+	ifstr.read(input, inputSize);
+	ifstr.close();
+	lut->image.fill(input, 0, 0, 0, lutWidth, lutHeight, lutDepth3D, cudaMemcpyHostToDevice);
+	delete[] input;
+	m_launchParameters.LUTs.reflectiveDielectricOuterAlbedo = m_lookUpTables[LookUpTable::REFLECTIVE_DIELECTRIC_OUTER_ALBEDO].texture.getTextureObject();
+
+	lut = &m_lookUpTables[LookUpTable::REFLECTIVE_DIELECTRIC_INNER_ALBEDO];
+	*lut = CudaCombinedTexture{lutWidth, lutHeight, lutDepth3D, TextureType::R32_FLOAT,
+			TextureAddress::CLAMP, TextureAddress::CLAMP, TextureAddress::CLAMP,
+			TextureFilter::LINEAR, false};
+	ifstr.open(getExeDir() / "bin/albedoDielectricReflectiveInnerLUT.bin", std::ios_base::binary | std::ios_base::ate);
+	inputSize = static_cast<size_t>(ifstr.tellg());
+	input = new char[inputSize];
+	ifstr.seekg(0);
+	ifstr.read(input, inputSize);
+	ifstr.close();
+	lut->image.fill(input, 0, 0, 0, lutWidth, lutHeight, lutDepth3D, cudaMemcpyHostToDevice);
+	delete[] input;
+	m_launchParameters.LUTs.reflectiveDielectricInnerAlbedo = m_lookUpTables[LookUpTable::REFLECTIVE_DIELECTRIC_INNER_ALBEDO].texture.getTextureObject();
 }
 void RenderingInterface::prepareDataForRendering(const Camera& camera, const RenderContext& renderContext)
 {
@@ -1043,13 +1168,13 @@ int RenderingInterface::bxdfTypeToIndex(SceneData::BxDF type)
 {
 	switch (type)
 	{
-		case SceneData::BxDF::CONDUCTOR:
+		case SceneData::BxDF::PURE_CONDUCTOR:
 			return 0;
 			break;
-		case SceneData::BxDF::DIELECTRIC:
+		case SceneData::BxDF::PURE_DIELECTRIC:
 			return 1;
 			break;
-		case SceneData::BxDF::DIELECTRIC_ABSORBING:
+		case SceneData::BxDF::COMPLEX_SURFACE:
 			return 2;
 			break;
 		default:
@@ -1218,9 +1343,9 @@ void RenderingInterface::cleanup()
 	OPTIX_CHECK(optixProgramGroupDestroy(m_ptProgramGroups[MISS]));
 	OPTIX_CHECK(optixProgramGroupDestroy(m_ptProgramGroups[TRIANGLE]));
 	OPTIX_CHECK(optixProgramGroupDestroy(m_ptProgramGroups[DISK]));
-	OPTIX_CHECK(optixProgramGroupDestroy(m_ptProgramGroups[CALLABLE_CONDUCTOR_BXDF]));
-	OPTIX_CHECK(optixProgramGroupDestroy(m_ptProgramGroups[CALLABLE_DIELECTRIC_BXDF]));
-	OPTIX_CHECK(optixProgramGroupDestroy(m_ptProgramGroups[CALLABLE_DIELECTRIC_ABSORBING_BXDF]));
+	OPTIX_CHECK(optixProgramGroupDestroy(m_ptProgramGroups[PURE_CONDUCTOR_BXDF]));
+	OPTIX_CHECK(optixProgramGroupDestroy(m_ptProgramGroups[PURE_DIELECTRIC_BXDF]));
+	OPTIX_CHECK(optixProgramGroupDestroy(m_ptProgramGroups[COMPLEX_SURFACE_BXDF]));
 	OPTIX_CHECK(optixModuleDestroy(m_ptModule));
 	OPTIX_CHECK(optixDeviceContextDestroy(m_context));
 
@@ -1267,6 +1392,7 @@ RenderingInterface::RenderingInterface(const Camera& camera, const RenderContext
 	fillMaterials(scene);
 	createSBT(scene);
 	fillSpectralCurvesData();
+	loadLookUpTables();
 	fillLightData(scene, camera.getPosition());
 	prepareDataForRendering(camera, renderContext);
 	prepareDataForPreviewDrawing();

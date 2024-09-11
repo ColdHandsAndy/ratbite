@@ -33,15 +33,47 @@ void draw(Window* window, const RenderingInterface* rInterface, UI* ui)
 {
 	rInterface->drawPreview(window->getWidth(), window->getHeight());
 
-	ui->renderImGui();
+	ui->renderInterface();
 
 	glfwSwapBuffers(window->getGLFWwindow());
 }
-void menu(UI& ui, Camera& camera, RenderContext& rContext, SceneData& scene, int currentSampleCount)
+void menu(UI& ui, Window& window, Camera& camera, RenderContext& rContext, SceneData& scene, int currentSampleCount)
 {
 	ui.startImGuiRecording();
+	constexpr ImColor infoColor{ 0.99f, 0.33f, 0.29f };
 
-	ImColor infoColor{ 0.99f, 0.33f, 0.29f };
+
+	ImGui::SetNextWindowPos(ImVec2(0.0f, 0.0f));
+	ImGui::SetNextWindowSize(ImVec2(window.getWidth(), window.getHeight()));
+
+	ImGuiWindowFlags windowFlags = ImGuiWindowFlags_NoBringToFrontOnFocus |
+		ImGuiWindowFlags_NoNavFocus |
+		ImGuiWindowFlags_NoDocking |
+		ImGuiWindowFlags_NoTitleBar |
+		ImGuiWindowFlags_NoResize |
+		ImGuiWindowFlags_NoMove |
+		ImGuiWindowFlags_NoCollapse |
+		ImGuiWindowFlags_MenuBar |
+		ImGuiWindowFlags_NoBackground;
+
+	ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0f, 0.0f));  
+	bool show{ ImGui::Begin("Dockspace", NULL, windowFlags) };
+	ImGui::PopStyleVar();
+	ImGui::DockSpace(ImGui::GetID("Dockspace"), ImVec2(0.0f, 0.0f), ImGuiDockNodeFlags_PassthruCentralNode);
+	if (show)
+	{
+		// if (ImGui::BeginMenuBar())
+		// {
+		// 	ImGui::EndMenuBar();
+		// }
+	}
+	ImGui::End();     
+
+
+	// ImGui::Begin("Render");
+	// ImGui::Image(, );
+	// ImGui::End();
+
 
 	bool changed{ false };
 	static bool pause{ false };
@@ -270,11 +302,14 @@ void menu(UI& ui, Camera& camera, RenderContext& rContext, SceneData& scene, int
 			int rb{};
 			switch (tempDescriptor.bxdf)
 			{
-				case SceneData::BxDF::CONDUCTOR:
+				case SceneData::BxDF::PURE_CONDUCTOR:
 					rb = 0;
 					break;
-				case SceneData::BxDF::DIELECTRIC:
+				case SceneData::BxDF::PURE_DIELECTRIC:
 					rb = 1;
+					break;
+				case SceneData::BxDF::COMPLEX_SURFACE:
+					rb = 2;
 					break;
 				default:
 					R_ERR_LOG("Unknown BxDF.")
@@ -287,10 +322,13 @@ void menu(UI& ui, Camera& camera, RenderContext& rContext, SceneData& scene, int
 			switch (rb)
 			{
 				case 0:
-					bx = SceneData::BxDF::CONDUCTOR;
+					bx = SceneData::BxDF::PURE_CONDUCTOR;
 					break;
 				case 1:
-					bx = SceneData::BxDF::DIELECTRIC;
+					bx = SceneData::BxDF::PURE_DIELECTRIC;
+					break;
+				case 2:
+					bx = SceneData::BxDF::COMPLEX_SURFACE;
 					break;
 				default:
 					R_ERR_LOG("Unknown output.")
@@ -301,19 +339,19 @@ void menu(UI& ui, Camera& camera, RenderContext& rContext, SceneData& scene, int
 				materialChanged = true;
 
 				tempDescriptor.bxdf = bx;
-				if (tempDescriptor.bxdf == SceneData::BxDF::CONDUCTOR)
+				if (tempDescriptor.bxdf == SceneData::BxDF::PURE_CONDUCTOR)
 				{
 					tempDescriptor.baseIOR = SpectralData::SpectralDataType::C_METAL_AL_IOR;
 					tempDescriptor.baseAC = SpectralData::SpectralDataType::C_METAL_AL_AC;
 				}
-				else if (tempDescriptor.bxdf == SceneData::BxDF::DIELECTRIC)
+				else if (tempDescriptor.bxdf == SceneData::BxDF::PURE_DIELECTRIC)
 				{
 					tempDescriptor.baseIOR = SpectralData::SpectralDataType::D_GLASS_F5_IOR;
 					tempDescriptor.baseAC = SpectralData::SpectralDataType::NONE;
 				}
 			}
 
-			if (tempDescriptor.bxdf == SceneData::BxDF::CONDUCTOR)
+			if (tempDescriptor.bxdf == SceneData::BxDF::PURE_CONDUCTOR)
 			{
 				int32_t currentSpectrum{ static_cast<int32_t>(SpectralData::conductorIndexFromType(tempDescriptor.baseIOR)) };
 				if (ImGui::ListBox("Conductor type", &currentSpectrum, SpectralData::conductorSpectraNames.data(), SpectralData::conductorSpectraNames.size(), 3))
@@ -324,7 +362,7 @@ void menu(UI& ui, Camera& camera, RenderContext& rContext, SceneData& scene, int
 					tempDescriptor.baseAC = SpectralData::conductorACSpectraTypes[currentSpectrum];
 				}
 			}
-			else if (tempDescriptor.bxdf == SceneData::BxDF::DIELECTRIC)
+			else if (tempDescriptor.bxdf == SceneData::BxDF::PURE_DIELECTRIC)
 			{
 				int32_t currentSpectrum{ static_cast<int32_t>(SpectralData::dielectricIndexFromType(tempDescriptor.baseIOR)) };
 				if (ImGui::ListBox("Dielectric type", &currentSpectrum, SpectralData::dielectricSpectraNames.data(), SpectralData::dielectricSpectraNames.size(), 3))
@@ -334,6 +372,12 @@ void menu(UI& ui, Camera& camera, RenderContext& rContext, SceneData& scene, int
 					tempDescriptor.baseIOR = SpectralData::dielectricIORSpectraTypes[currentSpectrum];
 					tempDescriptor.baseAC = SpectralData::SpectralDataType::NONE;
 				}
+			}
+
+			if (tempDescriptor.bxdf != SceneData::BxDF::COMPLEX_SURFACE)
+			{
+				if (ImGui::DragFloat("Roughness", &tempDescriptor.roughness, 0.002f, 0.0f, 1.0f))
+					materialChanged = true;
 			}
 
 			if (tempDescriptor.baseEmission != SpectralData::SpectralDataType::NONE)
@@ -346,9 +390,6 @@ void menu(UI& ui, Camera& camera, RenderContext& rContext, SceneData& scene, int
 					tempDescriptor.baseEmission = SpectralData::emissionSpectraTypes[currentSpectrum];
 				}
 			}
-
-			if (ImGui::DragFloat("Roughness", &tempDescriptor.roughness, 0.002f, 0.0f, 1.0f))
-				materialChanged = true;
 
 			if (materialChanged)
 			{
@@ -363,7 +404,6 @@ void menu(UI& ui, Camera& camera, RenderContext& rContext, SceneData& scene, int
 					*currentDesc = tempDescriptor;
 				}
 			}
-
 		}
 	}
 
@@ -440,7 +480,6 @@ int main(int argc, char** argv)
 	// TODO:
 	// Texture support (Texture loading, Ray differentials)
 	// Dynamic asset loading
-	// RGB base BxDF
 	// Adaptive sampling
 
 	initialize();
@@ -470,7 +509,7 @@ int main(int argc, char** argv)
 		if ((!rInterface.renderingIsFinished() || changesMade) && !rContext.paused())
 			rInterface.render(rContext, camera, scene, changesMade);
 
-		menu(ui, camera, rContext, scene, rInterface.getProcessedSampleCount());
+		menu(ui, window, camera, rContext, scene, rInterface.getProcessedSampleCount());
 
 		draw(&window, &rInterface, &ui);
 		

@@ -17,7 +17,8 @@ namespace QRNG
 
 		WAVELENGTH = 0,
 		LIGHT = 1,
-		SURFACE_BXDF = 2,
+		SURFACE_BXDF_0 = 2,
+		SURFACE_BXDF_1 = 3,
 
 		ROULETTE = 8,
 		

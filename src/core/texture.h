@@ -52,22 +52,29 @@ private:
 
 	uint32_t m_width{};
 	uint32_t m_height{};
+	uint32_t m_depth{};
 	uint32_t m_texelByteSize{};
 
 	TextureType m_type{};
 
 	bool m_invalid{ true };
 
-	void initialize(uint32_t width, uint32_t height,
+	void initialize(uint32_t width, uint32_t height, uint32_t depth,
 			int bitNumX, int bitNumY, int bitNumZ, int bitNumW, cudaChannelFormatKind channelFormatKind)
 	{
 		m_width = width;
 		m_height = height;
+		m_depth = depth;
 		m_texelByteSize = (bitNumX + bitNumY + bitNumZ + bitNumW) / 8;
 
 		cudaChannelFormatDesc formatDesc{ cudaCreateChannelDesc(bitNumX, bitNumY, bitNumZ, bitNumW, channelFormatKind) };
 
-		CUDA_CHECK(cudaMallocArray(&m_image, &formatDesc, width, height));
+		if (depth == 1)
+			CUDA_CHECK(cudaMallocArray(&m_image, &formatDesc, width, height));
+		else
+			CUDA_CHECK(cudaMalloc3DArray(&m_image, &formatDesc, {width, height, depth}));
+
+		m_invalid = false;
 	}
 	void destroy()
 	{
@@ -75,80 +82,81 @@ private:
 			CUDA_CHECK(cudaFree(m_image));
 	}
 public:
-	CudaImage(uint32_t width, uint32_t height, TextureType type) : m_type{type}
+	CudaImage() = default;
+	CudaImage(uint32_t width, uint32_t height, uint32_t depth, TextureType type) : m_type{type}
 	{
 		switch (type)
 		{
 			case TextureType::R8_UNORM:
-				initialize(width, height,
+				initialize(width, height, depth,
 						8, 0, 0, 0, cudaChannelFormatKindUnsigned);
 				break;
 			case TextureType::R8G8_UNORM:
-				initialize(width, height,
+				initialize(width, height, depth,
 						8, 8, 0, 0, cudaChannelFormatKindUnsigned);
 				break;
 			case TextureType::R8G8B8A8_UNORM:
-				initialize(width, height,
+				initialize(width, height, depth,
 						8, 8, 8, 8, cudaChannelFormatKindUnsigned);
 				break;
 			case TextureType::R16_UINT:
-				initialize(width, height,
+				initialize(width, height, depth,
 						16, 0, 0, 0, cudaChannelFormatKindUnsigned);
 				break;
 			case TextureType::R16G16_UINT:
-				initialize(width, height,
+				initialize(width, height, depth,
 						16, 16, 0, 0, cudaChannelFormatKindUnsigned);
 				break;
 			case TextureType::R16G16B16A16_UINT:
-				initialize(width, height,
+				initialize(width, height, depth,
 						16, 16, 16, 16, cudaChannelFormatKindUnsigned);
 				break;
 			case TextureType::R16_UNORM:
-				initialize(width, height,
+				initialize(width, height, depth,
 						16, 0, 0, 0, cudaChannelFormatKindUnsigned);
 				break;
 			case TextureType::R16G16_UNORM:
-				initialize(width, height,
+				initialize(width, height, depth,
 						16, 16, 0, 0, cudaChannelFormatKindUnsigned);
 				break;
 			case TextureType::R16G16B16A16_UNORM:
-				initialize(width, height,
+				initialize(width, height, depth,
 						16, 16, 16, 16, cudaChannelFormatKindUnsigned);
 				break;
 			case TextureType::R16_FLOAT:
-				initialize(width, height,
+				initialize(width, height, depth,
 						16, 0, 0, 0, cudaChannelFormatKindFloat);
 				break;
 			case TextureType::R16G16_FLOAT:
-				initialize(width, height,
+				initialize(width, height, depth,
 						16, 16, 0, 0, cudaChannelFormatKindFloat);
 				break;
 			case TextureType::R16G16B16A16_FLOAT:
-				initialize(width, height,
+				initialize(width, height, depth,
 						16, 16, 16, 16, cudaChannelFormatKindFloat);
 				break;
 			case TextureType::R32_UINT:
-				initialize(width, height,
+				initialize(width, height, depth,
 						32, 0, 0, 0, cudaChannelFormatKindUnsigned);
 				break;
 			case TextureType::R32G32_UINT:
-				initialize(width, height,
+				initialize(width, height, depth,
 						32, 32, 0, 0, cudaChannelFormatKindUnsigned);
 				break;
 			case TextureType::R32G32B32A32_UINT:
-				initialize(width, height,
+				initialize(width, height, depth,
 						32, 32, 32, 32, cudaChannelFormatKindUnsigned);
 				break;
 			case TextureType::R32_FLOAT:
-				initialize(width, height,
+				initialize(width, height, depth,
 						32, 0, 0, 0, cudaChannelFormatKindFloat);
 				break;
 			case TextureType::R32G32_FLOAT:
-				initialize(width, height,
+				initialize(width, height, depth,
 						32, 32, 0, 0, cudaChannelFormatKindFloat);
 				break;
 			case TextureType::R32G32B32A32_FLOAT:
-				initialize(width, height,
+				initialize(width, height, depth,
 						32, 32, 32, 32, cudaChannelFormatKindFloat);
 				break;
 			default:
@@ -160,6 +168,7 @@ public:
 	{
 		m_width = tex.m_width;
 		m_height = tex.m_height;
+		m_depth = tex.m_depth;
 		m_texelByteSize = tex.m_texelByteSize;
 		m_image = tex.m_image;
 
@@ -170,6 +179,7 @@ public:
 	{
 		m_width = tex.m_width;
 		m_height = tex.m_height;
+		m_depth = tex.m_depth;
 		m_texelByteSize = tex.m_texelByteSize;
 		m_image = tex.m_image;
 
@@ -187,18 +197,29 @@ public:
 
 	cudaArray_t getData() const { return m_image; }
 
-	void fillZero(uint32_t wOffset, uint32_t hOffset, uint32_t width, uint32_t height)
+	void fillZero(uint32_t wOffset, uint32_t hOffset, uint32_t dOffset, uint32_t width, uint32_t height, uint32_t depth)
 	{
-		void* zeroBuf{ malloc(wOffset * m_texelByteSize * hOffset) };
-		memset(zeroBuf, 0, wOffset * m_texelByteSize * hOffset);
-		fill(zeroBuf, wOffset, hOffset, width, height, cudaMemcpyHostToDevice);
+		void* zeroBuf{ malloc(width * m_texelByteSize * height * depth) };
+		memset(zeroBuf, 0, width * m_texelByteSize * height * depth);
+		fill(zeroBuf, wOffset, hOffset, dOffset, width, height, depth, cudaMemcpyHostToDevice);
 		free(zeroBuf);
 	}
-	void fill(void* src, uint32_t wOffset, uint32_t hOffset, uint32_t width, uint32_t height, cudaMemcpyKind memcpyKind)
+	void fill(void* src, uint32_t wOffset, uint32_t hOffset, uint32_t dOffset, uint32_t width, uint32_t height, uint32_t depth, cudaMemcpyKind memcpyKind)
 	{
-		R_ASSERT_LOG(wOffset < m_width && hOffset < m_height, "Offset into the texture is invalid");
-		R_ASSERT_LOG(width <= m_width && height <= m_height, "Source data size exceeds the texture's size");
-		CUDA_CHECK(cudaMemcpy2DToArray(m_image, wOffset, hOffset, src, width * m_texelByteSize, width * m_texelByteSize, height, memcpyKind));
+		R_ASSERT_LOG(!m_invalid, "CudaImage is invalid.");
+		R_ASSERT_LOG(wOffset < m_width && hOffset < m_height && dOffset < m_depth, "Offset into the texture is invalid");
+		R_ASSERT_LOG(width <= m_width && height <= m_height && depth <= m_depth, "Source data size exceeds the texture's size");
+		if (depth == 1)
+			CUDA_CHECK(cudaMemcpy2DToArray(m_image, wOffset, hOffset, src, width * m_texelByteSize, width * m_texelByteSize, height, memcpyKind));
+		else
+		{
+			cudaMemcpy3DParms memcpyData{ .srcPtr = cudaPitchedPtr{src, width * m_texelByteSize, width, height},
+				.dstArray = m_image,
+				.dstPos = cudaPos{wOffset, hOffset, dOffset},
+				.extent = cudaExtent{m_width, m_height, m_depth},
+				.kind = cudaMemcpyHostToDevice };
+			CUDA_CHECK(cudaMemcpy3D(&memcpyData));
+		}
 	}
 
 	friend class CudaTexture;
@@ -212,7 +233,7 @@ private:
 
 	bool m_invalid{ true };
 
-	void initialize(cudaTextureAddressMode addressModeX, cudaTextureAddressMode addressModeY, cudaTextureFilterMode filterMode, cudaTextureReadMode readMode,
+	void initialize(cudaTextureAddressMode addressModeX, cudaTextureAddressMode addressModeY, cudaTextureAddressMode addressModeZ, cudaTextureFilterMode filterMode, cudaTextureReadMode readMode,
 			bool colorTexture,
 			bool normalizedAccess,
 			uint32_t maxAnisotropy, cudaTextureFilterMode mipmapFilterMode)
@@ -224,7 +245,7 @@ private:
 		cudaTextureDesc texDesc{};
 		texDesc.addressMode[0] = addressModeX;
 		texDesc.addressMode[1] = addressModeY;
-		texDesc.addressMode[2] = cudaAddressModeClamp;
+		texDesc.addressMode[2] = addressModeZ;
 		texDesc.filterMode = filterMode;
 		texDesc.readMode = readMode;
 		texDesc.sRGB = colorTexture ? 1 : 0;
@@ -251,8 +272,9 @@ private:
 			CUDA_CHECK(cudaDestroyTextureObject(m_texture));
 	}
 public:
+	CudaTexture() = default;
 	CudaTexture(const CudaImage& image,
-			TextureAddress addressModeX = TextureAddress::CLAMP, TextureAddress addressModeY = TextureAddress::CLAMP,
+			TextureAddress addressModeX = TextureAddress::CLAMP, TextureAddress addressModeY = TextureAddress::CLAMP, TextureAddress addressModeZ = TextureAddress::CLAMP,
 			TextureFilter filterMode = TextureFilter::LINEAR,
 			bool colorTexture = false) : m_internalImage{ &image }
 	{
@@ -288,6 +310,22 @@ public:
 				R_ERR_LOG("Unknown address mode passed");
 				break;
 		}
+		cudaTextureAddressMode cudaAddressModeZ{};
+		switch (addressModeZ)
+		{
+			case TextureAddress::WRAP:
+				cudaAddressModeZ = cudaAddressModeWrap;
+				break;
+			case TextureAddress::CLAMP:
+				cudaAddressModeZ = cudaAddressModeClamp;
+				break;
+			case TextureAddress::MIRROR:
+				cudaAddressModeZ = cudaAddressModeMirror;
+				break;
+			default:
+				R_ERR_LOG("Unknown address mode passed");
+				break;
+		}
 		cudaTextureFilterMode cudaFilterMode{};
 		switch (filterMode)
 		{
@@ -304,109 +342,109 @@ public:
 		switch (image.m_type)
 		{
 			case TextureType::R8_UNORM:
-				initialize(cudaAddressModeX, cudaAddressModeY, cudaFilterMode, cudaReadModeNormalizedFloat,
+				initialize(cudaAddressModeX, cudaAddressModeY, cudaAddressModeZ, cudaFilterMode, cudaReadModeNormalizedFloat,
 						colorTexture,
 						true,
 						16, cudaFilterModeLinear);
 				break;
 			case TextureType::R8G8_UNORM:
-				initialize(cudaAddressModeX, cudaAddressModeY, cudaFilterMode, cudaReadModeNormalizedFloat,
+				initialize(cudaAddressModeX, cudaAddressModeY, cudaAddressModeZ, cudaFilterMode, cudaReadModeNormalizedFloat,
 						colorTexture,
 						true,
 						16, cudaFilterModeLinear);
 				break;
 			case TextureType::R8G8B8A8_UNORM:
-				initialize(cudaAddressModeX, cudaAddressModeY, cudaFilterMode, cudaReadModeNormalizedFloat,
+				initialize(cudaAddressModeX, cudaAddressModeY, cudaAddressModeZ, cudaFilterMode, cudaReadModeNormalizedFloat,
 						colorTexture,
 						true,
 						16, cudaFilterModeLinear);
 				break;
 			case TextureType::R16_UINT:
-				initialize(cudaAddressModeX, cudaAddressModeY, cudaFilterMode, cudaReadModeElementType,
+				initialize(cudaAddressModeX, cudaAddressModeY, cudaAddressModeZ, cudaFilterMode, cudaReadModeElementType,
 						colorTexture,
 						true,
 						16, cudaFilterModeLinear);
 				break;
 			case TextureType::R16G16_UINT:
-				initialize(cudaAddressModeX, cudaAddressModeY, cudaFilterMode, cudaReadModeElementType,
+				initialize(cudaAddressModeX, cudaAddressModeY, cudaAddressModeZ, cudaFilterMode, cudaReadModeElementType,
 						colorTexture,
 						true,
 						16, cudaFilterModeLinear);
 				break;
 			case TextureType::R16G16B16A16_UINT:
-				initialize(cudaAddressModeX, cudaAddressModeY, cudaFilterMode, cudaReadModeElementType,
+				initialize(cudaAddressModeX, cudaAddressModeY, cudaAddressModeZ, cudaFilterMode, cudaReadModeElementType,
 						colorTexture,
 						true,
 						16, cudaFilterModeLinear);
 				break;
 			case TextureType::R16_UNORM:
-				initialize(cudaAddressModeX, cudaAddressModeY, cudaFilterMode, cudaReadModeNormalizedFloat,
+				initialize(cudaAddressModeX, cudaAddressModeY, cudaAddressModeZ, cudaFilterMode, cudaReadModeNormalizedFloat,
 						colorTexture,
 						true,
 						16, cudaFilterModeLinear);
 				break;
 			case TextureType::R16G16_UNORM:
-				initialize(cudaAddressModeX, cudaAddressModeY, cudaFilterMode, cudaReadModeNormalizedFloat,
+				initialize(cudaAddressModeX, cudaAddressModeY, cudaAddressModeZ, cudaFilterMode, cudaReadModeNormalizedFloat,
 						colorTexture,
 						true,
 						16, cudaFilterModeLinear);
 				break;
 			case TextureType::R16G16B16A16_UNORM:
-				initialize(cudaAddressModeX, cudaAddressModeY, cudaFilterMode, cudaReadModeNormalizedFloat,
+				initialize(cudaAddressModeX, cudaAddressModeY, cudaAddressModeZ, cudaFilterMode, cudaReadModeNormalizedFloat,
 						colorTexture,
 						true,
 						16, cudaFilterModeLinear);
 				break;
 			case TextureType::R16_FLOAT:
-				initialize(cudaAddressModeX, cudaAddressModeY, cudaFilterMode, cudaReadModeElementType,
+				initialize(cudaAddressModeX, cudaAddressModeY, cudaAddressModeZ, cudaFilterMode, cudaReadModeElementType,
 						colorTexture,
 						true,
 						16, cudaFilterModeLinear);
 				break;
 			case TextureType::R16G16_FLOAT:
-				initialize(cudaAddressModeX, cudaAddressModeY, cudaFilterMode, cudaReadModeElementType,
+				initialize(cudaAddressModeX, cudaAddressModeY, cudaAddressModeZ, cudaFilterMode, cudaReadModeElementType,
 						colorTexture,
 						true,
 						16, cudaFilterModeLinear);
 				break;
 			case TextureType::R16G16B16A16_FLOAT:
-				initialize(cudaAddressModeX, cudaAddressModeY, cudaFilterMode, cudaReadModeElementType,
+				initialize(cudaAddressModeX, cudaAddressModeY, cudaAddressModeZ, cudaFilterMode, cudaReadModeElementType,
 						colorTexture,
 						true,
 						16, cudaFilterModeLinear);
 				break;
 			case TextureType::R32_UINT:
-				initialize(cudaAddressModeX, cudaAddressModeY, cudaFilterMode, cudaReadModeElementType,
+				initialize(cudaAddressModeX, cudaAddressModeY, cudaAddressModeZ, cudaFilterMode, cudaReadModeElementType,
 						colorTexture,
 						true,
 						16, cudaFilterModeLinear);
 				break;
 			case TextureType::R32G32_UINT:
-				initialize(cudaAddressModeX, cudaAddressModeY, cudaFilterMode, cudaReadModeElementType,
+				initialize(cudaAddressModeX, cudaAddressModeY, cudaAddressModeZ, cudaFilterMode, cudaReadModeElementType,
 						colorTexture,
 						true,
 						16, cudaFilterModeLinear);
 				break;
 			case TextureType::R32G32B32A32_UINT:
-				initialize(cudaAddressModeX, cudaAddressModeY, cudaFilterMode, cudaReadModeElementType,
+				initialize(cudaAddressModeX, cudaAddressModeY, cudaAddressModeZ, cudaFilterMode, cudaReadModeElementType,
 						colorTexture,
 						true,
 						16, cudaFilterModeLinear);
 				break;
 			case TextureType::R32_FLOAT:
-				initialize(cudaAddressModeX, cudaAddressModeY, cudaFilterMode, cudaReadModeElementType,
+				initialize(cudaAddressModeX, cudaAddressModeY, cudaAddressModeZ, cudaFilterMode, cudaReadModeElementType,
 						colorTexture,
 						true,
 						16, cudaFilterModeLinear);
 				break;
 			case TextureType::R32G32_FLOAT:
-				initialize(cudaAddressModeX, cudaAddressModeY, cudaFilterMode, cudaReadModeElementType,
+				initialize(cudaAddressModeX, cudaAddressModeY, cudaAddressModeZ, cudaFilterMode, cudaReadModeElementType,
 						colorTexture,
 						true,
 						16, cudaFilterModeLinear);
 				break;
 			case TextureType::R32G32B32A32_FLOAT:
-				initialize(cudaAddressModeX, cudaAddressModeY, cudaFilterMode, cudaReadModeElementType,
+				initialize(cudaAddressModeX, cudaAddressModeY, cudaAddressModeZ, cudaFilterMode, cudaReadModeElementType,
 						colorTexture,
 						true,
 						16, cudaFilterModeLinear);
@@ -442,4 +480,25 @@ public:
 	CudaTexture& operator=(const CudaTexture&) = delete;
 
 	cudaTextureObject_t getTextureObject() const { return m_texture; }
+};
+
+struct CudaCombinedTexture
+{
+	CudaImage image{};
+	CudaTexture texture{};
+
+	CudaCombinedTexture() = default;
+	CudaCombinedTexture(uint32_t width, uint32_t height, uint32_t depth, TextureType type,
+			TextureAddress addressModeX = TextureAddress::CLAMP, TextureAddress addressModeY = TextureAddress::CLAMP, TextureAddress addressModeZ = TextureAddress::CLAMP,
+			TextureFilter filterMode = TextureFilter::LINEAR,
+			bool colorTexture = false)
+		: image{width, height, depth, type}, texture{image,
+			addressModeX, addressModeY, addressModeZ,
+			filterMode,
+			colorTexture}
+	{}
+	CudaCombinedTexture(CudaCombinedTexture&&) = default;
+	CudaCombinedTexture& operator=(CudaCombinedTexture&&) = default;
+	CudaCombinedTexture(const CudaCombinedTexture&) = delete;
+	CudaCombinedTexture& operator=(const CudaCombinedTexture&) = delete;
 };

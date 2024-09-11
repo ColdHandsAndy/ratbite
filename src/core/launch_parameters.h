@@ -56,6 +56,15 @@ struct LaunchParameters
 	CUPTR(MaterialData) materials{};
 	CUPTR(DenseSpectrum) spectra{};
 
+	struct LookUpTables
+	{
+		cudaTextureObject_t conductorAlbedo{};
+		cudaTextureObject_t dielectricOuterAlbedo{};
+		cudaTextureObject_t dielectricInnerAlbedo{};
+		cudaTextureObject_t reflectiveDielectricOuterAlbedo{};
+		cudaTextureObject_t reflectiveDielectricInnerAlbedo{};
+	} LUTs;
+
 	CUPTR(DenseSpectrum) sensorSpectralCurveA{};
 	CUPTR(DenseSpectrum) sensorSpectralCurveB{};
 	CUPTR(DenseSpectrum) sensorSpectralCurveC{};

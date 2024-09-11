@@ -15,6 +15,22 @@
 #include "../device/spectral.h"
 #include "../device/local_transform.h"
 
+namespace diffuse
+{
+	namespace CosWeighted
+	{
+		CU_DEVICE CU_INLINE glm::vec3 sample(const glm::vec2& uv)
+		{
+			glm::vec2 d{ sampling::disk::sampleUniform2DPolar(uv) };
+			return glm::vec3{d.x, d.y, cuda::std::sqrt(cuda::std::fmax(0.0f, 1.0f - d.x * d.x - d.y * d.y))};
+		}
+		CU_DEVICE CU_INLINE float PDF(float cosTheta)
+		{
+			return cosTheta / glm::pi<float>();
+		}
+	}
+}
+
 namespace microfacet
 {
 	struct ContextIncident
@@ -48,10 +64,10 @@ namespace microfacet
 	{
 		return {.wmCos2Theta = LocalTransform::cos2Theta(wm), .wmTan2Theta = LocalTransform::tan2Theta(wm), .wmCosPhi = LocalTransform::cosPhi(wm), .wmSinPhi = LocalTransform::sinPhi(wm)};
 	}
-	struct Microsurface
+	struct Alpha
 	{
-		float alphaX{};
-		float alphaY{};
+		float alphaX{ 0.09f };
+		float alphaY{ 0.09f };
 		CU_DEVICE CU_INLINE void regularize()
 		{
 			if (alphaX < 0.3f)
@@ -61,7 +77,7 @@ namespace microfacet
 		}
 	};
 
-	CU_DEVICE CU_INLINE float LambdaG(const glm::vec3& w, float alphaX, float alphaY, float cosPhi, float sinPhi, float tan2Theta)
+	CU_DEVICE CU_INLINE float LambdaG(float alphaX, float alphaY, float cosPhi, float sinPhi, float tan2Theta)
 	{
 		if (isinf(tan2Theta))
 			return 0.0f;
@@ -71,20 +87,20 @@ namespace microfacet
 		return (cuda::std::sqrtf(1.0f + alpha2 * tan2Theta) - 1.0f) / 2.0f;
 	}
 	//Masking function
-	CU_DEVICE CU_INLINE float G1(const glm::vec3& wo, const ContextOutgoing& context, const Microsurface& ms)
+	CU_DEVICE CU_INLINE float G1(const ContextOutgoing& context, const Alpha& a)
 	{
 		return 1.0f / (1.0f +
-			LambdaG(wo, ms.alphaX, ms.alphaY, context.woCosPhi, context.woSinPhi, context.woTan2Theta));
+			LambdaG(a.alphaX, a.alphaY, context.woCosPhi, context.woSinPhi, context.woTan2Theta));
 	}
 	//Masking-Shadowing function
-	CU_DEVICE CU_INLINE float G(const glm::vec3& wi, const glm::vec3& wo, const ContextIncident& ctxi, const ContextOutgoing& ctxo, const Microsurface& ms)
+	CU_DEVICE CU_INLINE float G(const ContextIncident& ctxi, const ContextOutgoing& ctxo, const Alpha& a)
 	{
 		return 1.0f / (1.0f + 
-			LambdaG(wi, ms.alphaX, ms.alphaY, ctxi.wiCosPhi, ctxi.wiSinPhi, ctxi.wiTan2Theta) + 
-			LambdaG(wo, ms.alphaX, ms.alphaY, ctxo.woCosPhi, ctxo.woSinPhi, ctxo.woTan2Theta));
+			LambdaG(a.alphaX, a.alphaY, ctxi.wiCosPhi, ctxi.wiSinPhi, ctxi.wiTan2Theta) + 
+			LambdaG(a.alphaX, a.alphaY, ctxo.woCosPhi, ctxo.woSinPhi, ctxo.woTan2Theta));
 	}
 	//Microfacet distribution function
-	CU_DEVICE CU_INLINE float D(const glm::vec3& wm, const ContextMicronormal& ctxm, const Microsurface& ms)
+	CU_DEVICE CU_INLINE float D(const ContextMicronormal& ctxm, const Alpha& ms)
 	{
 		float tan2Theta{ ctxm.wmTan2Theta };
 		if (isinf(tan2Theta))
@@ -167,6 +183,32 @@ namespace microfacet
 		}
 		return res;
 	}
+	//Fresnel (Schlick) approximation
+	CU_DEVICE CU_INLINE float FSchlick(float f0, float mu)
+	{
+		return f0 + (1.0f - f0) * cuda::std::pow(1.0f - mu, 5.0f);
+	}
+	CU_DEVICE CU_INLINE glm::vec3 FSchlick(const glm::vec3& f0, float mu)
+	{
+		return f0 + (1.0f - f0) * cuda::std::pow(1.0f - mu, 5.0f);
+	}
+	//Fresnel (F82) approximation
+	CU_DEVICE CU_INLINE glm::vec3 F82(const glm::vec3& f0, float mu)
+	{
+		constexpr float muDash{ 1.0f / 7.0f };
+		constexpr float3 specularColor{ 1.0f, 1.0f, 1.0f };
+		constexpr float specularWeight{ 1.0f };
+
+		glm::vec3 f{ FSchlick(f0, mu) };
+		glm::vec3 fDash{ FSchlick(f0, muDash) };
+
+		return specularWeight * (f - ((mu * cuda::std::pow(1.0f - mu, 6.0f)) / (muDash * cuda::std::pow(1.0f - muDash, 6.0f))) * (fDash - glm::vec3{specularColor.x, specularColor.y, specularColor.z} * fDash));
+	}
+	CU_DEVICE CU_INLINE glm::vec3 FAvgIntegralForF82(const glm::vec3& f0)
+	{
+		constexpr float3 specularColor{ 1.0f, 1.0f, 1.0f };
+		return 0.877105f * f0 + (0.0648148f + 0.0752755f * f0) * glm::vec3{specularColor.x, specularColor.y, specularColor.z} - 0.0171958f;
+	}
 
 	namespace VNDF
 	{
@@ -184,11 +226,11 @@ namespace microfacet
 			DESC
 		};
 		template<SamplingMethod Method>
-		CU_DEVICE CU_INLINE glm::vec3 sample(const glm::vec3& wo, const Microsurface& ms, const glm::vec2& uv)
+		CU_DEVICE CU_INLINE glm::vec3 sample(const glm::vec3& wo, const Alpha& a, const glm::vec2& uv)
 		{
 			if constexpr (Method == ORIGINAL)
 			{
-				glm::vec3 wh{ glm::normalize(glm::vec3{ms.alphaX * wo.x, ms.alphaY * wo.y, wo.z}) };
+				glm::vec3 wh{ glm::normalize(glm::vec3{a.alphaX * wo.x, a.alphaY * wo.y, wo.z}) };
 				if (wh.z < 0.0f)
 					wh = -wh;
 
@@ -203,39 +245,39 @@ namespace microfacet
 				float pz{ cuda::std::sqrtf(cuda::std::fmax(0.0f, 1.0f - (p.x * p.x + p.y * p.y))) };
 				glm::vec3 nh{ p.x * t + p.y * b + pz * wh };
 
-				return glm::normalize(glm::vec3{ms.alphaX * nh.x, ms.alphaY * nh.y, cuda::std::fmax(1e-6f, nh.z)});
+				return glm::normalize(glm::vec3{a.alphaX * nh.x, a.alphaY * nh.y, cuda::std::fmax(1e-6f, nh.z)});
 			}
 			else if constexpr (Method == SPHERICAL_CAP)
 			{
-				glm::vec3 woStd{ glm::normalize(glm::vec3{wo.x * ms.alphaX, wo.y * ms.alphaY, wo.z}) };
+				glm::vec3 woStd{ glm::normalize(glm::vec3{wo.x * a.alphaX, wo.y * a.alphaY, wo.z}) };
 				if (woStd.z < 0.0f)
 					woStd = -woStd;
 
 				float phi{ 2.0f * glm::pi<float>() * uv.x };
 				float b{ woStd.z };
-				float z{ __fmaf_rd(1.0f - uv.y, 1.0f + b, -b) };
+				float z{ __fmaf_rn(1.0f - uv.y, 1.0f + b, -b) };
 				float sinTheta{ cuda::std::sqrtf(glm::clamp(1.0f - z * z, 0.0f, 1.0f)) };
 				glm::vec3 wiStd{ sinTheta * cuda::std::cos(phi), sinTheta * cuda::std::sin(phi), z };
 				glm::vec3 wmStd{ woStd + wiStd };
-				glm::vec3 wm{ glm::normalize(glm::vec3{wmStd.x * ms.alphaX, wmStd.y * ms.alphaY, wmStd.z}) };
+				glm::vec3 wm{ glm::normalize(glm::vec3{wmStd.x * a.alphaX, wmStd.y * a.alphaY, wmStd.z}) };
 				return wm;
 			}
 			else if constexpr (Method == BOUNDED_SPHERICAL_CAP)
 			{
-				glm::vec3 woStd{ glm::normalize(glm::vec3{wo.x * ms.alphaX, wo.y * ms.alphaY, wo.z}) };
+				glm::vec3 woStd{ glm::normalize(glm::vec3{wo.x * a.alphaX, wo.y * a.alphaY, wo.z}) };
 
 				float phi{ 2.0f * glm::pi<float>() * uv.x };
-				float a{ cuda::std::fmin(ms.alphaX, ms.alphaY) };
+				float a1{ cuda::std::fmin(a.alphaX, a.alphaY) };
 				float s{ 1.0f + glm::length(glm::vec2{wo.x, wo.y}) };
-				float a2{ a * a };
+				float a2{ a1 * a1 };
 				float s2{ s * s };
 				float k{ (1.0f - a2) * s2 / (s2 + a2 * wo.z * wo.z) };
 				float b{ wo.z > 0.0f ? k * woStd.z : woStd.z };
-				float z{ __fmaf_rd(1.0f - uv.y, 1.0f + b, -b) };
+				float z{ __fmaf_rn(1.0f - uv.y, 1.0f + b, -b) };
 				float sinTheta{ cuda::std::sqrtf(glm::clamp(1.0f - z * z, 0.0f, 1.0f)) };
 				glm::vec3 wiStd{ sinTheta * cuda::std::cos(phi), sinTheta * cuda::std::sin(phi), z };
 				glm::vec3 wmStd{ woStd + wiStd };
-				glm::vec3 wm{ glm::normalize(glm::vec3{wmStd.x * ms.alphaX, wmStd.y * ms.alphaY, wmStd.z}) };
+				glm::vec3 wm{ glm::normalize(glm::vec3{wmStd.x * a.alphaX, wmStd.y * a.alphaY, wmStd.z}) };
 				return wm;
 			}
 			else
@@ -243,27 +285,27 @@ namespace microfacet
 			return {};
 		}
 		template<SamplingMethod Method>
-		CU_DEVICE CU_INLINE float PDF(const glm::vec3& wo, const glm::vec3& wm, const float absDotWoWm, const ContextOutgoing& ctxo, const ContextMicronormal& ctxm, const Microsurface& ms)
+		CU_DEVICE CU_INLINE float PDF(const glm::vec3& wo, const float absDotWoWm, const ContextOutgoing& ctxo, const ContextMicronormal& ctxm, const Alpha& a)
 		{
 			if constexpr (Method == ORIGINAL)
 			{
-				return G1(wo, ctxo, ms) / cuda::std::fabs(LocalTransform::cosTheta(wo)) * D(wm, ctxm, ms) * absDotWoWm;
+				return G1(ctxo, a) / cuda::std::fabs(LocalTransform::cosTheta(wo)) * D(ctxm, a) * absDotWoWm;
 			}
 			else if constexpr (Method == SPHERICAL_CAP)
 			{
-				return G1(wo, ctxo, ms) / cuda::std::fabs(LocalTransform::cosTheta(wo)) * D(wm, ctxm, ms) * absDotWoWm;
+				return G1(ctxo, a) / cuda::std::fabs(LocalTransform::cosTheta(wo)) * D(ctxm, a) * absDotWoWm;
 			}
 			else if constexpr (Method == BOUNDED_SPHERICAL_CAP)
 			{
-				float ndf{ D(wm, ctxm, ms) };
-				glm::vec2 ao{ glm::vec2{wo.x, wo.y} * glm::vec2{ms.alphaX, ms.alphaY} };
+				float ndf{ D(ctxm, a) };
+				glm::vec2 ao{ glm::vec2{wo.x, wo.y} * glm::vec2{a.alphaX, a.alphaY} };
 				float len2{ glm::dot(ao, ao) };
 				float t{ cuda::std::sqrt(len2 + wo.z * wo.z) };
 				if (wo.z >= 0.0f)
 				{
-					float a{ glm::clamp(cuda::std::fmin(ms.alphaX, ms.alphaY), 0.0f, 1.0f) };
+					float a1{ glm::clamp(cuda::std::fmin(a.alphaX, a.alphaY), 0.0f, 1.0f) };
 					float s{ 1.0f + glm::length(glm::vec2{wo.x, wo.y}) };
-					float a2{ a * a };
+					float a2{ a1 * a1 };
 					float s2{ s * s };
 					float k{ (1.0f - a2) * s2 / (s2 + a2 * wo.z * wo.z) };
 					return ndf * 2.0f * absDotWoWm / (k * wo.z + t); // Jacobian is applied outside of this function, therfore different formula
@@ -275,4 +317,30 @@ namespace microfacet
 			return {};
 		}
 	}
+}
+
+namespace microsurface
+{
+	struct Base
+	{
+		glm::vec3 color{ 0.8f };
+		float metalness{ 1.0f };
+	};
+	struct Specular
+	{
+		float ior{ 1.5f };
+		float roughness{ 1.0f };
+	};
+	struct Transmission
+	{
+		// glm::vec3 color{ 1.0f }; // Transmission color is base color
+		float weight{ 0.0f };
+	};
+
+	struct Surface
+	{
+		Base base{};
+		Specular specular{};
+		Transmission transmission{};
+	};
 }

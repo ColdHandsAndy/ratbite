@@ -12,7 +12,7 @@
 namespace utility
 {
 	//Modified version of https://link.springer.com/content/pdf/10.1007/978-1-4842-4427-2_6.pdf
-	CU_DEVICE CU_INLINE glm::vec3 offsetRay(const glm::vec3& p, const glm::vec3& n)
+	CU_DEVICE CU_INLINE glm::vec3 offsetPoint(const glm::vec3& p, const glm::vec3& n)
 	{
 		constexpr float originInterval{ 1.0f / 32.0f };
 		constexpr float floatScale{ 1.0f / 65536.0f };
@@ -50,6 +50,28 @@ namespace utility
 	{
 		return -v + 2.0f * glm::dot(v, n) * n;
 	}
+	CU_DEVICE CU_INLINE glm::vec3 refract(const glm::vec3& v, glm::vec3 n, float eta, bool& valid)
+	{
+		float cosThetaI{ glm::dot(v, n) };
+		if (cosThetaI < 0.0f)
+		{
+			cosThetaI = -cosThetaI;
+			n = -n;
+		}
+
+		float sin2ThetaI{ cuda::std::fmax(0.0f, 1.0f - cosThetaI * cosThetaI) };
+		float sin2ThetaT{ sin2ThetaI / (eta * eta) };
+
+		if (sin2ThetaT >= 1.0f)
+		{
+			valid = false;
+			return {};
+		}
+		valid = true;
+
+		glm::vec3 r{ -v / eta + (cosThetaI / eta - cuda::std::sqrtf(1.0f - sin2ThetaT)) * n };
+		return r;
+	}
 	CU_DEVICE CU_INLINE glm::vec3 refract(const glm::vec3& v, glm::vec3 n, float eta, bool& valid, float* etaRel)
 	{
 		float cosThetaI{ glm::dot(v, n) };
@@ -80,7 +102,7 @@ namespace utility
 	CU_DEVICE CU_INLINE float roughnessToAlpha(float roughness)
 	{
 		// return cuda::std::sqrtf(roughness);
-		return roughness;
+		return roughness * roughness;
 	}
 
 	namespace octohedral

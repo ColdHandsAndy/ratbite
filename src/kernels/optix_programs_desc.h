@@ -96,7 +96,7 @@ namespace Program
     static constexpr char intersectionDiskName[]{ "__intersection__disk" };
 	static constexpr char closehitDiskName[]{ "__closesthit__disk" };
 	static constexpr char closehitSphereName[]{ "__closesthit__sphere" };
-    static constexpr char conductorBxDFName[]{ "__direct_callable__ConductorBxDF" };
-    static constexpr char dielectricBxDFName[]{  "__direct_callable__DielectricBxDF" };
-    static constexpr char dielectricAbsorbingBxDFName[]{  "__direct_callable__DielectricAbsorbingBxDF" };
+    static constexpr char pureConductorBxDFName[]{ "__direct_callable__PureConductorBxDF" };
+    static constexpr char pureDielectricBxDFName[]{  "__direct_callable__PureDielectricBxDF" };
+    static constexpr char complexSurfaceBxDFName[]{  "__direct_callable__ComplexSurface_BxDF" };
 }

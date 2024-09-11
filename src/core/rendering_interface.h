@@ -33,6 +33,17 @@ private:
 	std::vector<CUdeviceptr> m_attributeBuffers{};
 	std::vector<CudaImage> m_images{};
 	std::vector<CudaTexture> m_textures{};
+	enum LookUpTable
+	{
+		CONDUCTOR_ALBEDO = 0,
+		DIELECTRIC_OUTER_ALBEDO = 1,
+		DIELECTRIC_INNER_ALBEDO = 2,
+		REFLECTIVE_DIELECTRIC_OUTER_ALBEDO = 3,
+		REFLECTIVE_DIELECTRIC_INNER_ALBEDO = 4,
+
+		DESC
+	};
+	CudaCombinedTexture m_lookUpTables[DESC]{};
 
 	OptixTraversableHandle m_iasHandle{};
 	CUdeviceptr m_iasBuffer{};
@@ -52,9 +63,9 @@ private:
 		TRIANGLE,
 		DISK,
 		SPHERE,
-		CALLABLE_CONDUCTOR_BXDF,
-		CALLABLE_DIELECTRIC_BXDF,
-		CALLABLE_DIELECTRIC_ABSORBING_BXDF,
+		PURE_CONDUCTOR_BXDF,
+		PURE_DIELECTRIC_BXDF,
+		COMPLEX_SURFACE_BXDF,
 		ALL_GROUPS
 	};
 	static constexpr uint32_t m_ptProgramGroupCount{ ALL_GROUPS };
@@ -123,6 +134,7 @@ private:
 	void fillMaterials(SceneData& scene);
 	void createSBT(const SceneData& scene);
 	void fillSpectralCurvesData();
+	void loadLookUpTables();
 	void fillLightData(const SceneData& scene, const glm::vec3& cameraPosition);
 	void prepareDataForRendering(const Camera& camera, const RenderContext& renderContext);
 	void prepareDataForPreviewDrawing();

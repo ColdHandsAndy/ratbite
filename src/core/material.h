@@ -32,12 +32,26 @@ struct MaterialData
 		NONE          = 0,
 		BASE_COLOR    = 1 << 0,
 		NORMAL        = 1 << 1,
-		PBR_MET_ROUGH = 1 << 2,
+		MET_ROUGH     = 1 << 2,
+		TRANSMISSION  = 1 << 3,
+
+		DESC
+	};
+	enum class FactorTypeBitfield : uint32_t
+	{
+		NONE          = 0,
+		BASE_COLOR    = 1 << 0,
+		METALNESS     = 1 << 1,
+		ROUGHNESS     = 1 << 2,
+		TRANSMISSION  = 1 << 3,
+		CUTOFF        = 1 << 4,
 
 		DESC
 	};
 
 	uint32_t bxdfIndexSBT{};
+
+	bool doubleSided{};
 
 	IndexType indexType{};
 	CUPTR(uint8_t) indices{};
@@ -55,14 +69,25 @@ struct MaterialData
 	uint16_t emissionSpectrumDataIndex{};
 	
 	float mfRoughnessValue{};
+	float ior{};
+	float alphaCutoff{};
 
 	TextureTypeBitfield textures{};
 	bool bcTexCoordSetIndex{};
 	bool mrTexCoordSetIndex{};
 	bool nmTexCoordSetIndex{};
+	bool trTexCoordSetIndex{};
 	cudaTextureObject_t baseColorTexture{};
 	cudaTextureObject_t normalTexture{};
 	cudaTextureObject_t pbrMetalRoughnessTexture{};
+	cudaTextureObject_t transmissionTexture{};
+
+	FactorTypeBitfield factors{};
+	float baseColorFactor[4]{};
+	float metalnessFactor{};
+	float roughnessFactor{};
+	float transmissionFactor{};
 };
 ENABLE_ENUM_BITWISE_OPERATORS(MaterialData::AttributeTypeBitfield);
 ENABLE_ENUM_BITWISE_OPERATORS(MaterialData::TextureTypeBitfield);
+ENABLE_ENUM_BITWISE_OPERATORS(MaterialData::FactorTypeBitfield);

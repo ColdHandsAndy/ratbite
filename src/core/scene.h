@@ -24,15 +24,18 @@ struct SceneData
 {
 	enum class BxDF
 	{
-		CONDUCTOR,
-		DIELECTRIC,
-		DIELECTRIC_ABSORBING,
+		PURE_CONDUCTOR,
+		PURE_DIELECTRIC,
+		COMPLEX_SURFACE,
 		DESC
 	};
 	struct MaterialDescriptor //We need 'MaterialDescrioptor' to find material data before rendering
 	{
 		std::string name{};
 		BxDF bxdf{};
+
+		bool doubleSided{ false };
+
 		// Spectral Material
 		SpectralData::SpectralDataType baseIOR{};
 		SpectralData::SpectralDataType baseAC{};
@@ -46,6 +49,19 @@ struct SceneData
 		int mrTexCoordIndex{};
 		int normalTextureIndex{ -1 };
 		int nmTexCoordIndex{};
+		int transmissionTextureIndex{ -1 };
+		int trTexCoordIndex{};
+
+		bool bcFactorPresent{};
+		glm::vec4 baseColorFactor{};
+		bool alphaCutoffPresent{};
+		float alphaCutoff{};
+		bool metFactorPresent{};
+		float metalnessFactor{};
+		bool roughFactorPresent{};
+		float roughnessFactor{};
+		bool transmitFactorPresent{};
+		float transmitFactor{};
 	};
 	std::vector<MaterialDescriptor> materialDescriptors{};
 
@@ -57,6 +73,7 @@ struct SceneData
 		void* data{};
 		uint32_t width{};
 		uint32_t height{};
+		uint32_t channelCount{};
 		size_t byteSize{};
 	};
 	std::vector<ImageData> imageData{};
@@ -169,7 +186,7 @@ struct SceneData
 				count += mesh.submeshes.size();
 		return count;
 	}
-	void loadModel(const std::filesystem::path& path, const MaterialDescriptor* assignedMaterial = nullptr);
+	void loadModel(const std::filesystem::path& path, const glm::mat4& transform = glm::identity<glm::mat4>(), const MaterialDescriptor* assignedMaterial = nullptr);
 
 
 	class DiskLight
@@ -330,31 +347,43 @@ struct SceneData
 
 	SceneData()
 	{
-		MaterialDescriptor mat{ MaterialDescriptor{
-			.name = "Model",
-			.bxdf = BxDF::CONDUCTOR,
-			.baseIOR = SpectralData::SpectralDataType::C_METAL_AL_IOR,
-			.baseAC = SpectralData::SpectralDataType::C_METAL_AL_AC,
-			.baseEmission = SpectralData::SpectralDataType::NONE,
-			.roughness = 1.0f} };
-		// loadModel("A:/Models/gltf/deccer cubes/deccer_cubes.gltf", &mat);
-		loadModel("A:/Models/gltf/cornell_scene/cornell_scene.gltf", &mat);
-		// loadModel("A:/Models/gltf/cornell_knob/scene.gltf", &mat);
+		// MaterialDescriptor mat{ MaterialDescriptor{
+		// 	.name = "Model",
+		// 	.bxdf = BxDF::PURE_CONDUCTOR,
+		// 	.baseIOR = SpectralData::SpectralDataType::C_METAL_AL_IOR,
+		// 	.baseAC = SpectralData::SpectralDataType::C_METAL_AL_AC,
+		// 	.baseEmission = SpectralData::SpectralDataType::NONE,
+		// 	.roughness = 1.0f} };
+		glm::mat4 transform{ glm::identity<glm::mat4>() };
+		// transform[0] *= 0.2f;
+		// transform[1] *= 0.2f;
+		// transform[2] *= 0.2f;
+		// transform[3] += glm::vec4{0.0f, 0.0f, 0.0f, 0.0f};
+		transform[0] *= 70.2f;
+		transform[1] *= 70.2f;
+		transform[2] *= 70.2f;
+		transform[3] += glm::vec4{-200.0f, 0.0f, 0.0f, 0.0f};
+
+		// loadModel("A:/Models/gltf/flying world/scene.gltf", transform);
+		// loadModel("A:/Models/gltf/knob mat test/scene.glb", transform);
+		// loadModel("A:/Models/gltf/mc_village.glb", transform);
+		// loadModel("A:/Models/gltf/aston_martin.glb", transform);
+		loadModel("A:/Models/gltf/NormalTangentMirrorTest.glb", transform);
 
 
 		int matIndex{};
-		// matIndex = static_cast<int>(materialDescriptors.size());
-		// materialDescriptors.push_back(
-		// 		MaterialDescriptor{.name = "Light 0",
-		// 		.bxdf = BxDF::CONDUCTOR,
-		// 		.baseIOR = SpectralData::SpectralDataType::C_METAL_AL_IOR,
-		// 		.baseAC = SpectralData::SpectralDataType::C_METAL_AL_AC,
-		// 		.baseEmission = SpectralData::SpectralDataType::ILLUM_D65,
-		// 		.roughness = 1.0f});
+		matIndex = static_cast<int>(materialDescriptors.size());
+		materialDescriptors.push_back(
+				MaterialDescriptor{.name = "Light 0",
+				.bxdf = BxDF::PURE_CONDUCTOR,
+				.baseIOR = SpectralData::SpectralDataType::C_METAL_AL_IOR,
+				.baseAC = SpectralData::SpectralDataType::C_METAL_AL_AC,
+				.baseEmission = SpectralData::SpectralDataType::ILLUM_D65,
+				.roughness = 1.0f});
 		// DiskLight disk{ {-278.0f, 514.0f, 279.5f},
 		// 	80.0f,
 		// 	glm::normalize(glm::vec3{0.0f, -1.0f, 0.0f}),
-		// 	0.0f,
+		// 	1.0f,
 		// 	matIndex };
 		// diskLights.push_back(disk);
 		// DiskLight disk2{ {-278.0f, 314.0f, 279.5f},
@@ -369,24 +398,8 @@ struct SceneData
 		// 	0.2f,
 		// 	matIndex };
 		// diskLights.push_back(disk3);
-		matIndex = static_cast<int>(materialDescriptors.size());
-		materialDescriptors.push_back(
-				MaterialDescriptor{.name = "Light 1",
-				.bxdf = BxDF::CONDUCTOR,
-				.baseIOR = SpectralData::SpectralDataType::C_METAL_AL_IOR,
-				.baseAC = SpectralData::SpectralDataType::C_METAL_AL_AC,
-				.baseEmission = SpectralData::SpectralDataType::ILLUM_F5,
-				.roughness = 1.0f});
 		SphereLight sphere{ {-78.0f, 214.0f, 339.5f}, 90.0f, 0.1f, matIndex };
 		sphereLights.push_back(sphere);
-		// matIndex = static_cast<int>(materialDescriptors.size());
-		// materialDescriptors.push_back(
-		// 		MaterialDescriptor{.name = "Light 2",
-		// 		.bxdf = BxDF::CONDUCTOR,
-		// 		.baseIOR = SpectralData::SpectralDataType::C_METAL_AL_IOR,
-		// 		.baseAC = SpectralData::SpectralDataType::C_METAL_AL_AC,
-		// 		.baseEmission = SpectralData::SpectralDataType::ILLUM_F9,
-		// 		.roughness = 1.0f});
 		// SphereLight sphere1{ {-378.0f, 454.0f, 279.5f}, 120.0f, 0.1f, matIndex };
 		// sphereLights.push_back(sphere1);
 

@@ -106,7 +106,8 @@ private:
 	static void glfwWindowRefreshCallback(GLFWwindow* window)
 	{
 		UserDataGLFW* userData{ reinterpret_cast<UserDataGLFW*>(glfwGetWindowUserPointer(window)) };
-		userData->draw(userData->window, userData->rInterface, userData->ui);
+		if (userData->rInterface != nullptr && userData->ui != nullptr)
+			userData->draw(userData->window, userData->rInterface, userData->ui);
 	}
 	static void glfwFramebufferSizeCallback(GLFWwindow* window, int width, int height)
 	{
