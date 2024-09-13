@@ -52,26 +52,31 @@ CU_DEVICE CU_INLINE void unpackTraceData(const LaunchParameters& params, glm::ve
 		uint32_t& primitiveIndex, glm::vec2& barycentrics,
 		LightType& lightType, uint16_t& lightIndex,
 		MaterialData** materialDataPtr,
-		glm::quat& shadingFrame,
-		uint32_t pl0, uint32_t pl1, uint32_t pl2, uint32_t pl3, uint32_t pl4, uint32_t pl5, uint32_t pl6, uint32_t pl7, uint32_t pl8, uint32_t pl9, uint32_t pl10, uint32_t pl11)
+		glm::mat3& normalTransform,
+		uint32_t* pl)
 {
-	hP = glm::vec3{ __uint_as_float(pl0), __uint_as_float(pl1), __uint_as_float(pl2) };
-	encHGN = pl3;
-	uint32_t matIndex{ pl7 & 0xFFFF };
+	hP = glm::vec3{ __uint_as_float(pl[0]), __uint_as_float(pl[1]), __uint_as_float(pl[2]) };
+	encHGN = pl[3];
+	uint32_t matIndex{ pl[7] & 0xFFFF };
 	*materialDataPtr = params.materials + matIndex;
-	stateFlags |= static_cast<PathStateBitfield>((pl7 >> 16) & 0xFF);
-	lightType = static_cast<LightType>(pl7 >> 24);
+	stateFlags |= static_cast<PathStateBitfield>((pl[7] >> 16) & 0xFF);
+	lightType = static_cast<LightType>(pl[7] >> 24);
 	if (static_cast<bool>(stateFlags & PathStateBitfield::TRIANGULAR_GEOMETRY))
 	{
-		primitiveIndex = pl4;
-		barycentrics = {__uint_as_float(pl5), __uint_as_float(pl6)};
+		primitiveIndex = pl[4];
+		barycentrics = {__uint_as_float(pl[5]), __uint_as_float(pl[6])};
 	}
 	else
-		lightIndex = pl4;
-	shadingFrame.x = __uint_as_float(pl8);
-	shadingFrame.y = __uint_as_float(pl9);
-	shadingFrame.z = __uint_as_float(pl10);
-	shadingFrame.w = __uint_as_float(pl11);
+		lightIndex = pl[4];
+	normalTransform[0][0] = __uint_as_float(pl[8]);
+	normalTransform[1][0] = __uint_as_float(pl[9]);
+	normalTransform[2][0] = __uint_as_float(pl[10]);
+	normalTransform[0][1] = __uint_as_float(pl[11]);
+	normalTransform[1][1] = __uint_as_float(pl[12]);
+	normalTransform[2][1] = __uint_as_float(pl[13]);
+	normalTransform[0][2] = __uint_as_float(pl[14]);
+	normalTransform[1][2] = __uint_as_float(pl[15]);
+	normalTransform[2][2] = __uint_as_float(pl[16]);
 }
 CU_DEVICE CU_INLINE void updateStateFlags(PathStateBitfield& stateFlags)
 {
@@ -88,7 +93,9 @@ CU_DEVICE CU_INLINE void resolveSample(SampledSpectrum& L, const SampledSpectrum
 		L[i] = pdf[i] != 0.0f ? L[i] / pdf[i] : 0.0f;
 	}
 }
-CU_DEVICE CU_INLINE void resolveAttributes(const MaterialData& material, const PathStateBitfield& stateFlags, const glm::vec2& barycentrics, uint32_t primitiveIndex, glm::vec2& texCoord1, glm::vec2& texCoord2)
+CU_DEVICE CU_INLINE void resolveAttributes(const MaterialData& material, const PathStateBitfield& stateFlags, const glm::vec2& barycentrics, uint32_t primitiveIndex,
+		const glm::vec3& geoNormal, const glm::mat3& normalTransform,
+		glm::vec2& texCoord1, glm::vec2& texCoord2, glm::vec3& normal, glm::vec3& tangent, bool& flipBitangent)
 {
 	float baryWeights[3]{ 1.0f - barycentrics.x - barycentrics.y, barycentrics.x, barycentrics.y };
 	uint32_t indices[3];
@@ -121,6 +128,70 @@ CU_DEVICE CU_INLINE void resolveAttributes(const MaterialData& material, const P
 	// attr = material.attributeData + material.colorOffset;
 	// if (static_cast<bool>(material.attributes & MaterialData::AttributeTypeBitfield::COLOR))
 	// 	;
+	if (static_cast<bool>(material.attributes & (MaterialData::AttributeTypeBitfield::NORMAL | MaterialData::AttributeTypeBitfield::FRAME)))
+	{
+		glm::vec3 shadingNormal{};
+		glm::vec3 shadingTangent{};
+		if (static_cast<bool>(material.attributes & MaterialData::AttributeTypeBitfield::FRAME))
+		{
+			attr = attribBuffer + material.frameOffset;
+
+			glm::quat frames[3]{
+				*reinterpret_cast<glm::quat*>(attr + attributesStride * indices[0]),
+				*reinterpret_cast<glm::quat*>(attr + attributesStride * indices[1]),
+				*reinterpret_cast<glm::quat*>(attr + attributesStride * indices[2]), };
+			flipBitangent = cuda::std::signbit(frames[0].w);
+			glm::mat3 frameMats[3]{
+				glm::mat3_cast(frames[0]),
+				glm::mat3_cast(frames[1]),
+				glm::mat3_cast(frames[2]), };
+			glm::vec3 normals[3]{ frameMats[0][1], frameMats[1][1], frameMats[2][1] };
+			glm::vec3 tangents[3]{ frameMats[0][0], frameMats[1][0], frameMats[2][0] };
+			shadingNormal = glm::vec3{
+					baryWeights[0] * normals[0]
+					+
+					baryWeights[1] * normals[1]
+					+
+					baryWeights[2] * normals[2] };
+			shadingTangent =
+				baryWeights[0] * tangents[0]
+				+
+				baryWeights[1] * tangents[1]
+				+
+				baryWeights[2] * tangents[2];
+		}
+		else
+		{
+			attr = attribBuffer + material.normalOffset;
+
+			glm::vec3 normals[3]{
+				utility::octohedral::decode(*reinterpret_cast<glm::vec2*>(attr + attributesStride * indices[0])),
+				utility::octohedral::decode(*reinterpret_cast<glm::vec2*>(attr + attributesStride * indices[1])),
+				utility::octohedral::decode(*reinterpret_cast<glm::vec2*>(attr + attributesStride * indices[2])), };
+			shadingNormal = glm::vec3{
+				(1.0f - barycentrics.x - barycentrics.y) * normals[0]
+				+
+				barycentrics.x * normals[1]
+				+
+				barycentrics.y * normals[2] };
+			float sign{ cuda::std::copysignf(1.0f, shadingNormal.z) };
+			float a{ -1.0f / (sign + shadingNormal.z) };
+			float b{ shadingNormal.x * shadingNormal.y * a };
+			shadingTangent = glm::vec3(1.0f + sign * (shadingNormal.x * shadingNormal.x) * a, sign * b, -sign * shadingNormal.x);
+		}
+
+		normal = glm::normalize(normalTransform * shadingNormal);
+		glm::mat3 vectorTransform{ glm::inverse(glm::transpose(normalTransform)) };
+		tangent = glm::normalize(vectorTransform * shadingTangent);
+	}
+	else
+	{
+		normal = geoNormal;
+		float sign{ cuda::std::copysignf(1.0f, geoNormal.z) };
+		float a{ -1.0f / (sign + geoNormal.z) };
+		float b{ geoNormal.x * geoNormal.y * a };
+		tangent = glm::vec3(1.0f + sign * (geoNormal.x * geoNormal.x) * a, sign * b, -sign * geoNormal.x);
+	}
 	if (static_cast<bool>(material.attributes & MaterialData::AttributeTypeBitfield::TEX_COORD_1))
 	{
 		attr = attribBuffer + material.texCoord1Offset;
@@ -140,23 +211,25 @@ CU_DEVICE CU_INLINE void resolveAttributes(const MaterialData& material, const P
 }
 CU_DEVICE CU_INLINE void resolveTextures(const MaterialData& material,
 		const PathStateBitfield& stateFlags, const glm::vec3& rayDir,
-		const glm::vec2& texCoords1, const glm::vec2& texCoords2, const glm::vec3& geometryNormal, const glm::quat& shadingFrame,
+		const glm::vec2& texCoords1, const glm::vec2& texCoords2, const glm::vec3& normal, const glm::vec3& tangent, bool flipTangent,
 		LocalTransform& localTransform, microsurface::Surface& surface, bool& skipHit)
 {
-	glm::mat3 frame{ glm::mat3_cast(shadingFrame) };
+	glm::vec3 bitangent{ glm::cross(tangent, normal) * (flipTangent ? -1.0f : 1.0f) };
+	glm::mat3 frame{ bitangent, tangent, normal };
 	glm::vec3 n{};
 	if (static_cast<bool>(material.textures & MaterialData::TextureTypeBitfield::NORMAL))
 	{
 		float2 uv{ material.nmTexCoordSetIndex ? float2{texCoords2.x, texCoords2.y} : float2{texCoords1.x, texCoords1.y} };
 		float4 nm{ tex2D<float4>(material.normalTexture, uv.x, uv.y) };
-		n = glm::normalize(glm::vec3{-(nm.y * 2.0f - 1.0f), nm.x * 2.0f - 1.0f, nm.z * 2.0f - 1.0f});
+		n = glm::normalize(glm::vec3{nm.y * 2.0f - 1.0f, nm.x * 2.0f - 1.0f, nm.z * 2.0f - 1.0f});
 	}
 	else
 		n = glm::vec3{0.0f, 0.0f, 1.0f};
 	n = frame * n;
 
-	glm::vec3 shadingBitangent{ glm::normalize(glm::cross(frame[1], n)) };
-	glm::vec3 shadingTangent{ glm::normalize(glm::cross(n, shadingBitangent)) * (static_cast<bool>(stateFlags & PathStateBitfield::RIGHT_HANDED_FRAME) ? -1.0f : 1.0f) };
+	glm::vec3 shadingBitangent{ glm::normalize(glm::cross(tangent, n)) };
+	glm::vec3 shadingTangent{ glm::normalize(glm::cross(n, shadingBitangent)) };
+	shadingBitangent *= (flipTangent ? -1.0f : 1.0f);
 	frame = glm::mat3{shadingBitangent, shadingTangent, n};
 	localTransform = LocalTransform{frame};
 
@@ -361,6 +434,9 @@ extern "C" __global__ void __closesthit__triangle()
 
 	float WFO[12]{};
 	optixGetObjectToWorldTransformMatrix(WFO);
+	float OFW[12]{};
+	optixGetWorldToObjectTransformMatrix(OFW);
+
 	float3 hpos{ hposO.x * WFO[0] + hposO.y * WFO[1] + hposO.z * WFO[2]  + WFO[3], 
 				 hposO.x * WFO[4] + hposO.y * WFO[5] + hposO.z * WFO[6]  + WFO[7], 
 				 hposO.x * WFO[8] + hposO.y * WFO[9] + hposO.z * WFO[10] + WFO[11] };
@@ -370,108 +446,15 @@ extern "C" __global__ void __closesthit__triangle()
 	float3 geometryNormal{u.y * v.z - u.z * v.y,
 						  u.z * v.x - u.x * v.z,
 						  u.x * v.y - u.y * v.x};
-	geometryNormal = optixTransformNormalFromObjectToWorldSpace(geometryNormal);
+	geometryNormal = {geometryNormal.x * OFW[0] + geometryNormal.y * OFW[4] + geometryNormal.z * OFW[8], 
+				      geometryNormal.x * OFW[1] + geometryNormal.y * OFW[5] + geometryNormal.z * OFW[9], 
+				      geometryNormal.x * OFW[2] + geometryNormal.y * OFW[6] + geometryNormal.z * OFW[10]};
 	// bool flipNormals{ optixIsFrontFaceHit() && material.doubleSided };
 	bool flipNormals{ false };
 	float normalizeDiv{ (flipNormals ? -1.0f : 1.0f) * __frsqrt_rn(geometryNormal.x * geometryNormal.x + geometryNormal.y * geometryNormal.y + geometryNormal.z * geometryNormal.z) };
 	geometryNormal = {geometryNormal.x * normalizeDiv, geometryNormal.y * normalizeDiv, geometryNormal.z * normalizeDiv};
 	uint32_t encGeometryNormal{ utility::octohedral::encodeU32(glm::vec3{geometryNormal.x, geometryNormal.y, geometryNormal.z}) };
 
-	uint32_t indices[3];
-	switch (material.indexType)
-	{
-		case IndexType::UINT_16:
-			{
-				uint16_t* idata{ reinterpret_cast<uint16_t*>(material.indices) + primitiveIndex * 3 };
-				indices[0] = idata[0];
-				indices[1] = idata[1];
-				indices[2] = idata[2];
-			}
-			break;
-		case IndexType::UINT_32:
-			{
-				uint32_t* idata{ reinterpret_cast<uint32_t*>(material.indices) + primitiveIndex * 3 };
-				indices[0] = idata[0];
-				indices[1] = idata[1];
-				indices[2] = idata[2];
-			}
-			break;
-		default:
-			break;
-	}
-
-	uint8_t* attribBuffer{ material.attributeData };
-	uint32_t attributesStride{ material.attributeStride };
-	glm::mat3 frameMat;
-	bool rhFrame{ false };
-	if (static_cast<bool>(material.attributes & (MaterialData::AttributeTypeBitfield::NORMAL | MaterialData::AttributeTypeBitfield::FRAME)))
-	{
-		glm::vec3 shadingNormal{};
-		glm::vec3 shadingTangent{};
-		if (static_cast<bool>(material.attributes & MaterialData::AttributeTypeBitfield::FRAME))
-		{
-			uint32_t attribOffset{ material.frameOffset };
-			uint8_t* frameAtt{ attribBuffer + attribOffset };
-
-			glm::quat frames[3]{
-				*reinterpret_cast<glm::quat*>(frameAtt + attributesStride * indices[0]),
-				*reinterpret_cast<glm::quat*>(frameAtt + attributesStride * indices[1]),
-				*reinterpret_cast<glm::quat*>(frameAtt + attributesStride * indices[2]), };
-			rhFrame = cuda::std::signbit(frames[0].w);
-			glm::mat3 frameMats[3]{
-				glm::mat3_cast(frames[0]),
-				glm::mat3_cast(frames[1]),
-				glm::mat3_cast(frames[2]), };
-			glm::vec3 normals[3]{ frameMats[0][1], frameMats[1][1], frameMats[2][1] };
-			glm::vec3 tangents[3]{ frameMats[0][0], frameMats[1][0], frameMats[2][0] };
-			shadingTangent =
-				(1.0f - barycentrics.x - barycentrics.y) * tangents[0]
-				+
-				barycentrics.x * tangents[1]
-				+
-				barycentrics.y * tangents[2];
-			shadingNormal = glm::vec3{
-				(1.0f - barycentrics.x - barycentrics.y) * normals[0]
-				+
-				barycentrics.x * normals[1]
-				+
-				barycentrics.y * normals[2] };
-		}
-		else
-		{
-			uint32_t attribOffset{ material.normalOffset };
-			uint8_t* normalAtt{ attribBuffer + attribOffset };
-			glm::vec3 normals[3]{
-				utility::octohedral::decode(*reinterpret_cast<glm::vec2*>(normalAtt + attributesStride * indices[0])),
-				utility::octohedral::decode(*reinterpret_cast<glm::vec2*>(normalAtt + attributesStride * indices[1])),
-				utility::octohedral::decode(*reinterpret_cast<glm::vec2*>(normalAtt + attributesStride * indices[2])), };
-			shadingNormal = glm::vec3{
-				(1.0f - barycentrics.x - barycentrics.y) * normals[0]
-				+
-				barycentrics.x * normals[1]
-				+
-				barycentrics.y * normals[2] };
-			float sign{ cuda::std::copysignf(1.0f, shadingNormal.z) };
-			float a{ -1.0f / (sign + shadingNormal.z) };
-			float b{ shadingNormal.x * shadingNormal.y * a };
-			shadingTangent = glm::vec3(1.0f + sign * (shadingNormal.x * shadingNormal.x) * a, sign * b, -sign * shadingNormal.x);
-		}
-		float3 sNW{ optixTransformNormalFromObjectToWorldSpace(float3{shadingNormal.x, shadingNormal.y, shadingNormal.z}) };
-		shadingNormal = glm::normalize(glm::vec3{sNW.x, sNW.y, sNW.z});
-		shadingNormal = flipNormals ? -shadingNormal : shadingNormal;
-		float3 tNW{ optixTransformNormalFromObjectToWorldSpace(float3{shadingTangent.x, shadingTangent.y, shadingTangent.z}) };
-		shadingTangent = glm::normalize(glm::vec3{tNW.x, tNW.y, tNW.z});
-
-		glm::vec3 shadingBitangent{ glm::normalize(glm::cross(shadingTangent, shadingNormal)) };
-		shadingTangent = glm::normalize(glm::cross(shadingNormal, shadingBitangent));
-
-		frameMat = glm::mat3{shadingBitangent, shadingTangent, shadingNormal};
-	}
-	else
-	{
-		frameMat = LocalTransform::genFromLocalMatrixFromNormal(glm::vec3{geometryNormal.x, geometryNormal.y, geometryNormal.z});
-	}
-	glm::quat frame{ glm::quat_cast(frameMat) };
 
 	optixSetPayload_0(__float_as_uint(hpos.x));
 	optixSetPayload_1(__float_as_uint(hpos.y));
@@ -482,12 +465,17 @@ extern "C" __global__ void __closesthit__triangle()
 	optixSetPayload_6(__float_as_uint(barycentrics.y));
 	optixSetPayload_7(
 			(static_cast<uint32_t>(LightType::NONE) << 24) |
-			(static_cast<uint32_t>((rhFrame ? PathStateBitfield::RIGHT_HANDED_FRAME : PathStateBitfield::NO_FLAGS) | PathStateBitfield::TRIANGULAR_GEOMETRY) << 16) |
+			(static_cast<uint32_t>(PathStateBitfield::TRIANGULAR_GEOMETRY) << 16) |
 			(materialIndex & 0xFFFF));
-	optixSetPayload_8(__float_as_uint(frame.x));
-	optixSetPayload_9(__float_as_uint(frame.y));
-	optixSetPayload_10(__float_as_uint(frame.z));
-	optixSetPayload_11(__float_as_uint(frame.w));
+	optixSetPayload_8(__float_as_uint(OFW[0]));
+	optixSetPayload_9(__float_as_uint(OFW[4]));
+	optixSetPayload_10(__float_as_uint(OFW[8]));
+	optixSetPayload_11(__float_as_uint(OFW[1]));
+	optixSetPayload_12(__float_as_uint(OFW[5]));
+	optixSetPayload_13(__float_as_uint(OFW[9]));
+	optixSetPayload_14(__float_as_uint(OFW[2]));
+	optixSetPayload_15(__float_as_uint(OFW[6]));
+	optixSetPayload_16(__float_as_uint(OFW[10]));
 }
 extern "C" __global__ void __intersection__disk()
 {
@@ -894,11 +882,13 @@ extern "C" __device__ void __direct_callable__ComplexSurface_BxDF(const Material
 	}
 
 	float roughness{ cuda::std::fmax(0.001f, surface.specular.roughness) };
+	if (roughness < 0.01f)
+		stateFlags = stateFlags | PathStateBitfield::CURRENT_HIT_SPECULAR;
 	float alpha{ utility::roughnessToAlpha(roughness) };
 	microfacet::Alpha alphaMS{ .alphaX = alpha, .alphaY = alpha };
 
-	// if (static_cast<bool>(stateFlags & PathStateBitfield::REGULARIZED))
-	// 	alphaMS.regularize();
+	if (static_cast<bool>(stateFlags & PathStateBitfield::REGULARIZED))
+		alphaMS.regularize();
 	glm::vec3 wo{ locWo };
 	microfacet::ContextOutgoing ctxo{ microfacet::createContextOutgoing(wo) };
 	glm::vec3 wm{};
@@ -1122,7 +1112,7 @@ extern "C" __global__ void __raygen__main()
 		uint32_t depth{ 0 };
 		do
 		{
-			uint32_t pl0, pl1, pl2, pl3, pl4, pl5, pl6, pl7, pl8, pl9, pl10, pl11;
+			uint32_t pl[17];
 			optixTrace(OPTIX_PAYLOAD_TYPE_ID_0, //Payload type
 					   parameters.traversable, //Traversable handle
 					   { rO.x, rO.y, rO.z }, //Ray origin
@@ -1135,19 +1125,19 @@ extern "C" __global__ void __raygen__main()
 					   0, //SBT offset
 					   1, //SBT stride
 					   0, //SBT miss program index
-					   pl0, pl1, pl2, pl3, pl4, pl5, pl6, pl7, pl8, pl9, pl10, pl11); //Payload
+					   pl[0], pl[1], pl[2], pl[3], pl[4], pl[5], pl[6], pl[7], pl[8], pl[9], pl[10], pl[11], pl[12], pl[13], pl[14], pl[15], pl[16]); //Payload
 
 			glm::vec3 hP; //Hit position
 			uint32_t encHitGNormal;
 			uint32_t primitiveIndex;
 			glm::vec2 barycentrics;
 			MaterialData* material;
-			glm::quat shadingFrame;
+			glm::mat3 normalTransform;
 			unpackTraceData(parameters, hP, encHitGNormal,
 					stateFlags,
 					primitiveIndex, barycentrics,
-					lightType, lightIndex, &material, shadingFrame,
-					pl0, pl1, pl2, pl3, pl4, pl5, pl6, pl7, pl8, pl9, pl10, pl11);
+					lightType, lightIndex, &material, normalTransform,
+					pl);
 
 			if (lightType == LightType::SKY)
 			{
@@ -1176,8 +1166,12 @@ extern "C" __global__ void __raygen__main()
 			{
 				glm::vec2 texC1;
 				glm::vec2 texC2;
-				resolveAttributes(*material, stateFlags, barycentrics, primitiveIndex, texC1, texC2);
-				resolveTextures(*material, stateFlags, rD, texC1, texC2, hNG, shadingFrame, localTransform, surface, skipHit);
+				glm::vec3 normal;
+				glm::vec3 tangent;
+				bool flipTangent{ false };
+				resolveAttributes(*material, stateFlags, barycentrics, primitiveIndex, hNG, normalTransform,
+						texC1, texC2, normal, tangent, flipTangent);
+				resolveTextures(*material, stateFlags, rD, texC1, texC2, normal, tangent, flipTangent, localTransform, surface, skipHit);
 			}
 			else
 				localTransform = LocalTransform{hNG};
@@ -1197,6 +1191,16 @@ extern "C" __global__ void __raygen__main()
 						 L, wavelengths, throughputWeight,
 						 bxdfPDF, rD, stateFlags, refractionScale);
 			}
+
+			// TODO: Debug color output
+			//
+			// glm::vec3 c{};
+			// if ((static_cast<uint32_t>(texC1.x * 50.0f) % 2) == ((static_cast<uint32_t>(texC1.y * 50.0f) % 2) == 0 ? 1 : 0))
+			// 	c = glm::vec3{0.8f};
+			// else
+			// 	c = glm::vec3{0.5f};
+			// L = color::RGBtoSpectrum(c, wavelengths, *parameters.spectralBasisR, *parameters.spectralBasisG, *parameters.spectralBasisB);
+			//
 
 			if (float tMax{ throughputWeight.max() * refractionScale }; tMax < 1.0f && depth > 0)
 			{

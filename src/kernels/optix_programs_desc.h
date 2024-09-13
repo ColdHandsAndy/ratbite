@@ -8,7 +8,7 @@ namespace Program
     static constexpr unsigned int maxDCDepth{ 1 };
     static constexpr unsigned int maxCCDepth{ 0 };
 
-    static constexpr unsigned int payloadValueCount{ 12 };
+    static constexpr unsigned int payloadValueCount{ 17 };
     static constexpr unsigned int payloadSemantics[payloadValueCount]
     {
         // Position
@@ -64,7 +64,37 @@ namespace Program
         OPTIX_PAYLOAD_SEMANTICS_AH_NONE           |
         OPTIX_PAYLOAD_SEMANTICS_IS_WRITE,
 
-		// Shading frame
+		// Normal transform
+        OPTIX_PAYLOAD_SEMANTICS_TRACE_CALLER_READ |
+        OPTIX_PAYLOAD_SEMANTICS_CH_WRITE          |
+        OPTIX_PAYLOAD_SEMANTICS_MS_NONE           |
+        OPTIX_PAYLOAD_SEMANTICS_AH_NONE           |
+        OPTIX_PAYLOAD_SEMANTICS_IS_NONE,
+
+        OPTIX_PAYLOAD_SEMANTICS_TRACE_CALLER_READ |
+        OPTIX_PAYLOAD_SEMANTICS_CH_WRITE          |
+        OPTIX_PAYLOAD_SEMANTICS_MS_NONE           |
+        OPTIX_PAYLOAD_SEMANTICS_AH_NONE           |
+        OPTIX_PAYLOAD_SEMANTICS_IS_NONE,
+
+        OPTIX_PAYLOAD_SEMANTICS_TRACE_CALLER_READ |
+        OPTIX_PAYLOAD_SEMANTICS_CH_WRITE          |
+        OPTIX_PAYLOAD_SEMANTICS_MS_NONE           |
+        OPTIX_PAYLOAD_SEMANTICS_AH_NONE           |
+        OPTIX_PAYLOAD_SEMANTICS_IS_NONE,
+
+        OPTIX_PAYLOAD_SEMANTICS_TRACE_CALLER_READ |
+        OPTIX_PAYLOAD_SEMANTICS_CH_WRITE          |
+        OPTIX_PAYLOAD_SEMANTICS_MS_NONE           |
+        OPTIX_PAYLOAD_SEMANTICS_AH_NONE           |
+        OPTIX_PAYLOAD_SEMANTICS_IS_NONE,
+
+        OPTIX_PAYLOAD_SEMANTICS_TRACE_CALLER_READ |
+        OPTIX_PAYLOAD_SEMANTICS_CH_WRITE          |
+        OPTIX_PAYLOAD_SEMANTICS_MS_NONE           |
+        OPTIX_PAYLOAD_SEMANTICS_AH_NONE           |
+        OPTIX_PAYLOAD_SEMANTICS_IS_NONE,
+
         OPTIX_PAYLOAD_SEMANTICS_TRACE_CALLER_READ |
         OPTIX_PAYLOAD_SEMANTICS_CH_WRITE          |
         OPTIX_PAYLOAD_SEMANTICS_MS_NONE           |

@@ -31,13 +31,13 @@ void initialize()
 }
 void draw(Window* window, const RenderingInterface* rInterface, UI* ui)
 {
-	rInterface->drawPreview(window->getWidth(), window->getHeight());
+	// rInterface->drawPreview(window->getWidth(), window->getHeight());
 
 	ui->renderInterface();
 
 	glfwSwapBuffers(window->getGLFWwindow());
 }
-void menu(UI& ui, Window& window, Camera& camera, RenderContext& rContext, SceneData& scene, int currentSampleCount)
+void interface(UI& ui, Window& window, Camera& camera, RenderContext& rContext, SceneData& scene, GLuint renderResult, int currentSampleCount)
 {
 	ui.startImGuiRecording();
 	constexpr ImColor infoColor{ 0.99f, 0.33f, 0.29f };
@@ -53,8 +53,7 @@ void menu(UI& ui, Window& window, Camera& camera, RenderContext& rContext, Scene
 		ImGuiWindowFlags_NoResize |
 		ImGuiWindowFlags_NoMove |
 		ImGuiWindowFlags_NoCollapse |
-		ImGuiWindowFlags_MenuBar |
-		ImGuiWindowFlags_NoBackground;
+		ImGuiWindowFlags_MenuBar;
 
 	ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0.0f, 0.0f));  
 	bool show{ ImGui::Begin("Dockspace", NULL, windowFlags) };
@@ -70,9 +69,34 @@ void menu(UI& ui, Window& window, Camera& camera, RenderContext& rContext, Scene
 	ImGui::End();     
 
 
-	// ImGui::Begin("Render");
-	// ImGui::Image(, );
-	// ImGui::End();
+	ImGui::Begin("Render");
+
+	ImVec2 vMin{ ImGui::GetWindowContentRegionMin() };
+	ImVec2 vMax{ ImGui::GetWindowContentRegionMax() };
+	vMin.x += ImGui::GetWindowPos().x;
+	vMin.y += ImGui::GetWindowPos().y;
+	vMax.x += ImGui::GetWindowPos().x;
+	vMax.y += ImGui::GetWindowPos().y;
+	float renderWinWidth{ vMax.x - vMin.x };
+	float renderWinHeight{ vMax.y - vMin.y };
+
+	static float renderScale{ 0.2f };
+	int renderWidth{ std::max(std::min(4096, static_cast<int>(renderWinWidth * renderScale)), 0) };
+	if (renderWidth != rContext.getRenderWidth())
+		rContext.setRenderWidth(std::max(renderWidth, 1));
+	int renderHeight{ std::max(std::min(4096, static_cast<int>(renderWinHeight * renderScale)), 0) };
+	if (renderHeight != rContext.getRenderHeight())
+		rContext.setRenderHeight(std::max(renderHeight, 1));
+
+	if (renderWidth != 0 && renderHeight != 0 && !ImGui::IsWindowCollapsed())
+	{
+		ImGui::GetWindowDrawList()->AddImage(reinterpret_cast<ImTextureID>(renderResult), vMin, vMax, ImVec2(0.0f, 1.0f), ImVec2(1.0f, 0.0f));
+		ui.setCursorIsOverRenderWindow(
+				ImGui::GetMousePos().x > vMin.x && ImGui::GetMousePos().x < vMax.x &&
+				ImGui::GetMousePos().y > vMin.y && ImGui::GetMousePos().y < vMax.y);
+	}
+
+	ImGui::End();
 
 
 	bool changed{ false };
@@ -113,6 +137,17 @@ void menu(UI& ui, Window& window, Camera& camera, RenderContext& rContext, Scene
 	{
 		ImGui::SeparatorText("Render settings");
 
+		changed = ImGui::SliderFloat("Render scale", &renderScale, 0.005f, 1.0f, "%.4f");
+		if (changed)
+		{
+			renderWidth = std::max(std::min(4096, static_cast<int>(renderWinWidth * renderScale)), 1);
+			if (renderWidth != rContext.getRenderWidth())
+				rContext.setRenderWidth(renderWidth);
+			renderHeight = std::max(std::min(4096, static_cast<int>(renderWinHeight * renderScale)), 1);
+			if (renderHeight != rContext.getRenderHeight())
+				rContext.setRenderHeight(renderHeight);
+		}
+
 		static int sampleCount{ rContext.getSampleCount() };
 		changed = ImGui::InputInt("Sample count", &sampleCount);
 		sampleCount = std::max(1, std::min(1048576, sampleCount));
@@ -123,22 +158,18 @@ void menu(UI& ui, Window& window, Camera& camera, RenderContext& rContext, Scene
 		pathLength = std::max(1, std::min(65535, pathLength));
 		if (changed) rContext.setPathLength(pathLength);
 
-		static int renderWidth{ rContext.getRenderWidth() };
-		ImGui::DragInt("Render width", &renderWidth, 4, 1, 2048, "%d", ImGuiSliderFlags_AlwaysClamp);
-		if ((renderWidth != rContext.getRenderWidth()) && !ui.keyboardIsCaptured())
-			rContext.setRenderWidth(renderWidth);
-
-		static int renderHeight{ rContext.getRenderHeight() };
-		ImGui::DragInt("Render height", &renderHeight, 4, 1, 2048, "%d", ImGuiSliderFlags_AlwaysClamp);
-		if ((renderHeight != rContext.getRenderHeight()) && !ui.keyboardIsCaptured())
-			rContext.setRenderHeight(renderHeight);
-
 		constexpr float exposureParameterization{ 10.0f };
 		static float exposure{ rContext.getImageExposure() * (1.0f / exposureParameterization) };
 		changed = ImGui::SliderFloat("Image exposure", &exposure, -1.0f, 1.0f, "%.5f", ImGuiSliderFlags_AlwaysClamp | ImGuiSliderFlags_Logarithmic);
 		if (changed) rContext.setImageExposure(exposure * exposureParameterization);
 
+
 		ImGui::SeparatorText("Camera settings");
+
+		static float movingSpeed{ static_cast<float>(camera.getMovingSpeed()) };
+		changed = ImGui::DragFloat("Moving speed", &movingSpeed, 4.0f, 1.0f, 1000.0f);
+		if (changed) camera.setMovingSpeed(movingSpeed);
+
 		static bool checkbox{ camera.depthOfFieldEnabled() };
 		changed = ImGui::Checkbox("Depth of Field", &checkbox);
 		if (changed) camera.setDepthOfField(checkbox);
@@ -410,8 +441,6 @@ void menu(UI& ui, Window& window, Camera& camera, RenderContext& rContext, Scene
 	ImGui::SeparatorText("Info");
 	ImGui::Text("Sample count: %d", currentSampleCount);
 
-	ImGui::SeparatorText("##");
-	ImGui::TextColored(infoColor, "Press \"H\" to hide this menu.");
 	ImGui::End();
 
 	rContext.setPause(pause);
@@ -448,16 +477,22 @@ void input(Window& window, UI& ui, Camera& camera, RenderContext& rContext)
 		camera.addMoveDir(Camera::Direction::DOWN);
 	camera.move(delta);
 
-	bool rightMouseClick{ false };
+	static bool rotateCam{ false };
+	static int prevState{ GLFW_RELEASE };
 	state = glfwGetMouseButton(glfwwindow, GLFW_MOUSE_BUTTON_LEFT);
-	if (state == GLFW_PRESS)
-		rightMouseClick = true;
+	if (state == GLFW_PRESS && prevState == GLFW_RELEASE && ui.cursorIsOverRenderWindow())
+	{
+		rotateCam = true;
+	}
+	else if (state == GLFW_RELEASE)
+		rotateCam = false;
+	prevState = state;
 	static double xposPrev{};
 	static double yposPrev{};
 	static double xpos{};
 	static double ypos{};
 	glfwGetCursorPos(glfwwindow, &xpos, &ypos);
-	if (!first && rightMouseClick && !ui.mouseIsCaptured())
+	if (!first && rotateCam)
 	{
 		double xd{ (xpos - xposPrev) };
 		double yd{ (ypos - yposPrev) };
@@ -465,12 +500,6 @@ void input(Window& window, UI& ui, Camera& camera, RenderContext& rContext)
 	}
 	xposPrev = xpos;
 	yposPrev = ypos;
-
-	static int hKeyState{ GLFW_RELEASE };
-	state = glfwGetKey(glfwwindow, GLFW_KEY_H);
-	if (state == GLFW_RELEASE && hKeyState == GLFW_PRESS)
-		ui.toggle();
-	hKeyState = state;
 
 	first = false;
 }
@@ -509,7 +538,7 @@ int main(int argc, char** argv)
 		if ((!rInterface.renderingIsFinished() || changesMade) && !rContext.paused())
 			rInterface.render(rContext, camera, scene, changesMade);
 
-		menu(ui, window, camera, rContext, scene, rInterface.getProcessedSampleCount());
+		interface(ui, window, camera, rContext, scene, rInterface.getPreview(), rInterface.getProcessedSampleCount());
 
 		draw(&window, &rInterface, &ui);
 		

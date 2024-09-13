@@ -1186,6 +1186,9 @@ int RenderingInterface::bxdfTypeToIndex(SceneData::BxDF type)
 
 void RenderingInterface::resolveRender(const glm::mat3& colorspaceTransform)
 {
+	if (m_imageCudaSurface != cudaSurfaceObject_t{})
+		CUDA_CHECK(cudaDestroySurfaceObject(m_imageCudaSurface));
+
 	CUDA_CHECK(cudaGraphicsMapResources(1, &m_graphicsResource, m_streams[0]));
 	CUDA_CHECK(cudaGraphicsSubResourceGetMappedArray(&m_imageCudaArray, m_graphicsResource, 0, 0));
 	cudaResourceDesc resDesc{ .resType = cudaResourceTypeArray, .res = { m_imageCudaArray } };
@@ -1213,7 +1216,6 @@ void RenderingInterface::processChanges(RenderContext& renderContext, Camera& ca
 	if (m_pathLength != renderContext.getPathLength())
 	{
 		m_pathLength = renderContext.getPathLength();
-
 		m_launchParameters.maxPathLength = m_pathLength;
 	}	
 	if (m_launchWidth != renderContext.getRenderWidth() || m_launchHeight != renderContext.getRenderHeight())
@@ -1245,7 +1247,9 @@ void RenderingInterface::processChanges(RenderContext& renderContext, Camera& ca
 		glBindTexture(GL_TEXTURE_2D, 0);
 	}
 	if (m_imageExposure != renderContext.getImageExposure())
+	{
 		m_imageExposure = renderContext.getImageExposure();
+	}
 
 	if (camera.orientationChanged())
 	{
@@ -1262,7 +1266,9 @@ void RenderingInterface::processChanges(RenderContext& renderContext, Camera& ca
 
 	bool refillLightData{ camera.positionChanged() || scene.lightChangesMade() };
 	if (refillLightData)
+	{
 		fillLightData(scene, camera.getPosition());
+	}
 
 	bool rebuildLightAS{ scene.lightChangesMade() };
 	if (rebuildLightAS)
@@ -1275,7 +1281,9 @@ void RenderingInterface::processChanges(RenderContext& renderContext, Camera& ca
 
 	bool rebuildInstanceAS{ camera.positionChanged() || scene.lightChangesMade() };
 	if (rebuildInstanceAS)
+	{
 		buildInstanceAccelerationStructure(scene, camera.getPosition());
+	}
 
 	for (auto& cd : scene.changedDescriptors)
 	{
@@ -1291,15 +1299,16 @@ void RenderingInterface::processChanges(RenderContext& renderContext, Camera& ca
 		}
 	}
 
+	scene.acceptChanges();
+	renderContext.acceptChanges();
+	camera.acceptChanges();
+
 	CUDA_CHECK(cudaMemcpyAsync(reinterpret_cast<void*>(m_lpBuffer), &m_launchParameters, sizeof(m_launchParameters), cudaMemcpyHostToDevice, m_streams[1]));
 
 	m_currentSampleCount = 1;
 	m_currentSampleOffset = 0;
 	m_processedSampleCount = 0;
 
-	scene.acceptChanges();
-	renderContext.acceptChanges();
-	camera.acceptChanges();
 	m_renderingIsFinished = false;
 }
 void RenderingInterface::updateSubLaunchData()
@@ -1418,8 +1427,10 @@ void RenderingInterface::render(RenderContext& renderContext, Camera& camera, Sc
 		resolveRender(renderContext.getColorspaceTransform());
 		CUDA_SYNC_STREAM(m_streams[0]);
 	}
+
 	if (changesMade)
 		processChanges(renderContext, camera, scene);
+
 	if (m_currentSampleCount == 0)
 	{
 		m_processedSampleCount = m_currentSampleOffset;

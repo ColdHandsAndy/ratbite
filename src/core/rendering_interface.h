@@ -162,6 +162,7 @@ public:
 
 	void render(RenderContext& renderContext, Camera& camera, SceneData& scene, bool changesMade);
 	void drawPreview(int winWidth, int winHeight) const;
+	GLuint getPreview() const { return m_glTexture; }
 	bool renderingIsFinished() const { return m_renderingIsFinished; }
 	bool sublaunchIsFinished() const { return m_sublaunchIsFinished; }
 	int getProcessedSampleCount() const { return m_processedSampleCount; }

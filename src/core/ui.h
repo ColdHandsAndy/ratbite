@@ -10,6 +10,7 @@ class UI
 {
 private:
 	bool m_draw{ true };
+	bool m_cursorIsOverRenderWindow{ false };
 public:
 	UI(GLFWwindow* window)
 	{
@@ -33,6 +34,9 @@ public:
 	
 	bool mouseIsCaptured() const { return ImGui::GetIO().WantCaptureMouse; }
 	bool keyboardIsCaptured() const { return ImGui::GetIO().WantCaptureKeyboard; }
+
+	void setCursorIsOverRenderWindow(bool isOver) { m_cursorIsOverRenderWindow = isOver; }
+	bool cursorIsOverRenderWindow() const { return m_cursorIsOverRenderWindow; }
 	
 	void startImGuiRecording()
 	{
@@ -82,7 +86,7 @@ private:
 		colors[ImGuiCol_ScrollbarGrab]          = ImVec4(0.34f, 0.34f, 0.34f, 0.54f);
 		colors[ImGuiCol_ScrollbarGrabHovered]   = ImVec4(0.40f, 0.40f, 0.40f, 0.54f);
 		colors[ImGuiCol_ScrollbarGrabActive]    = ImVec4(0.56f, 0.56f, 0.56f, 0.54f);
-		colors[ImGuiCol_CheckMark]              = ImVec4(0.33f, 0.67f, 0.86f, 1.00f);
+		colors[ImGuiCol_CheckMark]              = ImVec4(0.82f, 0.72f, 0.66f, 1.00f);
 		colors[ImGuiCol_SliderGrab]             = ImVec4(0.34f, 0.34f, 0.34f, 0.54f);
 		colors[ImGuiCol_SliderGrabActive]       = ImVec4(0.56f, 0.56f, 0.56f, 0.54f);
 		colors[ImGuiCol_Button]                 = ImVec4(0.05f, 0.05f, 0.05f, 0.54f);
@@ -101,25 +105,26 @@ private:
 		colors[ImGuiCol_TabHovered]             = ImVec4(0.14f, 0.14f, 0.14f, 1.00f);
 
 		colors[ImGuiCol_TabSelected]            = ImVec4(0.20f, 0.20f, 0.20f, 0.36f);
-		colors[ImGuiCol_TabSelectedOverline]    = ImVec4(1.00f, 0.00f, 0.00f, 1.00f);
+		colors[ImGuiCol_TabSelectedOverline]    = ImVec4(0.55f, 0.29f, 0.23f, 1.00f);
 		colors[ImGuiCol_TabDimmed]              = ImVec4(0.00f, 0.00f, 0.00f, 0.52f);
 		colors[ImGuiCol_TabDimmedSelected]      = ImVec4(0.14f, 0.14f, 0.14f, 1.00f);
-		colors[ImGuiCol_TabDimmedSelectedOverline] = ImVec4(0.70f, 0.00f, 0.00f, 1.00f);
-		colors[ImGuiCol_PlotLines]              = ImVec4(1.00f, 0.00f, 0.00f, 1.00f);
-		colors[ImGuiCol_PlotLinesHovered]       = ImVec4(1.00f, 0.00f, 0.00f, 1.00f);
-		colors[ImGuiCol_PlotHistogram]          = ImVec4(1.00f, 0.00f, 0.00f, 1.00f);
-		colors[ImGuiCol_PlotHistogramHovered]   = ImVec4(1.00f, 0.00f, 0.00f, 1.00f);
+		colors[ImGuiCol_TabDimmedSelectedOverline] = ImVec4(0.33f, 0.17f, 0.14f, 1.00f);
+
+		colors[ImGuiCol_PlotLines]              = ImVec4(0.55f, 0.29f, 0.23f, 1.00f);
+		colors[ImGuiCol_PlotLinesHovered]       = ImVec4(0.55f, 0.29f, 0.23f, 1.00f);
+		colors[ImGuiCol_PlotHistogram]          = ImVec4(0.55f, 0.29f, 0.23f, 1.00f);
+		colors[ImGuiCol_PlotHistogramHovered]   = ImVec4(0.55f, 0.29f, 0.23f, 1.00f);
 		colors[ImGuiCol_TableHeaderBg]          = ImVec4(0.00f, 0.00f, 0.00f, 0.22f);
 		colors[ImGuiCol_TableBorderStrong]      = ImVec4(0.00f, 0.00f, 0.00f, 0.52f);
 		colors[ImGuiCol_TableBorderLight]       = ImVec4(0.28f, 0.28f, 0.28f, 0.29f);
 		colors[ImGuiCol_TableRowBg]             = ImVec4(0.00f, 0.00f, 0.00f, 0.00f);
 		colors[ImGuiCol_TableRowBgAlt]          = ImVec4(1.00f, 1.00f, 1.00f, 0.06f);
 		colors[ImGuiCol_TextSelectedBg]         = ImVec4(0.20f, 0.22f, 0.23f, 1.00f);
-		colors[ImGuiCol_DragDropTarget]         = ImVec4(0.33f, 0.67f, 0.86f, 1.00f);
-		colors[ImGuiCol_NavHighlight]           = ImVec4(1.00f, 0.00f, 0.00f, 1.00f);
-		colors[ImGuiCol_NavWindowingHighlight]  = ImVec4(1.00f, 0.00f, 0.00f, 0.70f);
-		colors[ImGuiCol_NavWindowingDimBg]      = ImVec4(1.00f, 0.00f, 0.00f, 0.20f);
-		colors[ImGuiCol_ModalWindowDimBg]       = ImVec4(1.00f, 0.00f, 0.00f, 0.35f);
+		colors[ImGuiCol_DragDropTarget]         = ImVec4(0.82f, 0.72f, 0.66f, 1.00f);
+		colors[ImGuiCol_NavHighlight]           = ImVec4(0.55f, 0.29f, 0.23f, 1.00f);
+		colors[ImGuiCol_NavWindowingHighlight]  = ImVec4(0.55f, 0.29f, 0.23f, 0.70f);
+		colors[ImGuiCol_NavWindowingDimBg]      = ImVec4(0.55f, 0.29f, 0.23f, 0.20f);
+		colors[ImGuiCol_ModalWindowDimBg]       = ImVec4(0.55f, 0.29f, 0.23f, 0.35f);
 		colors[ImGuiCol_DockingPreview]         = ImVec4(0.30f, 0.32f, 0.33f, 0.80f);
 		colors[ImGuiCol_DockingEmptyBg]         = ImVec4(0.44f, 0.44f, 0.44f, 0.29f);
 
@@ -138,9 +143,9 @@ private:
 		style.PopupBorderSize                   = 1;
 		style.FrameBorderSize                   = 1;
 		style.TabBorderSize                     = 1;
-		style.WindowRounding                    = 7;
-		style.ChildRounding                     = 4;
-		style.FrameRounding                     = 3;
+		style.WindowRounding                    = 0;
+		style.ChildRounding                     = 0;
+		style.FrameRounding                     = 0;
 		style.PopupRounding                     = 4;
 		style.ScrollbarRounding                 = 9;
 		style.GrabRounding                      = 3;

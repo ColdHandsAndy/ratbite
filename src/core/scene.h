@@ -365,10 +365,11 @@ struct SceneData
 		transform[3] += glm::vec4{-200.0f, 0.0f, 0.0f, 0.0f};
 
 		// loadModel("A:/Models/gltf/flying world/scene.gltf", transform);
+		loadModel("A:/Models/gltf/flightHelmet/scene.gltf", transform);
 		// loadModel("A:/Models/gltf/knob mat test/scene.glb", transform);
 		// loadModel("A:/Models/gltf/mc_village.glb", transform);
-		// loadModel("A:/Models/gltf/aston_martin.glb", transform);
-		loadModel("A:/Models/gltf/NormalTangentMirrorTest.glb", transform);
+		// loadModel("A:/Models/gltf/dodge_charger.glb", transform);
+		// loadModel("A:/Models/gltf/NormalTangentMirrorTest.glb", transform);
 
 
 		int matIndex{};

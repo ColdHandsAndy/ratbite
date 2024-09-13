@@ -90,7 +90,7 @@ namespace
 						int c{};
 						stbi_info(pathToTex, &x, &y, &c);
 						int cNum{ c == 1 ? c : 4 };
-						unsigned char* image{ stbi_load(pathToTex, &x, &y, &x, cNum) };
+						unsigned char* image{ stbi_load(pathToTex, &x, &y, &c, cNum) };
 
 						size_t byteSize{ static_cast<size_t>(x * y * cNum) };
 						void* data{ malloc(byteSize) };
@@ -256,21 +256,6 @@ namespace
 					descriptor.name = descriptor.name + ' ' + '(' + mesh.name + ' ' + std::to_string(j) + ')';
 					if (material != nullptr)
 					{
-						descriptor.ior = material->has_ior ? material->ior.ior : 1.5f;
-						if (material->has_pbr_metallic_roughness)
-						{
-							if (material->pbr_metallic_roughness.base_color_texture.texture != nullptr)
-							{
-								textureData[cgltf_texture_index(data, material->pbr_metallic_roughness.base_color_texture.texture)].sRGB = true;
-								descriptor.baseColorTextureIndex = cgltf_texture_index(data, material->pbr_metallic_roughness.base_color_texture.texture);
-								descriptor.bcTexCoordIndex = material->pbr_metallic_roughness.base_color_texture.texcoord;
-							}
-							if (material->pbr_metallic_roughness.metallic_roughness_texture.texture != nullptr)
-							{
-								descriptor.metalRoughnessTextureIndex = cgltf_texture_index(data, material->pbr_metallic_roughness.metallic_roughness_texture.texture);
-								descriptor.mrTexCoordIndex = material->pbr_metallic_roughness.metallic_roughness_texture.texcoord;
-							}
-						}
 						if (material->normal_texture.texture != nullptr)
 						{
 							descriptor.normalTextureIndex = cgltf_texture_index(data, material->normal_texture.texture);

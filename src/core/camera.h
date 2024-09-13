@@ -104,6 +104,8 @@ public:
 
 		m_orientationChanged = true;
 	}
+	void setMovingSpeed(double speed) { m_speed = speed; }
+	void setRotationSpeed(double speed) { m_rotationSpeed = speed; }
 	void setFocusDistance(double fd) { m_focusDistance = std::max(0.0, std::min(65504.0, fd)); m_depthOfFieldChanged = true; }
 	void setAperture(double a) { m_aperture = std::max(0.0, std::min(65504.0, a)); m_depthOfFieldChanged = true; }
 	void setDepthOfField(bool enabled) { m_depthOfFieldEnabled = enabled; m_depthOfFieldChanged = true; }
@@ -112,6 +114,7 @@ public:
 	const glm::dvec3& getV() const { return m_v; }
 	const glm::dvec3& getW() const { return m_w; }
 	const double getMovingSpeed() const { return m_speed; }
+	const double getRotationSpeed() const { return m_rotationSpeed; }
 	const double getFocusDistance() const { return m_focusDistance; }
 	const double getAperture() const { return m_aperture; }
 	const bool depthOfFieldEnabled() const { return m_depthOfFieldEnabled; }
