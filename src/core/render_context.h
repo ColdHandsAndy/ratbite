@@ -25,7 +25,6 @@ private:
 	glm::mat3 m_colorspaceTransform{};
 	float m_imageExposure{ 0.0f };
 
-	bool m_changesMade{ true };
 	bool m_paused{ false };
 public:
 	RenderContext(int renderWidth, int renderHeight, int pathLength, int sampleCount, Color::RGBColorspace colorspace) :
@@ -52,20 +51,15 @@ public:
 	int getPathLength() const { return m_pathLength; }
 	int getSampleCount() const { return m_sampleCount; }
 	float getImageExposure() const { return m_imageExposure; }
-	bool changesMade() const { return m_changesMade; }
 	bool paused() const { return m_paused; }
 
 	const glm::mat3& getColorspaceTransform() const { return m_colorspaceTransform; }
 
-	void setRenderMode(Mode m) { m_renderMode = m; m_changesMade = true; }
-	void setRenderWidth(int w) { m_renderWidth = w; float iw{ 1.0f / w }; m_renderInvWidth = iw; m_changesMade = true; }
-	void setRenderHeight(int h) { m_renderHeight = h; float ih{ 1.0f / h }; m_renderInvHeight = ih; m_changesMade = true; }
-	void setPathLength(int pl) { m_pathLength = pl; m_changesMade = true; }
-	void setSampleCount(int sc) { m_sampleCount = sc; m_changesMade = true; }
-	void setImageExposure(float exp) { m_imageExposure = exp; m_changesMade = true; }
+	void setRenderMode(Mode m) { m_renderMode = m; }
+	void setRenderWidth(int w) { m_renderWidth = w; float iw{ 1.0f / w }; m_renderInvWidth = iw; }
+	void setRenderHeight(int h) { m_renderHeight = h; float ih{ 1.0f / h }; m_renderInvHeight = ih; }
+	void setPathLength(int pl) { m_pathLength = pl; }
+	void setSampleCount(int sc) { m_sampleCount = sc; }
+	void setImageExposure(float exp) { m_imageExposure = exp; }
 	void setPause(bool pause) { m_paused = pause; }
-private:
-	void acceptChanges() { m_changesMade = false; }
-
-	friend class RenderingInterface;
 };

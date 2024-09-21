@@ -23,8 +23,6 @@ private:
 	float m_invWidth{};
 	float m_invHeight{};
 
-	bool m_sizeChanged{ false };
-
 	GLFWwindow* m_glfwWindow{};
 
 	struct UserDataGLFW
@@ -75,7 +73,10 @@ public:
 	Window(const Window&) = delete;
 	Window &operator=(Window&&) = delete;
 	Window &operator=(const Window&) = delete;
-	~Window() = default;
+	~Window()
+	{
+		glfwDestroyWindow(m_glfwWindow);
+	}
 
 	void attachRenderingInterface(const RenderingInterface* renderingInterface)
 	{

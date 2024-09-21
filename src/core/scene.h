@@ -1,9 +1,7 @@
 #pragma once
 
 #include <cstdint>
-#include <array>
 #include <vector>
-#include <stack>
 #include <string>
 #include <filesystem>
 
@@ -22,6 +20,8 @@
 
 struct SceneData
 {
+	inline static uint32_t m_idGen{ 0 };
+
 	enum class BxDF
 	{
 		PURE_CONDUCTOR,
@@ -29,7 +29,7 @@ struct SceneData
 		COMPLEX_SURFACE,
 		DESC
 	};
-	struct MaterialDescriptor //We need 'MaterialDescrioptor' to find material data before rendering
+	struct MaterialDescriptor
 	{
 		std::string name{};
 		BxDF bxdf{};
@@ -63,43 +63,6 @@ struct SceneData
 		bool transmitFactorPresent{};
 		float transmitFactor{};
 	};
-	std::vector<MaterialDescriptor> materialDescriptors{};
-
-	bool newMaterialDescriptorAdded{ false };
-	std::vector<std::pair<MaterialDescriptor, int>> changedDescriptors{};
-
-	struct ImageData
-	{
-		void* data{};
-		uint32_t width{};
-		uint32_t height{};
-		uint32_t channelCount{};
-		size_t byteSize{};
-	};
-	std::vector<ImageData> imageData{};
-	struct TextureData
-	{
-		int imageIndex{};
-		bool sRGB{};
-		TextureFilter filter{};
-		TextureAddress addressX{};
-		TextureAddress addressY{};
-	};
-	std::vector<TextureData> textureData{};
-	int addTextureData(void* data, uint32_t width, uint32_t height, size_t byteSize)
-	{
-		imageData.emplace_back(data, width, height, byteSize);
-		return imageData.size() - 1;
-	}
-	void clearImageData()
-	{
-		for(auto& tD : imageData)
-		{
-			free(tD.data);
-		}
-		imageData.clear();
-		textureData.clear();
-	}
 
 	// TODO: Need to free index buffer before deleting a submesh
 	struct Submesh
@@ -167,56 +130,149 @@ struct SceneData
 	struct Instance
 	{
 		int meshIndex{};
-		glm::mat3x4 transform{};
+		glm::mat4x3 transform{};
 	};
 	struct Model
 	{
+		uint32_t id{};
 		std::filesystem::path path{};
 		std::string name{};
 
 		std::vector<Mesh> meshes{};
 		std::vector<Instance> instances{};
+
+		glm::mat4x3 transform{};
+
+		struct ImageData
+		{
+			void* data{};
+			uint32_t width{};
+			uint32_t height{};
+			uint32_t channelCount{};
+			size_t byteSize{};
+		};
+		struct TextureData
+		{
+			int imageIndex{};
+			bool sRGB{};
+			TextureFilter filter{};
+			TextureAddress addressX{};
+			TextureAddress addressY{};
+		};
+		std::vector<ImageData> imageData{};
+		std::vector<TextureData> textureData{};
+
+		std::vector<MaterialDescriptor> materialDescriptors{};
+
+		Model() = default;
+		Model(Model&& model)
+			: id{ model.id }, path{ std::move(model.path) }, name{ std::move(model.name) },
+			meshes{ std::move(model.meshes) }, instances{ std::move(model.instances) },
+			transform{ model.transform },
+			imageData{ std::move(model.imageData) }, textureData{ std::move(model.textureData) },
+			materialDescriptors{ std::move(model.materialDescriptors) }
+		{
+		}
+		Model& operator=(Model&& model) 
+		{
+			id = model.id;
+			path = std::move(model.path);
+			name = std::move(model.name);
+
+			meshes = std::move(model.meshes);
+			instances = std::move(model.instances);
+
+			transform = model.transform;
+
+			imageData = std::move(model.imageData);
+			textureData = std::move(model.textureData);
+
+			materialDescriptors = std::move(model.materialDescriptors);
+
+			return *this;
+		}
+		Model& operator=(const Model& model)
+		{
+			id = model.id;
+			path = model.path;
+			name = model.name;
+
+			meshes = model.meshes;
+			instances = model.instances;
+
+			transform = model.transform;
+
+			imageData = model.imageData;
+			textureData = model.textureData;
+
+			materialDescriptors = model.materialDescriptors;
+
+			return *this;
+		}
+
+		int addTextureData(void* data, uint32_t width, uint32_t height, size_t byteSize)
+		{
+			imageData.emplace_back(data, width, height, byteSize);
+			return imageData.size() - 1;
+		}
+		void clearImageData()
+		{
+			for(auto& tD : imageData)
+			{
+				free(tD.data);
+			}
+			imageData.clear();
+			textureData.clear();
+		}
 	};
 	std::vector<Model> models{};
-	int getGeometryMaterialCount() const
-	{
-		int count{ 0 };
-		for(auto& model : models)
-			for(auto& mesh : model.meshes)
-				count += mesh.submeshes.size();
-		return count;
-	}
-	void loadModel(const std::filesystem::path& path, const glm::mat4& transform = glm::identity<glm::mat4>(), const MaterialDescriptor* assignedMaterial = nullptr);
+	int loadModel(const std::filesystem::path& path, const glm::mat4& transform = glm::identity<glm::mat4>());
 
 
 	class DiskLight
 	{
 	private:
+		uint32_t m_id{};
 		glm::vec3 m_pos{ -278.0f, 514.0f, 279.5f };
 		float m_radius{ 80.0f };
 		// float m_area{ glm::pi<float>() * m_radius * m_radius };
 		glm::vec3 m_normal{ glm::normalize(glm::vec3{0.0f, -1.0f, 0.0f}) };
 		glm::quat m_frame{ genDiskFrame() };
 		float m_scale{ 1.0f };
-		int m_materialDescIndex{ 0 };
+
+		MaterialDescriptor m_matDesc{};
 
 	public:
-		DiskLight(const glm::vec3& position, float radius, const glm::vec3& normal, float powerScale, int matDescIndex)
-			: m_pos{ position }, m_radius{ radius }, m_normal{ normal }, m_scale{ powerScale }, m_materialDescIndex{ matDescIndex }
+		DiskLight(const glm::vec3& position, float radius, const glm::vec3& normal, float powerScale, const MaterialDescriptor& matDesc)
+			: m_pos{ position }, m_radius{ radius }, m_normal{ normal }, m_scale{ powerScale }, m_matDesc{ matDesc }, m_id{ ++m_idGen }
 		{}
+		DiskLight& operator=(const DiskLight& light)
+		{
+			m_id = light.m_id;
+			m_pos = light.m_pos;
+			m_radius = light.m_radius;
+			m_normal = light.m_normal;
+			m_frame = light.m_frame;
+			m_scale = light.m_scale;
+			m_matDesc = light.m_matDesc;
+
+			return *this;
+		}
+
 		const glm::vec3& getPosition() const { return m_pos; }
 		const glm::vec3& getNormal() const { return m_normal; }
 		const glm::quat& getFrame() const { return m_frame; }
 		float getRadius() const { return m_radius; }
 		// float getArea() const { return m_area; }
 		float getPowerScale() const { return m_scale; }
-		int getMaterialIndex() const { return m_materialDescIndex; }
+		uint32_t getID() const { return m_id; }
+		const MaterialDescriptor& getMaterialDescriptor() { return m_matDesc; }
 
 		void setPosition(const glm::vec3& position) { m_pos = position; }
 		void setNormal(const glm::vec3& normal) { m_normal = normal; m_frame = genDiskFrame(); }
 		void setRadius(float radius) { m_radius = radius; }
 		void setPowerScale(float scale) { m_scale = scale; }
-		void setMaterialDescIndex(int index) { m_materialDescIndex = index; }
+		void setEmissionSpectrum(SpectralData::SpectralDataType type) { m_matDesc.baseEmission = type; }
 
 		OptixAabb getOptixAABB() const
 		{
@@ -265,17 +321,31 @@ struct SceneData
 	class SphereLight
 	{
 	private:
+		uint32_t m_id{};
 		glm::vec3 m_pos{ -278.0f, 514.0f, 279.5f };
 		float m_radius{ 50.0f };
 		// float m_area{ 4.0f * glm::pi<float>() * m_radius * m_radius };
 		glm::vec3 m_normal{ glm::normalize(glm::vec3{0.0f, 1.0f, 0.0f}) };
 		glm::quat m_frame{ genDiskFrame() };
 		float m_scale{ 1.0f };
-		int m_materialDescIndex{ 0 };
+
+		MaterialDescriptor m_matDesc{};
 	public:
-		SphereLight(const glm::vec3& position, float radius, float powerScale, int matDescIndex)
-			: m_pos{ position }, m_radius{ radius }, m_normal{ 0.0f, 1.0f, 0.0f }, m_scale{ powerScale }, m_materialDescIndex{ matDescIndex }
+		SphereLight(const glm::vec3& position, float radius, float powerScale, const MaterialDescriptor& matDesc)
+			: m_pos{ position }, m_radius{ radius }, m_normal{ 0.0f, 1.0f, 0.0f }, m_scale{ powerScale }, m_matDesc{ matDesc }, m_id{ ++m_idGen }
 		{}
+		SphereLight& operator=(const SphereLight& light)
+		{
+			m_id = light.m_id;
+			m_pos = light.m_pos;
+			m_radius = light.m_radius;
+			m_normal = light.m_normal;
+			m_frame = light.m_frame;
+			m_scale = light.m_scale;
+			m_matDesc = light.m_matDesc;
+
+			return *this;
+		}
 
 		const glm::vec3& getPosition() const { return m_pos; }
 		const glm::vec3& getNormal() const { return m_normal; }
@@ -283,12 +353,13 @@ struct SceneData
 		float getRadius() const { return m_radius; }
 		// float getArea() const { return m_area; }
 		float getPowerScale() const { return m_scale; }
-		int getMaterialIndex() const { return m_materialDescIndex; }
+		uint32_t getID() const { return m_id; }
+		const MaterialDescriptor& getMaterialDescriptor() { return m_matDesc; }
 
 		void setPosition(const glm::vec3& position) { m_pos = position; }
 		void setRadius(float radius) { m_radius = radius; }
 		void setPowerScale(float scale) { m_scale = scale; }
-		void setMaterialDescIndex(int index) { m_materialDescIndex = index; }
+		void setEmissionSpectrum(SpectralData::SpectralDataType type) { m_matDesc.baseEmission = type; }
 
 		OptixAabb getOptixAABB() const
 		{
@@ -334,76 +405,28 @@ struct SceneData
 	};
 	std::vector<SceneData::DiskLight> diskLights{};
 	std::vector<SceneData::SphereLight> sphereLights{};
-	uint32_t lightCount{};
 
-	bool sphereLightsChanged{ false };
-	bool diskLightsChanged{ false };
-	// bool lightDataAABBChanged{ false };
-	// int changedLightIndex{};
-
-	bool lightChangesMade() const { return sphereLightsChanged || diskLightsChanged; }
-	bool changesMade() const { return (changedDescriptors.size() != 0) || lightChangesMade(); }
-	void acceptChanges() { sphereLightsChanged = false; diskLightsChanged = false; changedDescriptors.clear(); }
+	int getLightCount() const { return diskLights.size() + sphereLights.size(); }
 
 	SceneData()
 	{
-		// MaterialDescriptor mat{ MaterialDescriptor{
-		// 	.name = "Model",
-		// 	.bxdf = BxDF::PURE_CONDUCTOR,
-		// 	.baseIOR = SpectralData::SpectralDataType::C_METAL_AL_IOR,
-		// 	.baseAC = SpectralData::SpectralDataType::C_METAL_AL_AC,
-		// 	.baseEmission = SpectralData::SpectralDataType::NONE,
-		// 	.roughness = 1.0f} };
-		glm::mat4 transform{ glm::identity<glm::mat4>() };
-		// transform[0] *= 0.2f;
-		// transform[1] *= 0.2f;
-		// transform[2] *= 0.2f;
-		// transform[3] += glm::vec4{0.0f, 0.0f, 0.0f, 0.0f};
-		transform[0] *= 70.2f;
-		transform[1] *= 70.2f;
-		transform[2] *= 70.2f;
-		transform[3] += glm::vec4{-200.0f, 0.0f, 0.0f, 0.0f};
-
-		// loadModel("A:/Models/gltf/flying world/scene.gltf", transform);
-		loadModel("A:/Models/gltf/flightHelmet/scene.gltf", transform);
-		// loadModel("A:/Models/gltf/knob mat test/scene.glb", transform);
-		// loadModel("A:/Models/gltf/mc_village.glb", transform);
-		// loadModel("A:/Models/gltf/dodge_charger.glb", transform);
-		// loadModel("A:/Models/gltf/NormalTangentMirrorTest.glb", transform);
-
-
-		int matIndex{};
-		matIndex = static_cast<int>(materialDescriptors.size());
-		materialDescriptors.push_back(
-				MaterialDescriptor{.name = "Light 0",
-				.bxdf = BxDF::PURE_CONDUCTOR,
-				.baseIOR = SpectralData::SpectralDataType::C_METAL_AL_IOR,
-				.baseAC = SpectralData::SpectralDataType::C_METAL_AL_AC,
-				.baseEmission = SpectralData::SpectralDataType::ILLUM_D65,
-				.roughness = 1.0f});
-		// DiskLight disk{ {-278.0f, 514.0f, 279.5f},
-		// 	80.0f,
-		// 	glm::normalize(glm::vec3{0.0f, -1.0f, 0.0f}),
-		// 	1.0f,
-		// 	matIndex };
+		// loadModel("A:/Models/gltf/mc_village.glb");
+		// SphereLight sphere{ {-78.0f, 214.0f, 339.5f}, 90.0f, 0.1f,
+		// 	MaterialDescriptor{.name = "Light 0",
+		// 				.bxdf = BxDF::PURE_CONDUCTOR,
+		// 				.baseIOR = SpectralData::SpectralDataType::C_METAL_AL_IOR,
+		// 				.baseAC = SpectralData::SpectralDataType::C_METAL_AL_AC,
+		// 				.baseEmission = SpectralData::SpectralDataType::ILLUM_D65,
+		// 				.roughness = 1.0f} };
+		// sphereLights.push_back(sphere);
+		//
+		// DiskLight disk{ {-78.0f, 214.0f, 339.5f}, 90.0f, {0.0f, -1.0f, 0.0f}, 0.1f,
+		// 	MaterialDescriptor{.name = "Light 1",
+		// 				.bxdf = BxDF::PURE_CONDUCTOR,
+		// 				.baseIOR = SpectralData::SpectralDataType::C_METAL_AL_IOR,
+		// 				.baseAC = SpectralData::SpectralDataType::C_METAL_AL_AC,
+		// 				.baseEmission = SpectralData::SpectralDataType::ILLUM_D65,
+		// 				.roughness = 1.0f} };
 		// diskLights.push_back(disk);
-		// DiskLight disk2{ {-278.0f, 314.0f, 279.5f},
-		// 	80.0f,
-		// 	glm::normalize(glm::vec3{0.0f, -1.0f, 0.0f}),
-		// 	0.1f,
-		// 	matIndex };
-		// diskLights.push_back(disk2);
-		// DiskLight disk3{ {-278.0f, 114.0f, 279.5f},
-		// 	80.0f,
-		// 	glm::normalize(glm::vec3{0.0f, -1.0f, 0.0f}),
-		// 	0.2f,
-		// 	matIndex };
-		// diskLights.push_back(disk3);
-		SphereLight sphere{ {-78.0f, 214.0f, 339.5f}, 90.0f, 0.1f, matIndex };
-		sphereLights.push_back(sphere);
-		// SphereLight sphere1{ {-378.0f, 454.0f, 279.5f}, 120.0f, 0.1f, matIndex };
-		// sphereLights.push_back(sphere1);
-
-		lightCount = diskLights.size() + sphereLights.size();
 	}
 };

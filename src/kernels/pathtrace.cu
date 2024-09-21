@@ -333,6 +333,7 @@ CU_DEVICE CU_INLINE DirectLightSampleData sampledLightEval(const LaunchParameter
 		const glm::vec3& hitPoint, const glm::vec3& hitNormal,
 		const glm::vec3& rand)
 {
+	DirectLightSampleData dlSampleData{};
 	LightType type{};
 	uint16_t index{};
 
@@ -351,7 +352,12 @@ CU_DEVICE CU_INLINE DirectLightSampleData sampledLightEval(const LaunchParameter
 	}
 	lightStructurePDF = 1.0f / lightStructurePDF;
 
-	DirectLightSampleData dlSampleData{};
+	if (lightC == 0)
+	{
+		dlSampleData.occluded = true;
+		return dlSampleData;
+	}
+
 	float dToL{};
 	float lightPDF{};
 	switch (type)
@@ -1017,6 +1023,7 @@ extern "C" __device__ void __direct_callable__ComplexSurface_BxDF(const Material
 		{
 			bool valid;
 			wi = utility::refract(wo, wm, eta, valid);
+			refractionScale *= eta;
 			if (wo.z * wi.z >= 0.0f || !valid)
 			{
 				stateFlags = stateFlags | PathStateBitfield::PATH_TERMINATED;

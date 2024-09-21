@@ -1,16 +1,28 @@
 #pragma once
 
+#include <vector>
+#include <string_view>
+#include <filesystem>
+
 #include <glad/glad.h>
+#define GLFW_EXPOSE_NATIVE_WIN32
+#include <nfd_glfw3.h>
 #include <GLFW/glfw3.h>
 #include <imgui.h>
 #include <backends/imgui_impl_glfw.h>
 #include <backends/imgui_impl_opengl3.h>
 
+#include "../core/debug_macros.h"
+#include "../core/command.h"
+#include "../core/window.h"
+#include "../core/camera.h"
+#include "../core/scene.h"
+#include "../core/render_context.h"
+
 class UI
 {
 private:
-	bool m_draw{ true };
-	bool m_cursorIsOverRenderWindow{ false };
+	bool m_cursorIsDraggingOverRenderWindow{ false };
 public:
 	UI(GLFWwindow* window)
 	{
@@ -30,13 +42,59 @@ public:
 	UI &operator=(const UI&) = default;
 	~UI() = default;
 
-	void toggle() { m_draw = !m_draw; }
+	void recordInterface(CommandBuffer& commands, Window& window, Camera& camera, RenderContext& rContext, SceneData& scene, GLuint renderResult, int currentSampleCount);
+	void recordInput(CommandBuffer& commands, Window& window, Camera& camera, RenderContext& rContext);
 	
 	bool mouseIsCaptured() const { return ImGui::GetIO().WantCaptureMouse; }
 	bool keyboardIsCaptured() const { return ImGui::GetIO().WantCaptureKeyboard; }
 
-	void setCursorIsOverRenderWindow(bool isOver) { m_cursorIsOverRenderWindow = isOver; }
-	bool cursorIsOverRenderWindow() const { return m_cursorIsOverRenderWindow; }
+	void setCursorIsDraggingOverRenderWindow(bool isDraggingOver) { m_cursorIsDraggingOverRenderWindow = isDraggingOver; }
+	bool cursorIsDraggingOverRenderWindow() const { return m_cursorIsDraggingOverRenderWindow; }
+
+	std::vector<std::filesystem::path> getFilesFromFileDialogWindow(GLFWwindow* window, const char* defaultPath, const char* fileFilters)
+	{
+		nfdfilteritem_t filters{ .name = "Filters", .spec = fileFilters };
+
+		const nfdpathset_t* outPaths{};
+		nfdwindowhandle_t parentWindow{};
+		NFD_GetNativeWindowFromGLFWWindow(window, &parentWindow);
+		nfdopendialogu8args_t dialogArgs{
+			.filterList = &filters,
+			.filterCount = 1,
+			.defaultPath = defaultPath,
+			.parentWindow = parentWindow };
+		nfdresult_t dialogResult{ NFD_OpenDialogMultipleU8_With(&outPaths, &dialogArgs) };
+
+		std::vector<std::filesystem::path> resPaths{};
+
+		if (dialogResult == NFD_OKAY)
+		{
+			nfdpathsetsize_t numPaths{};
+			NFD_PathSet_GetCount(outPaths, &numPaths);
+			resPaths.resize(numPaths);
+
+			for (int i{ 0 }; i < numPaths; ++i)
+			{
+				nfdchar_t* path{};
+				NFD_PathSet_GetPath(outPaths, i, &path);
+				resPaths[i] = path;
+
+				NFD_PathSet_FreePath(path);
+			}
+
+			NFD_PathSet_Free(outPaths);
+		}
+		else if (dialogResult == NFD_CANCEL)
+		{
+
+		}
+		else
+		{
+			R_ERR_LOG(NFD_GetError());
+		}
+
+		return resPaths;
+	}
 	
 	void startImGuiRecording()
 	{
@@ -46,7 +104,7 @@ public:
 	}
 	void renderInterface()
 	{
-		if (m_draw)
+		if (true)
 		{
 			ImGui::Render();
 			ImGui_ImplOpenGL3_RenderDrawData(ImGui::GetDrawData());
@@ -72,7 +130,7 @@ private:
 		colors[ImGuiCol_TextDisabled]           = ImVec4(0.50f, 0.50f, 0.50f, 1.00f);
 		colors[ImGuiCol_WindowBg]               = ImVec4(0.10f, 0.10f, 0.10f, 0.80f);
 		colors[ImGuiCol_ChildBg]                = ImVec4(0.00f, 0.00f, 0.00f, 0.00f);
-		colors[ImGuiCol_PopupBg]                = ImVec4(0.19f, 0.19f, 0.19f, 0.72f);
+		colors[ImGuiCol_PopupBg]                = ImVec4(0.19f, 0.19f, 0.19f, 0.92f);
 		colors[ImGuiCol_Border]                 = ImVec4(0.19f, 0.19f, 0.19f, 0.09f);
 		colors[ImGuiCol_BorderShadow]           = ImVec4(0.00f, 0.00f, 0.00f, 0.24f);
 		colors[ImGuiCol_FrameBg]                = ImVec4(0.05f, 0.05f, 0.05f, 0.34f);
@@ -130,7 +188,7 @@ private:
 
 		ImGuiStyle& style = ImGui::GetStyle();
 		style.WindowPadding                     = ImVec2(8.00f, 8.00f);
-		style.FramePadding                      = ImVec2(5.00f, 2.00f);
+		style.FramePadding                      = ImVec2(5.00f, 5.00f);
 		style.CellPadding                       = ImVec2(6.00f, 6.00f);
 		style.ItemSpacing                       = ImVec2(6.00f, 6.00f);
 		style.ItemInnerSpacing                  = ImVec2(6.00f, 6.00f);

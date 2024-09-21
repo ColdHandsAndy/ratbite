@@ -36,6 +36,7 @@ target_include_directories(ratbite PUBLIC
 	"$ENV{OPTIX_SDK_PATH}/include")
 target_link_libraries(ratbite PUBLIC opengl32)
 target_link_libraries(ratbite PUBLIC glfw3)
+target_link_libraries(ratbite PUBLIC nfd)
 target_link_libraries(ratbite PUBLIC CUDA::cudart)
 target_link_libraries(ratbite PUBLIC CUDA::cuda_driver)
 

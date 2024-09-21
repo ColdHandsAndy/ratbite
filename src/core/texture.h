@@ -79,7 +79,7 @@ private:
 	void destroy()
 	{
 		if (!m_invalid)
-			CUDA_CHECK(cudaFree(m_image));
+			CUDA_CHECK(cudaFreeArray(m_image));
 	}
 public:
 	CudaImage() = default;

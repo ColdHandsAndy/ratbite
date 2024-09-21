@@ -1,6 +1,7 @@
 #pragma once
 
 #include <unordered_map>
+#include <map>
 #include <stack>
 #include <glad/glad.h>
 #include <glm/vec3.hpp>
@@ -12,6 +13,7 @@
 #include "../core/render_context.h"
 #include "../core/launch_parameters.h"
 #include "../core/texture.h"
+#include "../core/command.h"
 
 class RenderingInterface
 {
@@ -27,12 +29,6 @@ private:
 	CUdeviceptr m_spherePrimitiveHandle{};
 	CUdeviceptr m_spherePrimBuffer{};
 
-	std::vector<OptixTraversableHandle> m_gasHandles{};
-	std::vector<CUdeviceptr> m_gasBuffers{};
-	std::vector<CUdeviceptr> m_indexBuffers{};
-	std::vector<CUdeviceptr> m_attributeBuffers{};
-	std::vector<CudaImage> m_images{};
-	std::vector<CudaTexture> m_textures{};
 	enum LookUpTable
 	{
 		CONDUCTOR_ALBEDO = 0,
@@ -88,6 +84,24 @@ private:
 	cudaEvent_t m_execEvent{};
 	cudaStream_t m_streams[5]{};
 
+	struct ModelResource
+	{
+		std::vector<OptixTraversableHandle> gasHandles{};
+		std::vector<CUdeviceptr> gasBuffers{};
+		std::vector<CUdeviceptr> indexBuffers{};
+		std::vector<CUdeviceptr> attributeBuffers{};
+		std::vector<CudaImage> images{};
+		std::vector<CudaTexture> textures{};
+		std::vector<uint32_t> materialIndices{};
+	};
+	std::map<uint32_t, ModelResource> m_modelResources{};
+
+	struct LightResource
+	{
+		uint32_t materialIndex{};
+	};
+	std::map<uint32_t, LightResource> m_lightResources{};
+
 	LaunchParameters m_launchParameters{};
 
 	RenderContext::Mode m_mode{};
@@ -105,12 +119,14 @@ private:
 	bool m_renderingIsFinished{ false };
 	bool m_sublaunchIsFinished{ false };
 
+	int m_matDataCount{ 0 };
+	std::stack<uint32_t> m_freeMaterialsIndices{};
+
 	struct SpectrumRecord
 	{
 		int index{};
 		int refcount{};
 	};
-	typedef std::unordered_map<SpectralData::SpectralDataType, SpectrumRecord> SpectraMap;
 	std::unordered_map<SpectralData::SpectralDataType, SpectrumRecord> m_loadedSpectra{};
 	std::stack<int> m_freeSpectra{};
 
@@ -129,26 +145,38 @@ private:
 
 	void createOptixContext();
 	void createRenderResolveProgram();
-	void createAccelerationStructures(const SceneData& scene, const glm::vec3& cameraPosition);
+	void createConstantSBTRecords();
 	void createModulesProgramGroupsPipeline();
-	void fillMaterials(SceneData& scene);
-	void createSBT(const SceneData& scene);
 	void fillSpectralCurvesData();
 	void loadLookUpTables();
-	void fillLightData(const SceneData& scene, const glm::vec3& cameraPosition);
 	void prepareDataForRendering(const Camera& camera, const RenderContext& renderContext);
 	void prepareDataForPreviewDrawing();
 
-	void buildGeometryAccelerationStructures(const SceneData& scene);
+	void loadModel(SceneData::Model& model);
+	void loadLights(SceneData& scene, const Camera& camera);
+	void removeModel(uint32_t modelID);
+	void removeLight(uint32_t lightID);
+
+	void fillModelMaterials(RenderingInterface::ModelResource& modelRes, SceneData::Model& model);
+	uint32_t fillLightMaterial(const SceneData::MaterialDescriptor& desc);
+	void buildGeometryAccelerationStructures(RenderingInterface::ModelResource& modelRes, SceneData::Model& model);
 	void buildLightAccelerationStructure(const SceneData& scene, LightType type);
-	void buildInstanceAccelerationStructure(const SceneData& scene, const glm::vec3& cameraPosition);
-	void changeMaterial(int index, const SceneData::MaterialDescriptor& desc, const SceneData::MaterialDescriptor& prevDesc);
-	void addMaterial(const SceneData::MaterialDescriptor& desc);
+	void uploadLightData(const SceneData& scene, const glm::vec3& cameraPosition, bool resizeBuffers);
+	void updateHitgroupSBTRecords(const SceneData& scene);
+	void updateInstanceAccelerationStructure(const SceneData& scene, const Camera& camera);
+
+
+	uint32_t addMaterial(const MaterialData& matData);
+	int changeSpectrum(SpectralData::SpectralDataType newSpecType, SpectralData::SpectralDataType oldSpecType);
+	uint32_t setNewSpectrum(SpectralData::SpectralDataType type);
+	uint32_t getSpectrum(SpectralData::SpectralDataType type);
+
 	int bxdfTypeToIndex(SceneData::BxDF type);
 	void updateSubLaunchData();
 	void updateSamplingState();
 	
-	void processChanges(RenderContext& renderContext, Camera& camera, SceneData& scene);
+
+	void processCommands(CommandBuffer& commands, RenderContext& renderContext, Camera& camera, SceneData& scene);
 	void resolveRender(const glm::mat3& colorspaceTransform);
 	void launch();
 public:
@@ -160,13 +188,11 @@ public:
 	RenderingInterface& operator=(const RenderingInterface&) = delete;
 	~RenderingInterface() = default;
 
-	void render(RenderContext& renderContext, Camera& camera, SceneData& scene, bool changesMade);
+	void render(CommandBuffer& commands, RenderContext& renderContext, Camera& camera, SceneData& scene);
 	void drawPreview(int winWidth, int winHeight) const;
 	GLuint getPreview() const { return m_glTexture; }
 	bool renderingIsFinished() const { return m_renderingIsFinished; }
 	bool sublaunchIsFinished() const { return m_sublaunchIsFinished; }
 	int getProcessedSampleCount() const { return m_processedSampleCount; }
-	uint32_t setNewSpectrum(SpectralData::SpectralDataType type);
-	uint32_t getSpectrum(SpectralData::SpectralDataType type);
 	void cleanup();
 };
