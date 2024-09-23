@@ -25,7 +25,12 @@ struct LaunchParameters
 		float camPerspectiveScaleW{};
 		float camPerspectiveScaleH{};
 	} resolutionState{};
-	uint32_t maxPathLength{};
+	struct PathState
+	{
+		uint32_t maxPathDepth{};
+		uint16_t maxReflectedPathDepth{};
+		uint16_t maxTransmittedPathDepth{};
+	} pathState{};
 	struct SamplingState
 	{
 		uint32_t offset{};

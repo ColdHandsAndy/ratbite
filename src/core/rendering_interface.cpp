@@ -489,26 +489,26 @@ void RenderingInterface::updateHitgroupSBTRecords(const SceneData& scene)
 		{
 			for (auto& submesh : model.meshes[instance.meshIndex].submeshes)
 			{
-				OptixRecordHitgroup record{};
+				OptixRecordHitgroup& record{ matHitgroupRecords.emplace_back() };
 				OPTIX_CHECK(optixSbtRecordPackHeader(m_ptProgramGroups[RenderingInterface::TRIANGLE], record.header));
 				record.data = modelRes.materialIndices[submesh.materialIndex];
-				matHitgroupRecords.push_back(record);
 			}
 		}
 	}
 	hitgroupCount += matHitgroupRecords.size();
 
 	OptixRecordHitgroup* hitgroups{ new OptixRecordHitgroup[hitgroupCount] };
-	int i{ 0 };
+	int j{ 0 };
 	for (auto& hg : lightHitgroupRecords)
-		hitgroups[i++] = hg;
+		hitgroups[j++] = hg;
 	for (auto& hg : matHitgroupRecords)
-		hitgroups[i++] = hg;
+		hitgroups[j++] = hg;
 	m_sbt.hitgroupRecordCount = hitgroupCount;
 	m_sbt.hitgroupRecordStrideInBytes = sizeof(OptixRecordHitgroup);
+	if (m_sbt.hitgroupRecordBase != CUdeviceptr{})
+		CUDA_CHECK(cudaFree(reinterpret_cast<void*>(m_sbt.hitgroupRecordBase)));
 	CUDA_CHECK(cudaMalloc(reinterpret_cast<void**>(&m_sbt.hitgroupRecordBase), m_sbt.hitgroupRecordStrideInBytes * m_sbt.hitgroupRecordCount));
-	CUDA_CHECK(cudaMemcpy(reinterpret_cast<void*>(m_sbt.hitgroupRecordBase), hitgroups, m_sbt.hitgroupRecordStrideInBytes * m_sbt.hitgroupRecordCount, cudaMemcpyHostToDevice));
-	delete[] hitgroups;
+	CUDA_CHECK(cudaMemcpyAsync(reinterpret_cast<void*>(m_sbt.hitgroupRecordBase), hitgroups, m_sbt.hitgroupRecordStrideInBytes * m_sbt.hitgroupRecordCount, cudaMemcpyHostToDevice, m_streams[1]));
 }
 void RenderingInterface::fillSpectralCurvesData()
 {
@@ -605,7 +605,6 @@ void RenderingInterface::prepareDataForRendering(const Camera& camera, const Ren
 {
 	m_mode = renderContext.getRenderMode();
 	m_sampleCount = renderContext.getSampleCount();
-	m_pathLength = renderContext.getPathLength();
 	m_launchWidth = renderContext.getRenderWidth();
 	m_launchHeight = renderContext.getRenderHeight();
 	m_imageExposure = renderContext.getImageExposure();
@@ -619,7 +618,10 @@ void RenderingInterface::prepareDataForRendering(const Camera& camera, const Ren
 		.invFilmHeight = renderContext.getRenderInvHeight(),
 		.camPerspectiveScaleW = static_cast<float>(glm::tan((glm::radians(45.0) * 0.5))) * (static_cast<float>(renderContext.getRenderWidth()) / static_cast<float>(renderContext.getRenderHeight())),
 		.camPerspectiveScaleH = static_cast<float>(glm::tan((glm::radians(45.0) * 0.5))) };
-	m_launchParameters.maxPathLength = static_cast<uint32_t>(renderContext.getPathLength());
+	int maxPathDepth{ std::max(1, renderContext.getMaxPathDepth()) };
+	m_launchParameters.pathState.maxPathDepth = maxPathDepth;
+	m_launchParameters.pathState.maxReflectedPathDepth = std::min(maxPathDepth, renderContext.getMaxReflectedPathDepth());
+	m_launchParameters.pathState.maxTransmittedPathDepth = std::min(maxPathDepth, renderContext.getMaxTransmittedPathDepth());
 	m_launchParameters.samplingState = {
 		.offset = static_cast<uint32_t>(m_currentSampleOffset),
 		.count = static_cast<uint32_t>(m_currentSampleCount) };
@@ -983,7 +985,7 @@ void RenderingInterface::updateInstanceAccelerationStructure(const SceneData& sc
 	instances[1].transform[10] = 1.0f;
 	instances[1].transform[11] = -cameraPosition.z;
 	int inst{ 2 };
-	int sbtOffset{ 0 };
+	int sbtOffset{ m_spherePrimitiveSBTRecordCount + m_customPrimitiveSBTRecordCount };
 	for(auto& model : scene.models)
 	{
 		const RenderingInterface::ModelResource& modelRes{ m_modelResources[model.id] };
@@ -996,7 +998,8 @@ void RenderingInterface::updateInstanceAccelerationStructure(const SceneData& sc
 			transform = modelTransform * transform;
 
 			instances[inst].instanceId = inst;
-			instances[inst].sbtOffset = m_spherePrimitiveSBTRecordCount + m_customPrimitiveSBTRecordCount + sbtOffset;
+			instances[inst].sbtOffset = sbtOffset;
+			// instances[inst].sbtOffset = 2;
 			instances[inst].traversableHandle = modelRes.gasHandles[instance.meshIndex];
 			instances[inst].visibilityMask = 0xFF;
 			instances[inst].flags = OPTIX_INSTANCE_FLAG_NONE;
@@ -1247,8 +1250,10 @@ void RenderingInterface::processCommands(CommandBuffer& commands, RenderContext&
 				}
 			case CommandType::CHANGE_PATH_LENGTH:
 				{
-					m_pathLength = renderContext.getPathLength();
-					m_launchParameters.maxPathLength = m_pathLength;
+					int maxPathDepth{ std::max(1, renderContext.getMaxPathDepth()) };
+					m_launchParameters.pathState.maxPathDepth = maxPathDepth;
+					m_launchParameters.pathState.maxReflectedPathDepth = std::min(maxPathDepth, renderContext.getMaxReflectedPathDepth());
+					m_launchParameters.pathState.maxTransmittedPathDepth = std::min(maxPathDepth, renderContext.getMaxTransmittedPathDepth());
 					restartRender = true;
 					break;
 				}

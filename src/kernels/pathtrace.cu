@@ -31,6 +31,7 @@ enum class PathStateBitfield : uint32_t
 	PATH_TERMINATED       = 1 << 4,
 	TRIANGULAR_GEOMETRY   = 1 << 5,
 	RIGHT_HANDED_FRAME    = 1 << 6,
+	REFRACTION_HAPPENED   = 1 << 7,
 };
 ENABLE_ENUM_BITWISE_OPERATORS(PathStateBitfield);
 
@@ -83,6 +84,8 @@ CU_DEVICE CU_INLINE void updateStateFlags(PathStateBitfield& stateFlags)
 	PathStateBitfield excludeFlags{ PathStateBitfield::CURRENT_HIT_SPECULAR | PathStateBitfield::TRIANGULAR_GEOMETRY | PathStateBitfield::RIGHT_HANDED_FRAME | PathStateBitfield::RAY_REFRACTED };
 	PathStateBitfield includeFlags{ static_cast<bool>(stateFlags & PathStateBitfield::CURRENT_HIT_SPECULAR) ?
 		PathStateBitfield::PREVIOUS_HIT_SPECULAR : PathStateBitfield::REGULARIZED };
+	if (static_cast<bool>(stateFlags & (PathStateBitfield::RAY_REFRACTED | PathStateBitfield::REFRACTION_HAPPENED)))
+		includeFlags |= PathStateBitfield::REFRACTION_HAPPENED;
 
 	stateFlags = (stateFlags & (~excludeFlags)) | includeFlags;
 }
@@ -893,8 +896,8 @@ extern "C" __device__ void __direct_callable__ComplexSurface_BxDF(const Material
 	float alpha{ utility::roughnessToAlpha(roughness) };
 	microfacet::Alpha alphaMS{ .alphaX = alpha, .alphaY = alpha };
 
-	if (static_cast<bool>(stateFlags & PathStateBitfield::REGULARIZED))
-		alphaMS.regularize();
+	// if (static_cast<bool>(stateFlags & PathStateBitfield::REGULARIZED))
+	// 	alphaMS.regularize();
 	glm::vec3 wo{ locWo };
 	microfacet::ContextOutgoing ctxo{ microfacet::createContextOutgoing(wo) };
 	glm::vec3 wm{};
@@ -1116,6 +1119,7 @@ extern "C" __global__ void __raygen__main()
 		LightType lightType{ LightType::NONE };
 		uint16_t lightIndex{};
 		PathStateBitfield stateFlags{ 0 };
+		bool continuePath{};
 		uint32_t depth{ 0 };
 		do
 		{
@@ -1224,10 +1228,19 @@ extern "C" __global__ void __raygen__main()
 				rD = glm::normalize(rD + (hNG * (-rCorrection + 0.01f)));
 			rO = utility::offsetPoint(hP, hNG);
 
+			continuePath = ++depth < parameters.pathState.maxPathDepth;
+			if (!static_cast<bool>(stateFlags & PathStateBitfield::CURRENT_HIT_SPECULAR))
+			{
+				if (static_cast<bool>(stateFlags & PathStateBitfield::REFRACTION_HAPPENED))
+					continuePath = depth < parameters.pathState.maxTransmittedPathDepth;
+				else
+					continuePath = depth < parameters.pathState.maxReflectedPathDepth;
+			}
+
 			qrngState.advanceBounce();
 			updateStateFlags(stateFlags);
 			terminated = static_cast<bool>(stateFlags & PathStateBitfield::PATH_TERMINATED);
-		} while (++depth < parameters.maxPathLength && !terminated);
+		} while (continuePath && !terminated);
 	breakPath:
 		qrngState.advanceSample();
 

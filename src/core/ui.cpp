@@ -146,13 +146,34 @@ void UI::recordInterface(CommandBuffer& commands, Window& window, Camera& camera
 		commands.pushCommand(Command{ .type = CommandType::CHANGE_SAMPLE_COUNT });
 	}
 
-	static int pathLength{ rContext.getPathLength() };
-	changed = ImGui::InputInt("Path length", &pathLength);
-	pathLength = std::max(1, std::min(65535, pathLength));
-	if (changed)
+	if (ImGui::TreeNode("Path depth"))
 	{
-		rContext.setPathLength(pathLength);
-		commands.pushCommand(Command{ .type = CommandType::CHANGE_PATH_LENGTH });
+		static int pathDepth{};
+		pathDepth = rContext.getMaxPathDepth();
+		changed = ImGui::InputInt("Max path depth", &pathDepth);
+		pathDepth = std::max(1, std::min(65535, pathDepth));
+		if (changed)
+		{
+			rContext.setMaxPathDepth(pathDepth);
+			commands.pushCommand(Command{ .type = CommandType::CHANGE_PATH_LENGTH });
+		}
+		pathDepth = rContext.getMaxReflectedPathDepth();
+		changed = ImGui::InputInt("Max reflected path depth", &pathDepth);
+		pathDepth = std::max(1, std::min(65535, pathDepth));
+		if (changed)
+		{
+			rContext.setMaxReflectedPathDepth(pathDepth);
+			commands.pushCommand(Command{ .type = CommandType::CHANGE_PATH_LENGTH });
+		}
+		pathDepth = rContext.getMaxTransmittedPathDepth();
+		changed = ImGui::InputInt("Max transmitted path depth", &pathDepth);
+		pathDepth = std::max(1, std::min(65535, pathDepth));
+		if (changed)
+		{
+			rContext.setMaxTransmittedPathDepth(pathDepth);
+			commands.pushCommand(Command{ .type = CommandType::CHANGE_PATH_LENGTH });
+		}
+		ImGui::TreePop();
 	}
 
 	static bool checkbox{ camera.depthOfFieldEnabled() };
@@ -166,7 +187,7 @@ void UI::recordInterface(CommandBuffer& commands, Window& window, Camera& camera
 	if (checkbox)
 	{
 		static float apperture{ static_cast<float>(camera.getAperture()) };
-		changed = ImGui::SliderFloat("Aperture", &apperture, 0.0f, 100.0f);
+		changed = ImGui::DragFloat("Aperture", &apperture, 0.001f, 0.001f, 100000.0f, "%.3f", ImGuiSliderFlags_AlwaysClamp);
 		if (changed)
 		{
 			camera.setAperture(apperture);
@@ -174,7 +195,7 @@ void UI::recordInterface(CommandBuffer& commands, Window& window, Camera& camera
 		}
 
 		static float focusDistance{ static_cast<float>(camera.getFocusDistance()) };
-		changed = ImGui::SliderFloat("Focus distance", &focusDistance, 0.01f, 1000.0f);
+		changed = ImGui::DragFloat("Focus distance", &focusDistance, 0.1f, 0.001f, 100000.0f, "%.3f", ImGuiSliderFlags_AlwaysClamp);
 		if (changed)
 		{
 			camera.setFocusDistance(focusDistance);
@@ -195,9 +216,10 @@ void UI::recordInterface(CommandBuffer& commands, Window& window, Camera& camera
 	ImGui::End();
 
 
-	ImGui::Begin("Scene");
+	ImGui::Begin("Scene settings");
 
-	ImGui::SeparatorText("Settings");
+	ImGui::SeparatorText("General");
+
 	static float movingSpeed{ static_cast<float>(camera.getMovingSpeed()) };
 	changed = ImGui::DragFloat("Moving speed", &movingSpeed, 0.5f, 0.01f, 1000.0f);
 	if (changed) camera.setMovingSpeed(movingSpeed);
@@ -230,7 +252,7 @@ void UI::recordInterface(CommandBuffer& commands, Window& window, Camera& camera
 		for (int i{ 0 }; i < scene.models.size(); ++i)
 		{
 			auto& md{ scene.models[i] };
-			if (ImGui::Button(md.name.c_str(), ImVec2(-FLT_MIN, 0.0f)))
+			if (ImGui::Button((md.name + "##" + std::to_string(i)).c_str(), ImVec2(-FLT_MIN, 0.0f)))
 			{
 				ImGui::OpenPopup("Model settings popup");
 				selectedIndex = i;
@@ -359,7 +381,7 @@ void UI::recordInterface(CommandBuffer& commands, Window& window, Camera& camera
 
 	if (ImGui::Button("Add sphere light"))
 	{
-		scene.sphereLights.emplace_back(glm::vec3{0.0f}, 50.0f, 0.1f,
+		scene.sphereLights.emplace_back(glm::vec3{0.0f}, 1.0f, 0.1f,
 				SceneData::MaterialDescriptor{.bxdf = SceneData::BxDF::PURE_CONDUCTOR,
 				.baseIOR = SpectralData::SpectralDataType::C_METAL_AG_IOR,
 				.baseAC = SpectralData::SpectralDataType::C_METAL_AG_AC,
@@ -372,7 +394,7 @@ void UI::recordInterface(CommandBuffer& commands, Window& window, Camera& camera
 	ImGui::SameLine();
 	if (ImGui::Button("Add disk light"))
 	{
-		scene.diskLights.emplace_back(glm::vec3{0.0f}, 50.0f, glm::vec3{0.0f, -1.0f, 0.0f}, 0.1f,
+		scene.diskLights.emplace_back(glm::vec3{0.0f}, 1.0f, glm::vec3{0.0f, -1.0f, 0.0f}, 0.1f,
 				SceneData::MaterialDescriptor{.bxdf = SceneData::BxDF::PURE_CONDUCTOR,
 				.baseIOR = SpectralData::SpectralDataType::C_METAL_AG_IOR,
 				.baseAC = SpectralData::SpectralDataType::C_METAL_AG_AC,
@@ -415,7 +437,7 @@ void UI::recordInterface(CommandBuffer& commands, Window& window, Camera& camera
 			SceneData::SphereLight& l{ scene.sphereLights[selectedIndex] };
 
 			float v[3]{ l.getPosition().x, l.getPosition().y, l.getPosition().z };
-			changed = ImGui::DragFloat3("Position", v, 10.0f, -10000.0f, -10000.0f);
+			changed = ImGui::DragFloat3("Position", v, 0.5f);
 			if (changed)
 			{
 				l.setPosition(glm::vec3{v[0], v[1], v[2]});
@@ -425,7 +447,7 @@ void UI::recordInterface(CommandBuffer& commands, Window& window, Camera& camera
 			}
 
 			float r{ l.getRadius() };
-			changed = ImGui::DragFloat("Radius", &r, 5.0f, 0.0001f, 2000.0f);
+			changed = ImGui::DragFloat("Radius", &r, 0.3f, 0.0001f, 10000.0f);
 			if (changed)
 			{
 				l.setRadius(r);
@@ -470,7 +492,7 @@ void UI::recordInterface(CommandBuffer& commands, Window& window, Camera& camera
 			SceneData::DiskLight& l{ scene.diskLights[selectedIndex] };
 
 			float v[3]{ l.getPosition().x, l.getPosition().y, l.getPosition().z };
-			changed = ImGui::DragFloat3("Position", v, 10.0f, -10000.0f, -10000.0f);
+			changed = ImGui::DragFloat3("Position", v, 0.5f);
 			if (changed)
 			{
 				l.setPosition(glm::vec3{v[0], v[1], v[2]});
@@ -480,7 +502,7 @@ void UI::recordInterface(CommandBuffer& commands, Window& window, Camera& camera
 			}
 
 			float r{ l.getRadius() };
-			changed = ImGui::DragFloat("Radius", &r, 5.0f, 0.0001f, 2000.0f);
+			changed = ImGui::DragFloat("Radius", &r, 0.3f, 0.0001f, 10000.0f);
 			if (changed)
 			{
 				l.setRadius(r);

@@ -110,7 +110,6 @@ private:
 	int m_launchWidth{};
 	int m_launchHeight{};
 	int m_sampleCount{};
-	int m_pathLength{};
 	float m_imageExposure{ 0.0f };
 
 	int m_currentSampleOffset{ 0 };

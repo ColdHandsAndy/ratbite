@@ -53,15 +53,11 @@ int main(int argc, char** argv)
 
 	constexpr uint32_t windowWidth{ 1280 };
 	constexpr uint32_t windowHeight{ 720 };
-	constexpr uint32_t renderWidth{ 360 };
-	constexpr uint32_t renderHeight{ 150 };
-	const int samplesToRender{ 4096 };
-	const int pathLength{ 3 };
-	
+
 	Window window{ windowWidth, windowHeight };
 	Camera camera{ {0.0f, 0.0f, 5.0f}, {0.0f, 0.0f, -1.0f}, {0.0f, 1.0f, 0.0f} };
 	SceneData scene{};
-	RenderContext rContext{ renderWidth, renderHeight, pathLength, samplesToRender, Color::RGBColorspace::sRGB };
+	RenderContext rContext{};
 	RenderingInterface rInterface{ camera, rContext, scene };
 	UI ui{ window.getGLFWwindow() };
 	CommandBuffer commands{};

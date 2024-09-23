@@ -25,11 +25,6 @@ namespace
 		if (node->mesh != nullptr)
 		{
 			size_t index{ cgltf_mesh_index(modelData, node->mesh) };
-			// instances.emplace_back(static_cast<int>(index),
-			// 		glm::mat3x4{
-			// 		glm::vec4{world[0][0], world[1][0], world[2][0], world[3][0]},
-			// 		glm::vec4{world[0][1], world[1][1], world[2][1], world[3][1]},
-			// 		glm::vec4{world[0][2], world[1][2], world[2][2], world[3][2]} });
 			instances.emplace_back(static_cast<int>(index),
 				glm::mat4x3{
 					glm::vec3{world[0][0], world[0][1], world[0][2]},

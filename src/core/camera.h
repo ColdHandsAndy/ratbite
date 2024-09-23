@@ -24,8 +24,8 @@ private:
 	glm::ivec3 m_step{ 0 };
 
 	bool m_depthOfFieldEnabled{ false };
-	double m_focusDistance{ 250.0f };
-	double m_aperture{ 1.0f };
+	double m_focusDistance{ 1.0 };
+	double m_aperture{ 0.01 };
 
 public:
 	Camera(const glm::dvec3& position, const glm::dvec3& viewDirection, const glm::dvec3& upDirection) : m_pos{ position }, m_upWorld{ glm::normalize(upDirection) }
