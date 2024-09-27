@@ -12,7 +12,7 @@
 
 namespace
 {
-	void processGLTFNode(const cgltf_data* modelData, const cgltf_node* node, std::vector<SceneData::Instance>& instances, cgltf_mesh* firstMesh, size_t meshCount, const glm::mat4& transform)
+	void processGLTFNode(const cgltf_data* modelData, const cgltf_node* node, size_t& triangleCount, std::vector<SceneData::Instance>& instances, cgltf_mesh* firstMesh, size_t meshCount, const glm::mat4& transform)
 	{
 		cgltf_float localMat[16]{};
 		cgltf_node_transform_local(node, localMat);
@@ -31,18 +31,22 @@ namespace
 					glm::vec3{world[1][0], world[1][1], world[1][2]},
 					glm::vec3{world[2][0], world[2][1], world[2][2]},
 					glm::vec3{world[3][0], world[3][1], world[3][2]}, });
+
+			for (int i{ 0 }; i < node->mesh->primitives_count; ++i)
+				if (node->mesh->primitives[i].attributes != nullptr)
+					triangleCount += node->mesh->primitives[i].attributes[0].data->count;
 		}
 
 		for (int i{ 0 }; i < node->children_count; ++i)
 		{
 			const cgltf_node* child{ node->children[i] };
-			processGLTFNode(modelData, child, instances, firstMesh, meshCount, world);
+			processGLTFNode(modelData, child, triangleCount, instances, firstMesh, meshCount, world);
 		}
 	}
-	void processGLTFScene(const cgltf_data* modelData, const cgltf_scene* scene, std::vector<SceneData::Instance>& instances, cgltf_mesh* firstMesh, size_t meshCount)
+	void processGLTFScene(const cgltf_data* modelData, const cgltf_scene* scene, size_t& triangleCount, std::vector<SceneData::Instance>& instances, cgltf_mesh* firstMesh, size_t meshCount)
 	{
 		for (int i{ 0 }; i < scene->nodes_count; ++i)
-			processGLTFNode(modelData, scene->nodes[i], instances, firstMesh, meshCount, glm::identity<glm::mat4>());
+			processGLTFNode(modelData, scene->nodes[i], triangleCount, instances, firstMesh, meshCount, glm::identity<glm::mat4>());
 	}
 
 	SceneData::Model loadGLTF(const std::filesystem::path& path, const glm::mat4& transform, uint32_t id)
@@ -368,7 +372,7 @@ namespace
 			}
 		}
 
-		processGLTFScene(data, data->scene, model.instances, firstMesh, meshCount);
+		processGLTFScene(data, data->scene, model.triangleCount, model.instances, firstMesh, meshCount);
 
 		cgltf_free(data);
 

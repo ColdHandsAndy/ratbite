@@ -907,49 +907,53 @@ extern "C" __device__ void __direct_callable__ComplexSurface_BxDF(const Material
 	float eta{ wo.z > 0.0f ? surface.specular.ior / 1.0f : 1.0f / surface.specular.ior };
 	float f0Sr{ (1.0f - eta) / (1.0f + eta) };
 	float f0{ f0Sr * f0Sr };
-	float energyCompensationTermDielectric{ 1.0f / tex3D<float>(eta > 1.0f ? parameters.LUTs.dielectricOuterAlbedo : parameters.LUTs.dielectricInnerAlbedo, LocalTransform::cosTheta(wo), roughness, f0) };
-	float energyPreservationTermDiffuse{ 1.0f - tex3D<float>(parameters.LUTs.reflectiveDielectricOuterAlbedo, LocalTransform::cosTheta(wo), roughness, f0) };
+	float energyCompensationTermDielectric{ 1.0f / tex3D<float>(eta > 1.0f ? parameters.LUTs.dielectricOuterAlbedo : parameters.LUTs.dielectricInnerAlbedo,
+			LocalTransform::cosTheta(wo), roughness, cuda::std::sqrt(cuda::std::abs(f0Sr))) };
+	float energyPreservationTermDiffuse{ 1.0f - tex3D<float>(eta > 1.0f ? parameters.LUTs.reflectiveDielectricOuterAlbedo : parameters.LUTs.reflectiveDielectricInnerAlbedo,
+			LocalTransform::cosTheta(wo), roughness, cuda::std::sqrt(cuda::std::abs(f0Sr))) };
 
 	if (!directLightData.occluded)
 	{
 		wi = locLi;
 		microfacet::ContextIncident ctxi{ microfacet::createContextIncident(wi) };
-		wm = glm::normalize(wi + wo);
-		microfacet::ContextMicronormal ctxm{ microfacet::createContextMicronormal(wm) };
 
-		float cosFactor{ cuda::std::fabs(LocalTransform::cosTheta(wi)) };
 		const float cosThetaI{ LocalTransform::cosTheta(wi) };
 		const float cosThetaO{ LocalTransform::cosTheta(wo) };
+		float cosFactor{ cuda::std::fabs(cosThetaI) };
+
+		bool reflect{ cosThetaI * cosThetaO > 0.0f };
+		float etaR{ 1.0f };
+		if (!reflect)
+			etaR = eta;
+		wm = glm::normalize(wi * etaR + wo);
+		microfacet::ContextMicronormal ctxm{ microfacet::createContextMicronormal(wm) };
+
 		const float wowmAbsDot{ cuda::std::fabs(glm::dot(wo, wm)) };
 
-		float Gs{ microfacet::G(ctxi, ctxo, alphaMS) };
-		float Ds{ microfacet::D(ctxm, alphaMS) };
 		float FDielectric{ microfacet::FSchlick(f0, wowmAbsDot) };
+		float Ds{ microfacet::D(ctxm, alphaMS) };
+		float Gs{ microfacet::G(ctxi, ctxo, alphaMS) };
 
 		float metalness{ surface.base.metalness };
+		float translucency{ surface.transmission.weight };
 		float cSpecWeight{ metalness };
 		float dSpecWeight{ (1.0f - metalness) * FDielectric };
-		float dTransWeight{ (1.0f - metalness) * (1.0f - FDielectric) };
-		float diffWeight{ (1.0f - metalness) * (1.0f - FDielectric) };
+		float diffWeight{ (1.0f - metalness) * (1.0f - translucency) * (1.0f - FDielectric) };
+		float dTransWeight{ (1.0f - metalness) * translucency * (1.0f - FDielectric) };
 
 		float lbxdfSpecPDF{ microfacet::VNDF::PDF<microfacet::VNDF::SPHERICAL_CAP>(wo, wowmAbsDot, ctxo, ctxm, alphaMS) / (4.0f * wowmAbsDot) };
-
+		float lbxdfDiffPDF{ diffuse::CosWeighted::PDF(LocalTransform::cosTheta(wi)) };
 		float dotWmWo{ glm::dot(wm, wo) };
 		float dotWmWi{ glm::dot(wm, wi) };
-		float t{ dotWmWi + dotWmWo / eta };
-		float denom{ t * t };
-		float dwmdwi{ cuda::std::fabs(dotWmWi) / denom };
-		float lbxdfTransPDF{ microfacet::VNDF::PDF<microfacet::VNDF::SPHERICAL_CAP>(wo, wowmAbsDot, ctxo, ctxm, alphaMS) * dwmdwi };
 
-		float lbxdfDiffPDF{ diffuse::CosWeighted::PDF(LocalTransform::cosTheta(wi)) };
-		if (wo.z * wi.z > 0.0f)
+		if (reflect)
 		{
 			SampledSpectrum FConductor{ color::RGBtoSpectrum(microfacet::F82(surface.base.color, wowmAbsDot) *
 					(1.0f + microfacet::FAvgIntegralForF82(surface.base.color) * ((1.0f - directionalAlbedoConductor) / directionalAlbedoConductor)),
 					wavelengths, *parameters.spectralBasisR, *parameters.spectralBasisG, *parameters.spectralBasisB) };
 
 			SampledSpectrum flConductor{ Ds * Gs * FConductor / cuda::std::fabs(4.0f * LocalTransform::cosTheta(wo) * LocalTransform::cosTheta(wi)) };
-			float flDielectric{ Ds * Gs * FDielectric * energyCompensationTermDielectric
+			float flDielectric{ Ds * Gs * energyCompensationTermDielectric // FDielectric is included in dSpecWeight
 				/ cuda::std::fabs(4.0f * LocalTransform::cosTheta(wo) * LocalTransform::cosTheta(wi)) };
 			SampledSpectrum flDiffuse{ energyPreservationTermDiffuse *
 				color::RGBtoSpectrum(surface.base.color, wavelengths, *parameters.spectralBasisR, *parameters.spectralBasisG, *parameters.spectralBasisB) / glm::pi<float>() };
@@ -965,14 +969,18 @@ extern "C" __device__ void __direct_callable__ComplexSurface_BxDF(const Material
 					diffWeight * flDiffuse
 					) / directLightData.lightSamplePDF;
 		}
-		else if (surface.transmission.weight != 0.0f)
+		else if (surface.transmission.weight != 0.0f && !(dotWmWo * cosThetaO <= 0.0f || dotWmWi * cosThetaI <= 0.0f))
 		{
+			float t{ dotWmWi + dotWmWo / eta };
+			float denom{ t * t };
+			float dwmdwi{ cuda::std::fabs(dotWmWi) / denom };
+			float lbxdfTransPDF{ microfacet::VNDF::PDF<microfacet::VNDF::SPHERICAL_CAP>(wo, wowmAbsDot, ctxo, ctxm, alphaMS) * dwmdwi };
 			float bxdfPDF{ dTransWeight * lbxdfTransPDF };
 			float mis{ MIS::powerHeuristic(1, directLightData.lightSamplePDF, 1, bxdfPDF) };
 			SampledSpectrum flTransmission{ Ds * (1.0f - FDielectric) * Gs * energyCompensationTermDielectric
 				* cuda::std::fabs(dotWmWo * dotWmWi / (cosThetaO * cosThetaI * denom)) };
 			flTransmission /= (eta * eta);
-			L += directLightData.spectrumSample * throughputWeight * cosFactor * mis * flTransmission / directLightData.lightSamplePDF;
+			L += directLightData.spectrumSample * throughputWeight * flTransmission * cosFactor * mis / directLightData.lightSamplePDF;
 		}
 	}
 
@@ -986,9 +994,9 @@ extern "C" __device__ void __direct_callable__ComplexSurface_BxDF(const Material
 
 	float conductorP{ surface.base.metalness };
 	float dielectricSpecP{ cuda::std::fmax(0.0f, FDielectric * (1.0f - conductorP)) };
-	float tr{ surface.transmission.weight };
-	float transmissionP{ cuda::std::fmax(0.0f, (1.0f - FDielectric) * (tr) * (1.0f - conductorP)) };
-	float diffuseP{ cuda::std::fmax(0.0f, (1.0f - FDielectric) * (1.0f - tr) * (1.0f - conductorP)) };
+	float translucency{ surface.transmission.weight };
+	float transmissionP{ cuda::std::fmax(0.0f, (1.0f - FDielectric) * translucency * (1.0f - conductorP)) };
+	float diffuseP{ cuda::std::fmax(0.0f, (1.0f - FDielectric) * (1.0f - translucency) * (1.0f - conductorP)) };
 
 	if (rand.z < conductorP + dielectricSpecP)
 	{
@@ -1229,7 +1237,7 @@ extern "C" __global__ void __raygen__main()
 			rO = utility::offsetPoint(hP, hNG);
 
 			continuePath = ++depth < parameters.pathState.maxPathDepth;
-			if (!static_cast<bool>(stateFlags & PathStateBitfield::CURRENT_HIT_SPECULAR))
+			if (!static_cast<bool>(stateFlags & PathStateBitfield::CURRENT_HIT_SPECULAR) && !skipHit)
 			{
 				if (static_cast<bool>(stateFlags & PathStateBitfield::REFRACTION_HAPPENED))
 					continuePath = depth < parameters.pathState.maxTransmittedPathDepth;

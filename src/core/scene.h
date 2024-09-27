@@ -143,6 +143,8 @@ struct SceneData
 
 		glm::mat4x3 transform{};
 
+		size_t triangleCount{};
+
 		struct ImageData
 		{
 			void* data{};
@@ -169,6 +171,7 @@ struct SceneData
 			: id{ model.id }, path{ std::move(model.path) }, name{ std::move(model.name) },
 			meshes{ std::move(model.meshes) }, instances{ std::move(model.instances) },
 			transform{ model.transform },
+			triangleCount{ model.triangleCount },
 			imageData{ std::move(model.imageData) }, textureData{ std::move(model.textureData) },
 			materialDescriptors{ std::move(model.materialDescriptors) }
 		{
@@ -183,6 +186,8 @@ struct SceneData
 			instances = std::move(model.instances);
 
 			transform = model.transform;
+
+			triangleCount = model.triangleCount;
 
 			imageData = std::move(model.imageData);
 			textureData = std::move(model.textureData);
@@ -201,6 +206,8 @@ struct SceneData
 			instances = model.instances;
 
 			transform = model.transform;
+
+			triangleCount = model.triangleCount;
 
 			imageData = model.imageData;
 			textureData = model.textureData;

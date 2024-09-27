@@ -279,19 +279,21 @@ void UI::recordInterface(CommandBuffer& commands, Window& window, Camera& camera
 			ImGui::PushItemWidth(ImGui::GetFontSize() * 3 + ImGui::GetStyle().FramePadding.x * 2.0f);
 			static float uniScale{ 1.0f };
 			float prev{ uniScale };
-			if (ImGui::DragFloat("Scale Uniform", &uniScale, 0.02f, 0.001f, 1000.0f))
+			if (ImGui::DragFloat("Scale Uniform", &uniScale, 0.02f, 0.001f, 1000.0f, "%.3f", ImGuiSliderFlags_AlwaysClamp))
 			{
 				xScale /= prev; yScale /= prev; zScale /= prev;
 				xScale *= uniScale; yScale *= uniScale; zScale *= uniScale;
 				changesMade = true;
 			}
-			if (ImGui::DragFloat("Scale X", &xScale, 0.02f, 0.001f, 1000.0f))
+			else if (ImGui::IsMouseReleased(ImGuiMouseButton_Left))
+				uniScale = 1.0f;
+			if (ImGui::DragFloat("Scale X", &xScale, 0.02f, 0.001f, 1000.0f, "%.3f", ImGuiSliderFlags_AlwaysClamp))
 				changesMade = true;
 			ImGui::SameLine();
-			if (ImGui::DragFloat("Scale Y", &yScale, 0.02f, 0.001f, 1000.0f))
+			if (ImGui::DragFloat("Scale Y", &yScale, 0.02f, 0.001f, 1000.0f, "%.3f", ImGuiSliderFlags_AlwaysClamp))
 				changesMade = true;
 			ImGui::SameLine();
-			if (ImGui::DragFloat("Scale Z", &zScale, 0.02f, 0.001f, 1000.0f))
+			if (ImGui::DragFloat("Scale Z", &zScale, 0.02f, 0.001f, 1000.0f, "%.3f", ImGuiSliderFlags_AlwaysClamp))
 				changesMade = true;
 			ImGui::PopItemWidth();
 
@@ -420,6 +422,11 @@ void UI::recordInterface(CommandBuffer& commands, Window& window, Camera& camera
 				ImGui::OpenPopup("Sphere light settings popup");
 				selectedIndex = i;
 			}
+			else if (ImGui::IsMouseReleased(ImGuiMouseButton_Right) && ImGui::IsItemHovered())
+			{
+				ImGui::OpenPopup("Remove sphere light popup");
+				selectedIndex = i;
+			}
 		}
 		for(int i{ 0 }; i < scene.diskLights.size(); ++i)
 		{
@@ -428,6 +435,11 @@ void UI::recordInterface(CommandBuffer& commands, Window& window, Camera& camera
 			if (ImGui::Button(name, ImVec2(-FLT_MIN, 0.0f)))
 			{
 				ImGui::OpenPopup("Disk light settings popup");
+				selectedIndex = i;
+			}
+			else if (ImGui::IsMouseReleased(ImGuiMouseButton_Right) && ImGui::IsItemHovered())
+			{
+				ImGui::OpenPopup("Remove disk light popup");
 				selectedIndex = i;
 			}
 		}
@@ -473,16 +485,6 @@ void UI::recordInterface(CommandBuffer& commands, Window& window, Camera& camera
 				lightPayload = { .type = LightType::SPHERE, .index = static_cast<uint32_t>(selectedIndex), .oldEmissionType = l.getMaterialDescriptor().baseEmission };
 				commands.pushCommand(Command{ .type = CommandType::CHANGE_LIGHT_EMISSION_SPECTRUM, .payload = &lightPayload });
 				l.setEmissionSpectrum(SpectralData::emissionSpectraTypes[currentSpectrum]);
-			}
-
-			changed = ImGui::Button("Remove light", ImVec2(ImGui::GetItemRectSize().x, 0.0f));
-			if (changed)
-			{
-				static CommandPayloads::Light lightPayload{};
-				lightPayload = { .type = LightType::SPHERE, .id = scene.sphereLights[selectedIndex].getID() };
-				commands.pushCommand(Command{ .type = CommandType::REMOVE_LIGHT, .payload = &lightPayload });
-				scene.sphereLights.erase(scene.sphereLights.begin() + selectedIndex);
-				ImGui::CloseCurrentPopup();
 			}
 
 			ImGui::EndPopup();
@@ -547,7 +549,25 @@ void UI::recordInterface(CommandBuffer& commands, Window& window, Camera& camera
 				l.setEmissionSpectrum(SpectralData::emissionSpectraTypes[currentSpectrum]);
 			}
 
-			changed = ImGui::Button("Remove light", ImVec2(ImGui::GetItemRectSize().x, 0.0f));
+			ImGui::EndPopup();
+		}
+		else if (ImGui::BeginPopup("Remove sphere light popup"))
+		{
+			changed = ImGui::Button("Remove");
+			if (changed)
+			{
+				static CommandPayloads::Light lightPayload{};
+				lightPayload = { .type = LightType::SPHERE, .id = scene.sphereLights[selectedIndex].getID() };
+				commands.pushCommand(Command{ .type = CommandType::REMOVE_LIGHT, .payload = &lightPayload });
+				scene.sphereLights.erase(scene.sphereLights.begin() + selectedIndex);
+				ImGui::CloseCurrentPopup();
+			}
+			
+			ImGui::EndPopup();
+		}
+		else if (ImGui::BeginPopup("Remove disk light popup"))
+		{
+			changed = ImGui::Button("Remove");
 			if (changed)
 			{
 				static CommandPayloads::Light lightPayload{};
@@ -556,7 +576,7 @@ void UI::recordInterface(CommandBuffer& commands, Window& window, Camera& camera
 				scene.diskLights.erase(scene.diskLights.begin() + selectedIndex);
 				ImGui::CloseCurrentPopup();
 			}
-
+			
 			ImGui::EndPopup();
 		}
 	}
@@ -566,7 +586,41 @@ void UI::recordInterface(CommandBuffer& commands, Window& window, Camera& camera
 
 
 	ImGui::Begin("Information");
-	ImGui::Text("Current sample count: %d", currentSampleCount);
+
+	ImGui::Text("Samples processed: %d", currentSampleCount);
+
+	size_t triangleCount{ 0 };
+	for (auto& md : scene.models)
+		triangleCount += md.triangleCount;
+	ImGui::Text("Triangle count: %llu", triangleCount);
+
+	const char* memUnits[]{ "kB", "MB", "GB" };
+	static int selectedMemUnit{ 1 };
+	const char* previewVal{ memUnits[selectedMemUnit] };
+	size_t freeMem{};
+	size_t totalMem{};
+	CUDA_CHECK(cudaMemGetInfo(&freeMem, &totalMem));
+	double unitDiv{ selectedMemUnit == 0 ? 1000.0 : (selectedMemUnit == 1 ? 1000.0 * 1000.0 : 1000.0 * 1000.0 * 1000.0) };
+	double freeMemInUnits{ freeMem / unitDiv };
+	double totalMemInUnits{ totalMem / unitDiv };
+	int percentageConsumed{ static_cast<int>((totalMemInUnits - freeMemInUnits) / totalMemInUnits * 100.0) };
+	ImGui::Text("Memory consumed: %f %s out of %f %s (%d %%)",
+			totalMemInUnits - freeMemInUnits, memUnits[selectedMemUnit], totalMemInUnits, memUnits[selectedMemUnit], percentageConsumed);
+	ImGui::SameLine();
+	if (ImGui::BeginCombo("##", previewVal, ImGuiComboFlags_NoArrowButton | ImGuiComboFlags_WidthFitPreview))
+	{
+		for (int i{ 0 }; i < ARRAYSIZE(memUnits); ++i)
+		{
+			const bool isSelected{ selectedMemUnit == i };
+			if (ImGui::Selectable(memUnits[i], isSelected))
+				selectedMemUnit = i;
+
+			if (isSelected)
+				ImGui::SetItemDefaultFocus();
+		}
+		ImGui::EndCombo();
+	}
+
 	ImGui::End();
 }
 void UI::recordInput(CommandBuffer& commands, Window& window, Camera& camera, RenderContext& rContext)

@@ -323,7 +323,7 @@ namespace microsurface
 {
 	struct Base
 	{
-		glm::vec3 color{ 0.8f };
+		glm::vec3 color{ 1.0f };
 		float metalness{ 1.0f };
 	};
 	struct Specular
