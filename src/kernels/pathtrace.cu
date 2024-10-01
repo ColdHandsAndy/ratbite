@@ -84,7 +84,7 @@ CU_DEVICE CU_INLINE void updateStateFlags(PathStateBitfield& stateFlags)
 	PathStateBitfield excludeFlags{ PathStateBitfield::CURRENT_HIT_SPECULAR | PathStateBitfield::TRIANGULAR_GEOMETRY | PathStateBitfield::RIGHT_HANDED_FRAME | PathStateBitfield::RAY_REFRACTED };
 	PathStateBitfield includeFlags{ static_cast<bool>(stateFlags & PathStateBitfield::CURRENT_HIT_SPECULAR) ?
 		PathStateBitfield::PREVIOUS_HIT_SPECULAR : PathStateBitfield::REGULARIZED };
-	if (static_cast<bool>(stateFlags & (PathStateBitfield::RAY_REFRACTED | PathStateBitfield::REFRACTION_HAPPENED)))
+	if (static_cast<bool>(stateFlags & (PathStateBitfield::RAY_REFRACTED)))
 		includeFlags |= PathStateBitfield::REFRACTION_HAPPENED;
 
 	stateFlags = (stateFlags & (~excludeFlags)) | includeFlags;
@@ -991,6 +991,10 @@ extern "C" __device__ void __direct_callable__ComplexSurface_BxDF(const Material
 
 	float Ds{ microfacet::D(ctxm, alphaMS) };
 	float FDielectric{ microfacet::FSchlick(f0, wowmAbsDot) };
+	float sin2ThetaI{ cuda::std::fmax(0.0f, 1.0f - wowmAbsDot * wowmAbsDot) };
+	float sin2ThetaT{ sin2ThetaI / (eta * eta) };
+	if (sin2ThetaT >= 1.0f)
+		FDielectric = 1.0f;
 
 	float conductorP{ surface.base.metalness };
 	float dielectricSpecP{ cuda::std::fmax(0.0f, FDielectric * (1.0f - conductorP)) };
@@ -1032,10 +1036,9 @@ extern "C" __device__ void __direct_callable__ComplexSurface_BxDF(const Material
 	{
 		if (rand.z < conductorP + dielectricSpecP + transmissionP)
 		{
-			bool valid;
-			wi = utility::refract(wo, wm, eta, valid);
+			wi = utility::refract(wo, wm, eta);
 			refractionScale *= eta;
-			if (wo.z * wi.z >= 0.0f || !valid)
+			if (wo.z * wi.z >= 0.0f)
 			{
 				stateFlags = stateFlags | PathStateBitfield::PATH_TERMINATED;
 				return;
@@ -1245,9 +1248,9 @@ extern "C" __global__ void __raygen__main()
 					continuePath = depth < parameters.pathState.maxReflectedPathDepth;
 			}
 
-			qrngState.advanceBounce();
-			updateStateFlags(stateFlags);
 			terminated = static_cast<bool>(stateFlags & PathStateBitfield::PATH_TERMINATED);
+			updateStateFlags(stateFlags);
+			qrngState.advanceBounce();
 		} while (continuePath && !terminated);
 	breakPath:
 		qrngState.advanceSample();

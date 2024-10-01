@@ -1248,7 +1248,7 @@ void RenderingInterface::processCommands(CommandBuffer& commands, RenderContext&
 					restartRender = true;
 					break;
 				}
-			case CommandType::CHANGE_PATH_LENGTH:
+			case CommandType::CHANGE_PATH_DEPTH:
 				{
 					int maxPathDepth{ std::max(1, renderContext.getMaxPathDepth()) };
 					m_launchParameters.pathState.maxPathDepth = maxPathDepth;

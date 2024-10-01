@@ -50,7 +50,7 @@ namespace utility
 	{
 		return -v + 2.0f * glm::dot(v, n) * n;
 	}
-	CU_DEVICE CU_INLINE glm::vec3 refract(const glm::vec3& v, glm::vec3 n, float eta, bool& valid)
+	CU_DEVICE CU_INLINE glm::vec3 refract(const glm::vec3& v, glm::vec3 n, float eta)
 	{
 		float cosThetaI{ glm::dot(v, n) };
 		if (cosThetaI < 0.0f)
@@ -63,11 +63,7 @@ namespace utility
 		float sin2ThetaT{ sin2ThetaI / (eta * eta) };
 
 		if (sin2ThetaT >= 1.0f)
-		{
-			valid = false;
 			return {};
-		}
-		valid = true;
 
 		glm::vec3 r{ -v / eta + (cosThetaI / eta - cuda::std::sqrtf(1.0f - sin2ThetaT)) * n };
 		return r;

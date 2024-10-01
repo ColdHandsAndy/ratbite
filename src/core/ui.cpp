@@ -282,33 +282,33 @@ void UI::recordRenderSettingsWindow(CommandBuffer& commands, Camera& camera, Ren
 
 	if (ImGui::TreeNode("Path depth"))
 	{
-		static int pathDepth{};
+		int pathDepth{};
 		pathDepth = rContext.getMaxPathDepth();
 		ImGui::Text("Max path depth");
-		changed = ImGui::InputInt("##", &pathDepth);
+		changed = ImGui::InputInt("###MPD", &pathDepth);
 		pathDepth = std::max(1, std::min(65535, pathDepth));
 		if (changed)
 		{
 			rContext.setMaxPathDepth(pathDepth);
-			commands.pushCommand(Command{ .type = CommandType::CHANGE_PATH_LENGTH });
+			commands.pushCommand(Command{ .type = CommandType::CHANGE_PATH_DEPTH });
 		}
 		pathDepth = rContext.getMaxReflectedPathDepth();
 		ImGui::Text("Max reflected path depth");
-		changed = ImGui::InputInt("##", &pathDepth);
+		changed = ImGui::InputInt("###MRPD", &pathDepth);
 		pathDepth = std::max(1, std::min(65535, pathDepth));
 		if (changed)
 		{
 			rContext.setMaxReflectedPathDepth(pathDepth);
-			commands.pushCommand(Command{ .type = CommandType::CHANGE_PATH_LENGTH });
+			commands.pushCommand(Command{ .type = CommandType::CHANGE_PATH_DEPTH });
 		}
 		pathDepth = rContext.getMaxTransmittedPathDepth();
 		ImGui::Text("Max transmitted path depth");
-		changed = ImGui::InputInt("##", &pathDepth);
+		changed = ImGui::InputInt("###MTPD", &pathDepth);
 		pathDepth = std::max(1, std::min(65535, pathDepth));
 		if (changed)
 		{
 			rContext.setMaxTransmittedPathDepth(pathDepth);
-			commands.pushCommand(Command{ .type = CommandType::CHANGE_PATH_LENGTH });
+			commands.pushCommand(Command{ .type = CommandType::CHANGE_PATH_DEPTH });
 		}
 		ImGui::TreePop();
 	}
