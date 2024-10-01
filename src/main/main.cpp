@@ -33,10 +33,14 @@ void initialize()
 	OPTIX_CHECK(optixInit());
 	R_ASSERT(NFD_Init() == NFD_OKAY);
 }
-void draw(Window* window, const RenderingInterface* rInterface, UI* ui)
+void draw(Window* window, UI* ui)
 {
-	ui->renderInterface();
-
+	ui->drawInterface(false);
+	glfwSwapBuffers(window->getGLFWwindow());
+}
+void redraw(Window* window, UI* ui)
+{
+	ui->drawInterface(true);
 	glfwSwapBuffers(window->getGLFWwindow());
 }
 void cleanup(UI& ui, RenderingInterface& rInterface)
@@ -62,7 +66,6 @@ int main(int argc, char** argv)
 	UI ui{ window.getGLFWwindow() };
 	CommandBuffer commands{};
 
-	window.attachRenderingInterface(&rInterface);
 	window.attachUI(&ui);
 
 	while (!glfwWindowShouldClose(window.getGLFWwindow()))
@@ -75,7 +78,7 @@ int main(int argc, char** argv)
 		ui.recordInterface(commands, window, camera, rContext, scene, rInterface.getPreview(), rInterface.getProcessedSampleCount());
 		ui.recordInput(commands, window, camera, rContext);
 
-		draw(&window, &rInterface, &ui);
+		draw(&window, &ui);
 	}
 
 	cleanup(ui, rInterface);

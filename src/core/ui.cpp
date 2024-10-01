@@ -1,5 +1,9 @@
 #include "../core/ui.h"
 
+#define STB_IMAGE_WRITE_IMPLEMENTATION
+#include <stb/stb_image_write.h>
+#undef STB_IMAGE_WRITE_IMPLEMENTATION
+
 #include "../core/command.h"
 #include "../core/window.h"
 #include "../core/camera.h"
@@ -59,14 +63,9 @@ namespace ImGuiWidgets
 	}
 }
 
-void UI::recordInterface(CommandBuffer& commands, Window& window, Camera& camera, RenderContext& rContext, SceneData& scene, GLuint renderResult, int currentSampleCount)
+void UI::recordDockspace(CommandBuffer& commands, Window& window, bool& openImageRenderSettings)
 {
-	startImGuiRecording();
-	constexpr ImColor infoColor{ 0.99f, 0.33f, 0.29f };
-
-	bool changed{ false };
-
-	ImGui::SetNextWindowPos(ImVec2(0.0f, 0.0f));
+	ImGui::SetNextWindowPos(ImGui::GetMainViewport()->WorkPos);
 	ImGui::SetNextWindowSize(ImVec2(window.getWidth(), window.getHeight()));
 
 	ImGuiWindowFlags windowFlags = ImGuiWindowFlags_NoBringToFrontOnFocus |
@@ -84,15 +83,139 @@ void UI::recordInterface(CommandBuffer& commands, Window& window, Camera& camera
 	ImGui::DockSpace(ImGui::GetID("Dockspace"), ImVec2(0.0f, 0.0f), ImGuiDockNodeFlags_PassthruCentralNode);
 	if (show)
 	{
-		// if (ImGui::BeginMenuBar())
-		// {
-		// 	ImGui::EndMenuBar();
-		// }
+		if (ImGui::BeginMenuBar())
+		{
+			ImGui::MenuItem("Render Image", nullptr, &openImageRenderSettings);
+			ImGui::EndMenuBar();
+		}
 	}
-	ImGui::End();     
+	ImGui::End();
+}
+void UI::recordImageRenderSettingsWindow(CommandBuffer& commands, RenderContext& rContext, bool openImageRenderSettings)
+{
+	m_imageRenderSettingsWindowIsOpen = openImageRenderSettings ? 1 : m_imageRenderSettingsWindowIsOpen;
+	if (m_imageRenderSettingsWindowIsOpen)
+	{
+		ImGui::Begin("Image render settings", &m_imageRenderSettingsWindowIsOpen,
+				ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoDocking | ImGuiWindowFlags_AlwaysAutoResize);
+		ImGui::SetWindowFocus();
 
+		bool changed{ false };
 
-	ImGui::Begin("Render");
+		static int renderWidth{ rContext.getRenderWidth() };
+		static int renderHeight{ rContext.getRenderHeight() };
+		static bool keepProportions{ true };
+		static float prop{ renderWidth / static_cast<float>(renderHeight) };
+		if (ImGui::Checkbox("Keep proportions", &keepProportions))
+			prop = renderWidth / static_cast<float>(renderHeight);
+		ImGui::PushItemWidth(ImGui::GetFontSize() * 6);
+		changed = ImGui::InputInt("Image width", &renderWidth, 0);
+		ImGui::PopItemWidth();
+		if (changed && keepProportions)
+			renderHeight = renderWidth / prop;
+		renderWidth = std::max(1, std::min(renderWidth, 16384));
+		ImGui::PushItemWidth(ImGui::GetFontSize() * 6);
+		changed = ImGui::InputInt("Image height", &renderHeight, 0);
+		ImGui::PopItemWidth();
+		if (changed && keepProportions)
+			renderWidth = renderHeight * prop;
+		renderHeight = std::max(1, std::min(renderHeight, 16384));
+
+		ImDrawList* drawList{ ImGui::GetWindowDrawList() };
+		const ImVec2 cursorPos{ ImGui::GetWindowPos().x + ImGui::GetCursorPos().x, ImGui::GetWindowPos().y + ImGui::GetCursorPos().y };
+		float rectPixelWidth{};
+		float rectPixelHeight{};
+		if (renderWidth > renderHeight)
+		{
+			rectPixelWidth = 100.0f;
+			rectPixelHeight = rectPixelWidth * (static_cast<float>(renderHeight) / static_cast<float>(renderWidth));
+		}
+		else
+		{
+			rectPixelHeight = 100.0f;
+			rectPixelWidth = rectPixelHeight * (static_cast<float>(renderWidth) / static_cast<float>(renderHeight));
+		}
+		drawList->AddRectFilledMultiColor(cursorPos,ImVec2(cursorPos.x + rectPixelWidth, cursorPos.y + rectPixelHeight),
+				ImColor(0.0f, 1.0f, 0.0f, 1.0f),
+				ImColor(1.0f, 1.0f, 0.0f, 1.0f),
+				ImColor(1.0f, 0.0f, 0.0f, 1.0f),
+				ImColor(0.0f, 0.0f, 0.0f, 1.0f));
+		drawList->AddRect(cursorPos,ImVec2(cursorPos.x + rectPixelWidth, cursorPos.y + rectPixelHeight),
+				ImGui::GetColorU32(ImGuiCol_Border, 1.0f));
+		ImGui::Dummy(ImVec2(rectPixelWidth, rectPixelHeight));
+
+		ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.0f, 1.0f, 0.0f, 0.75f));
+		ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.0f, 1.0f, 0.0f, 0.5f));
+		ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(0.0f, 1.0f, 0.0f, 1.0f));
+		ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.0f, 0.0f, 0.0f, 1.0f));
+		if (ImGui::Button("Start"))
+		{
+			rContext.setRenderMode(RenderContext::Mode::GRADUAL);
+			commands.pushCommand(Command{.type = CommandType::CHANGE_RENDER_MODE});
+			rContext.setRenderWidth(renderWidth);
+			rContext.setRenderHeight(renderHeight);
+			commands.pushCommand(Command{ .type = CommandType::CHANGE_RENDER_RESOLUTION });
+			m_imageRenderSettingsWindowIsOpen = false;
+			m_imageRenderWindowIsOpen = true;
+		}
+		ImGui::PopStyleColor(4);
+
+		ImGui::End();
+	}
+}
+void UI::recordImageRenderWindow(CommandBuffer& commands, Window& window, RenderContext& rContext, GLuint renderResult, int currentSampleCount)
+{
+	if (m_imageRenderWindowIsOpen)
+	{
+		std::string title{ "Render (" + std::to_string(currentSampleCount) + " / " + std::to_string(rContext.getSampleCount()) + ')' };
+		ImGui::Begin((title + "###RenderWindow").c_str(), &m_imageRenderWindowIsOpen,
+				ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoDocking | ImGuiWindowFlags_AlwaysAutoResize);
+		ImGui::SetWindowFocus();
+		ImVec2 vMin{ ImGui::GetWindowContentRegionMin() };
+		ImVec2 vMax{ ImGui::GetWindowContentRegionMax() };
+		vMin.x += ImGui::GetWindowPos().x;
+		vMin.y += ImGui::GetWindowPos().y;
+		vMax.x += ImGui::GetWindowPos().x;
+		vMax.y += ImGui::GetWindowPos().y;
+		ImGui::GetWindowDrawList()->AddImage(reinterpret_cast<ImTextureID>(renderResult), vMin, vMax, ImVec2(0.0f, 1.0f), ImVec2(1.0f, 0.0f));
+		ImGui::Dummy(ImVec2(rContext.getRenderWidth(), rContext.getRenderHeight()));
+
+		bool save{ ImGui::Button("Save") };
+		if (save)
+		{
+			std::string savePath{ saveFilesWithFileDialogWindow(window.getGLFWwindow(), getExeDir().string().c_str(), "ptresult.png", "png") };
+			if (!savePath.empty())
+			{
+				void* data{ malloc(rContext.getRenderWidth() * rContext.getRenderHeight() * 4) };
+				GLuint fb{};
+				glGenFramebuffers(1, &fb);
+				glBindFramebuffer(GL_FRAMEBUFFER, fb);
+				glBindTexture(GL_TEXTURE_2D, renderResult);
+				glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, renderResult, 0);
+				glReadBuffer(GL_COLOR_ATTACHMENT0);
+				glReadPixels(0, 0, rContext.getRenderWidth(), rContext.getRenderHeight(), GL_RGBA, GL_UNSIGNED_BYTE, data);
+				stbi_flip_vertically_on_write(1);
+				stbi_write_png(savePath.c_str(), rContext.getRenderWidth(), rContext.getRenderHeight(), 4, data, rContext.getRenderWidth() * 4);
+				m_imageRenderWindowIsOpen = false;
+				free(data);
+				glDeleteFramebuffers(1, &fb);
+				glBindFramebuffer(GL_FRAMEBUFFER, 0);
+			}
+		}
+
+		ImGui::End();
+		if (!m_imageRenderWindowIsOpen)
+		{
+			rContext.setRenderMode(RenderContext::Mode::IMMEDIATE);
+			commands.pushCommand(Command{.type = CommandType::CHANGE_RENDER_MODE});
+		}
+	}
+}
+void UI::recordPreviewWindow(CommandBuffer& commands, RenderContext& rContext,
+		float& renderWinWidth, float& renderWinHeight,
+		GLuint renderResult, float renderScale)
+{
+	ImGui::Begin("Preview");
 
 	ImVec2 vMin{ ImGui::GetWindowContentRegionMin() };
 	ImVec2 vMax{ ImGui::GetWindowContentRegionMax() };
@@ -100,36 +223,47 @@ void UI::recordInterface(CommandBuffer& commands, Window& window, Camera& camera
 	vMin.y += ImGui::GetWindowPos().y;
 	vMax.x += ImGui::GetWindowPos().x;
 	vMax.y += ImGui::GetWindowPos().y;
-	float renderWinWidth{ vMax.x - vMin.x };
-	float renderWinHeight{ vMax.y - vMin.y };
+	renderWinWidth = vMax.x - vMin.x;
+	renderWinHeight = vMax.y - vMin.y;
 
-	static float renderScale{ 0.2f };
 	int renderWidth{ std::max(std::min(4096, static_cast<int>(renderWinWidth * renderScale)), 0) };
 	int renderHeight{ std::max(std::min(4096, static_cast<int>(renderWinHeight * renderScale)), 0) };
-	if (renderHeight != rContext.getRenderHeight() || renderWidth != rContext.getRenderWidth())
+	if ((renderHeight != rContext.getRenderHeight() || renderWidth != rContext.getRenderWidth()) && !m_imageRenderWindowIsOpen)
 	{
 		rContext.setRenderWidth(std::max(renderWidth, 1));
 		rContext.setRenderHeight(std::max(renderHeight, 1));
 		commands.pushCommand(Command{ .type = CommandType::CHANGE_RENDER_RESOLUTION });
 	}
 
-	if (renderWidth != 0 && renderHeight != 0 && !ImGui::IsWindowCollapsed())
+	if (renderWidth != 0 && renderHeight != 0 && !ImGui::IsWindowCollapsed() && !m_imageRenderWindowIsOpen)
 	{
 		ImGui::GetWindowDrawList()->AddImage(reinterpret_cast<ImTextureID>(renderResult), vMin, vMax, ImVec2(0.0f, 1.0f), ImVec2(1.0f, 0.0f));
-		setCursorIsDraggingOverRenderWindow(ImGui::IsMouseDragging(ImGuiMouseButton_Left) && ImGui::IsWindowFocused());
+		static bool startInside{ false };
+		if (!startInside)
+		{
+			startInside = ImGui::IsMouseClicked(ImGuiMouseButton_Left)
+				&& (ImGui::GetMousePos().x > vMin.x && ImGui::GetMousePos().x < vMax.x)
+				&& (ImGui::GetMousePos().y > vMin.y && ImGui::GetMousePos().y < vMax.y);
+		}
+		m_previewWindowIsFocused = ImGui::IsWindowFocused();
+		m_cursorIsDraggingOverPreviewWindow = startInside && ImGui::IsMouseDragging(ImGuiMouseButton_Left) && ImGui::IsWindowFocused();
+		startInside = !ImGui::IsMouseReleased(ImGuiMouseButton_Left) && startInside;
 	}
 
 	ImGui::End();
-
+}
+void UI::recordRenderSettingsWindow(CommandBuffer& commands, Camera& camera, RenderContext& rContext, float& renderScale, float renderWinWidth, float renderWinHeight)
+{
+	bool changed{ false };
 
 	ImGui::Begin("Render settings");
 
-	changed = ImGui::SliderFloat("Render scale", &renderScale, 0.005f, 1.0f, "%.4f");
+	changed = ImGui::SliderFloat("Preview scale", &renderScale, 0.005f, 1.0f, "%.4f");
 	if (changed)
 	{
-		renderWidth = std::max(std::min(4096, static_cast<int>(renderWinWidth * renderScale)), 1);
-		renderHeight = std::max(std::min(4096, static_cast<int>(renderWinHeight * renderScale)), 1);
-		if (renderHeight != rContext.getRenderHeight() || renderWidth != rContext.getRenderWidth())
+		int renderWidth{ std::max(std::min(4096, static_cast<int>(renderWinWidth * renderScale)), 1) };
+		int renderHeight{ std::max(std::min(4096, static_cast<int>(renderWinHeight * renderScale)), 1) };
+		if ((renderHeight != rContext.getRenderHeight() || renderWidth != rContext.getRenderWidth()) && !m_imageRenderWindowIsOpen)
 		{
 			rContext.setRenderWidth(std::max(renderWidth, 1));
 			rContext.setRenderHeight(std::max(renderHeight, 1));
@@ -150,7 +284,8 @@ void UI::recordInterface(CommandBuffer& commands, Window& window, Camera& camera
 	{
 		static int pathDepth{};
 		pathDepth = rContext.getMaxPathDepth();
-		changed = ImGui::InputInt("Max path depth", &pathDepth);
+		ImGui::Text("Max path depth");
+		changed = ImGui::InputInt("##", &pathDepth);
 		pathDepth = std::max(1, std::min(65535, pathDepth));
 		if (changed)
 		{
@@ -158,7 +293,8 @@ void UI::recordInterface(CommandBuffer& commands, Window& window, Camera& camera
 			commands.pushCommand(Command{ .type = CommandType::CHANGE_PATH_LENGTH });
 		}
 		pathDepth = rContext.getMaxReflectedPathDepth();
-		changed = ImGui::InputInt("Max reflected path depth", &pathDepth);
+		ImGui::Text("Max reflected path depth");
+		changed = ImGui::InputInt("##", &pathDepth);
 		pathDepth = std::max(1, std::min(65535, pathDepth));
 		if (changed)
 		{
@@ -166,7 +302,8 @@ void UI::recordInterface(CommandBuffer& commands, Window& window, Camera& camera
 			commands.pushCommand(Command{ .type = CommandType::CHANGE_PATH_LENGTH });
 		}
 		pathDepth = rContext.getMaxTransmittedPathDepth();
-		changed = ImGui::InputInt("Max transmitted path depth", &pathDepth);
+		ImGui::Text("Max transmitted path depth");
+		changed = ImGui::InputInt("##", &pathDepth);
 		pathDepth = std::max(1, std::min(65535, pathDepth));
 		if (changed)
 		{
@@ -176,33 +313,37 @@ void UI::recordInterface(CommandBuffer& commands, Window& window, Camera& camera
 		ImGui::TreePop();
 	}
 
-	static bool checkbox{ camera.depthOfFieldEnabled() };
-	bool dofChanged{ false };
-	changed = ImGui::Checkbox("Depth of Field", &checkbox);
-	if (changed)
+	if (ImGui::TreeNode("Depth of Field"))
 	{
-		camera.setDepthOfField(checkbox);
-		dofChanged = true;
-	}
-	if (checkbox)
-	{
-		static float apperture{ static_cast<float>(camera.getAperture()) };
-		changed = ImGui::DragFloat("Aperture", &apperture, 0.001f, 0.001f, 100000.0f, "%.3f", ImGuiSliderFlags_AlwaysClamp);
+		static bool checkbox{ camera.depthOfFieldEnabled() };
+		bool dofChanged{ false };
+		changed = ImGui::Checkbox("Enabled", &checkbox);
 		if (changed)
 		{
-			camera.setAperture(apperture);
+			camera.setDepthOfField(checkbox);
 			dofChanged = true;
 		}
+		if (checkbox)
+		{
+			static float apperture{ static_cast<float>(camera.getAperture()) };
+			changed = ImGui::DragFloat("Aperture", &apperture, 0.001f, 0.001f, 100000.0f, "%.3f", ImGuiSliderFlags_AlwaysClamp);
+			if (changed)
+			{
+				camera.setAperture(apperture);
+				dofChanged = true;
+			}
 
-		static float focusDistance{ static_cast<float>(camera.getFocusDistance()) };
-		changed = ImGui::DragFloat("Focus distance", &focusDistance, 0.1f, 0.001f, 100000.0f, "%.3f", ImGuiSliderFlags_AlwaysClamp);
-		if (changed)
-		{
-			camera.setFocusDistance(focusDistance);
-			dofChanged = true;
+			static float focusDistance{ static_cast<float>(camera.getFocusDistance()) };
+			changed = ImGui::DragFloat("Focus distance", &focusDistance, 0.1f, 0.001f, 100000.0f, "%.3f", ImGuiSliderFlags_AlwaysClamp);
+			if (changed)
+			{
+				camera.setFocusDistance(focusDistance);
+				dofChanged = true;
+			}
 		}
+		if (dofChanged) commands.pushCommand(Command{ .type = CommandType::CHANGE_DEPTH_OF_FIELD_SETTINGS });
+		ImGui::TreePop();
 	}
-	if (dofChanged) commands.pushCommand(Command{ .type = CommandType::CHANGE_DEPTH_OF_FIELD_SETTINGS });
 
 	constexpr float exposureParameterization{ 10.0f };
 	static float exposure{ rContext.getImageExposure() * (1.0f / exposureParameterization) };
@@ -214,16 +355,19 @@ void UI::recordInterface(CommandBuffer& commands, Window& window, Camera& camera
 	}
 
 	ImGui::End();
-
-
-	ImGui::Begin("Scene settings");
+}
+void UI::recordSceneGeneralSettings(CommandBuffer& commands, Camera& camera)
+{
+	bool changed{ false };
 
 	ImGui::SeparatorText("General");
 
 	static float movingSpeed{ static_cast<float>(camera.getMovingSpeed()) };
 	changed = ImGui::DragFloat("Moving speed", &movingSpeed, 0.5f, 0.01f, 1000.0f);
 	if (changed) camera.setMovingSpeed(movingSpeed);
-
+}
+void UI::recordSceneModelsSettings(CommandBuffer& commands, Window& window, SceneData& scene, const ImVec4& infoColor)
+{
 	ImGui::SeparatorText("Models");
 
 	if (ImGui::Button("Add files"))
@@ -307,9 +451,9 @@ void UI::recordInterface(CommandBuffer& commands, Window& window, Camera& camera
 				float sinTh{ std::sin(rotAngleX) };
 				curRot = glm::mat3{
 					glm::vec3{1.0f, 0.0f, 0.0f},
-					glm::vec3{0.0f, cosTh, sinTh},
-					glm::vec3{0.0f, -sinTh, cosTh}}
-					* nonappliedRot;
+						glm::vec3{0.0f, cosTh, sinTh},
+						glm::vec3{0.0f, -sinTh, cosTh}}
+				* nonappliedRot;
 				changesMade = true;
 			}
 			ImGui::SameLine();
@@ -321,9 +465,9 @@ void UI::recordInterface(CommandBuffer& commands, Window& window, Camera& camera
 				float sinTh{ std::sin(rotAngleY) };
 				curRot = glm::mat3{
 					glm::vec3{cosTh, 0.0f, -sinTh},
-					glm::vec3{0.0f, 1.0f, 0.0f},
-					glm::vec3{sinTh, 0.0f, cosTh}}
-					* nonappliedRot;
+						glm::vec3{0.0f, 1.0f, 0.0f},
+						glm::vec3{sinTh, 0.0f, cosTh}}
+				* nonappliedRot;
 				changesMade = true;
 			}
 			ImGui::SameLine();
@@ -335,9 +479,9 @@ void UI::recordInterface(CommandBuffer& commands, Window& window, Camera& camera
 				float sinTh{ std::sin(rotAngleZ) };
 				curRot = glm::mat3{
 					glm::vec3{cosTh, sinTh, 0.0f},
-					glm::vec3{-sinTh, cosTh, 0.0f},
-					glm::vec3{0.0f, 0.0f, 1.0f}}
-					* nonappliedRot;
+						glm::vec3{-sinTh, cosTh, 0.0f},
+						glm::vec3{0.0f, 0.0f, 1.0f}}
+				* nonappliedRot;
 				changesMade = true;
 			}
 			if (ImGui::IsMouseReleased(ImGuiMouseButton_Left))
@@ -351,9 +495,9 @@ void UI::recordInterface(CommandBuffer& commands, Window& window, Camera& camera
 
 			md.transform = glm::mat4x3{
 				curRot[0] * xScale,
-				curRot[1] * yScale,
-				curRot[2] * zScale,
-				curPos};
+					curRot[1] * yScale,
+					curRot[2] * zScale,
+					curPos};
 
 			if (changesMade)
 			{
@@ -378,6 +522,10 @@ void UI::recordInterface(CommandBuffer& commands, Window& window, Camera& camera
 		}
 	}
 	ImGui::EndChild();
+}
+void UI::recordSceneLightsSettings(CommandBuffer& commands, SceneData& scene, const ImVec4& infoColor)
+{
+	bool changed{ false };
 
 	ImGui::SeparatorText("Lights");
 
@@ -562,7 +710,7 @@ void UI::recordInterface(CommandBuffer& commands, Window& window, Camera& camera
 				scene.sphereLights.erase(scene.sphereLights.begin() + selectedIndex);
 				ImGui::CloseCurrentPopup();
 			}
-			
+
 			ImGui::EndPopup();
 		}
 		else if (ImGui::BeginPopup("Remove disk light popup"))
@@ -576,15 +724,14 @@ void UI::recordInterface(CommandBuffer& commands, Window& window, Camera& camera
 				scene.diskLights.erase(scene.diskLights.begin() + selectedIndex);
 				ImGui::CloseCurrentPopup();
 			}
-			
+
 			ImGui::EndPopup();
 		}
 	}
 	ImGui::EndChild();
-
-	ImGui::End();
-
-
+}
+void UI::recordInformationWindow(SceneData& scene, int currentSampleCount)
+{
 	ImGui::Begin("Information");
 
 	ImGui::Text("Samples processed: %d", currentSampleCount);
@@ -623,6 +770,44 @@ void UI::recordInterface(CommandBuffer& commands, Window& window, Camera& camera
 
 	ImGui::End();
 }
+
+void UI::recordInterface(CommandBuffer& commands, Window& window, Camera& camera, RenderContext& rContext, SceneData& scene, GLuint renderResult, int currentSampleCount)
+{
+	startImGuiRecording();
+	constexpr ImColor infoColor{ 0.99f, 0.33f, 0.29f };
+
+	bool openImageRenderSettings{ false };
+	recordDockspace(commands, window, openImageRenderSettings);
+
+	recordImageRenderSettingsWindow(commands, rContext, openImageRenderSettings);
+	recordImageRenderWindow(commands, window, rContext, renderResult, currentSampleCount);
+
+	if (m_imageRenderWindowIsOpen || m_imageRenderSettingsWindowIsOpen)
+		ImGui::BeginDisabled();
+
+	static float renderScale{ 0.33f };
+	float renderWinWidth{};
+	float renderWinHeight{};
+	ImGui::SetNextWindowViewport(ImGui::GetMainViewport()->ID);
+	recordPreviewWindow(commands, rContext, renderWinWidth, renderWinHeight,
+			renderResult, renderScale);
+	ImGui::SetNextWindowViewport(ImGui::GetMainViewport()->ID);
+	recordRenderSettingsWindow(commands, camera, rContext, renderScale,
+			renderWinWidth, renderWinHeight);
+
+	ImGui::SetNextWindowViewport(ImGui::GetMainViewport()->ID);
+	ImGui::Begin("Scene settings");
+	recordSceneGeneralSettings(commands, camera);
+	recordSceneModelsSettings(commands, window, scene, infoColor);
+	recordSceneLightsSettings(commands, scene, infoColor);
+	ImGui::End();
+
+	ImGui::SetNextWindowViewport(ImGui::GetMainViewport()->ID);
+	recordInformationWindow(scene, currentSampleCount);
+
+	if (m_imageRenderWindowIsOpen || m_imageRenderSettingsWindowIsOpen)
+		ImGui::EndDisabled();
+}
 void UI::recordInput(CommandBuffer& commands, Window& window, Camera& camera, RenderContext& rContext)
 {
 	static bool first{ true };
@@ -634,24 +819,25 @@ void UI::recordInput(CommandBuffer& commands, Window& window, Camera& camera, Re
 	prevTime = newTime;
 
 	GLFWwindow* glfwwindow{ window.getGLFWwindow() };
+	bool renderFocused{ m_previewWindowIsFocused };
 	int state{};
 	state = glfwGetKey(glfwwindow, GLFW_KEY_W);
-	if (state == GLFW_PRESS)
+	if (state == GLFW_PRESS && renderFocused)
 		camera.addMoveDir(Camera::Direction::FORWARD);
 	state = glfwGetKey(glfwwindow, GLFW_KEY_A);
-	if (state == GLFW_PRESS)
+	if (state == GLFW_PRESS && renderFocused)
 		camera.addMoveDir(Camera::Direction::LEFT);
 	state = glfwGetKey(glfwwindow, GLFW_KEY_S);
-	if (state == GLFW_PRESS)
+	if (state == GLFW_PRESS && renderFocused)
 		camera.addMoveDir(Camera::Direction::BACKWARD);
 	state = glfwGetKey(glfwwindow, GLFW_KEY_D);
-	if (state == GLFW_PRESS)
+	if (state == GLFW_PRESS && renderFocused)
 		camera.addMoveDir(Camera::Direction::RIGHT);
 	state = glfwGetKey(glfwwindow, GLFW_KEY_SPACE);
-	if (state == GLFW_PRESS)
+	if (state == GLFW_PRESS && renderFocused)
 		camera.addMoveDir(Camera::Direction::UP);
 	state = glfwGetKey(glfwwindow, GLFW_KEY_LEFT_SHIFT);
-	if (state == GLFW_PRESS)
+	if (state == GLFW_PRESS && renderFocused)
 		camera.addMoveDir(Camera::Direction::DOWN);
 	if (camera.move(delta))
 		commands.pushCommand(Command{ .type = CommandType::CHANGE_CAMERA_POS });
@@ -664,7 +850,7 @@ void UI::recordInput(CommandBuffer& commands, Window& window, Camera& camera, Re
 	static double xpos{};
 	static double ypos{};
 	glfwGetCursorPos(glfwwindow, &xpos, &ypos);
-	if (!first && cursorIsDraggingOverRenderWindow())
+	if (!first && m_cursorIsDraggingOverPreviewWindow)
 	{
 		double xd{ (xpos - xposPrev) };
 		double yd{ (ypos - yposPrev) };

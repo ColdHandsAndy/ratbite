@@ -11,9 +11,8 @@
 #include "util.h"
 
 class Window;
-class RenderingInterface;
 class UI;
-void draw(Window* window, const RenderingInterface* rInterface, UI* ui);
+void redraw(Window* window, UI* ui);
 
 class Window
 {
@@ -28,9 +27,7 @@ private:
 	struct UserDataGLFW
 	{
 		Window* window{};
-		const RenderingInterface* rInterface{};
 		UI* ui{};
-		void (*draw)(Window* window, const RenderingInterface* rInterface, UI* ui){};
 	} m_userPointer{};
 public:
 	Window(int width, int height) : m_width{ width }, m_height{ height }, m_invWidth{ 1.0f / width }, m_invHeight{ 1.0f / height } 
@@ -54,7 +51,6 @@ public:
 		glfwSetInputMode(m_glfwWindow, GLFW_STICKY_KEYS, GLFW_TRUE);
 		glfwSetWindowUserPointer(m_glfwWindow, &m_userPointer);
 		m_userPointer.window = this;
-		m_userPointer.draw = draw;
 		glfwSwapInterval(0);
 		glfwSetFramebufferSizeCallback(m_glfwWindow, glfwFramebufferSizeCallback);
 		glfwSetWindowRefreshCallback(m_glfwWindow, glfwWindowRefreshCallback);
@@ -78,10 +74,6 @@ public:
 		glfwDestroyWindow(m_glfwWindow);
 	}
 
-	void attachRenderingInterface(const RenderingInterface* renderingInterface)
-	{
-		m_userPointer.rInterface = renderingInterface;
-	}
 	void attachUI(UI* ui)
 	{
 		m_userPointer.ui = ui;
@@ -107,8 +99,8 @@ private:
 	static void glfwWindowRefreshCallback(GLFWwindow* window)
 	{
 		UserDataGLFW* userData{ reinterpret_cast<UserDataGLFW*>(glfwGetWindowUserPointer(window)) };
-		if (userData->rInterface != nullptr && userData->ui != nullptr)
-			userData->draw(userData->window, userData->rInterface, userData->ui);
+		if (userData->ui != nullptr)
+			redraw(userData->window, userData->ui);
 	}
 	static void glfwFramebufferSizeCallback(GLFWwindow* window, int width, int height)
 	{

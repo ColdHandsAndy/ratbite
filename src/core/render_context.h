@@ -11,7 +11,7 @@ public:
 	enum class Mode : int
 	{
 		IMMEDIATE,
-		RENDER,
+		GRADUAL,
 		DESC
 	};
 private:

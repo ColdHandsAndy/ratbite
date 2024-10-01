@@ -1569,7 +1569,7 @@ void RenderingInterface::updateSamplingState()
 
 	int sublaunchSize{};
 	constexpr int maxSublaunchSize{ 64 };
-	if (m_mode == RenderContext::Mode::RENDER)
+	if (m_mode == RenderContext::Mode::GRADUAL)
 		sublaunchSize = std::min(static_cast<int>(std::pow(std::max(3, m_currentSampleCount), 1.5)), maxSublaunchSize);
 	else
 		sublaunchSize = 1;
@@ -1580,7 +1580,7 @@ void RenderingInterface::launch()
 {
 	OPTIX_CHECK(optixLaunch(m_pipeline, m_streams[1], m_lpBuffer, sizeof(LaunchParameters), &m_sbt, m_launchWidth, m_launchHeight, 1));
 	CUDA_CHECK(cudaEventRecord(m_execEvent, m_streams[1]));
-	if (m_mode == RenderContext::Mode::RENDER)
+	if (m_mode == RenderContext::Mode::GRADUAL)
 		CUDA_SYNC_DEVICE();
 }
 void RenderingInterface::cleanup()
