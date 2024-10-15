@@ -48,7 +48,7 @@ struct LaunchParameters
 		bool depthOfFieldEnabled{};
 		float appertureSize{};
 		float focusDistance{};
-	} cameraState;
+	} cameraState{};
 
 	struct Lights
 	{
@@ -56,7 +56,18 @@ struct LaunchParameters
 		CUPTR(uint16_t) orderedCount{};
 		CUPTR(DiskLightData) disks{};
 		CUPTR(SphereLightData) spheres{};
-	} lights;
+	} lights{};
+
+	struct EnvironmentMap
+	{
+		bool enabled{ false };
+		float width{};
+		float height{};
+		cudaTextureObject_t environmentTexture{};
+		CUPTR(uint16_t) conditionalCDFIndices{};
+		CUPTR(uint16_t) marginalCDFIndices{};
+		float integral{};
+	} envMap{};
 
 	CUPTR(MaterialData) materials{};
 	CUPTR(DenseSpectrum) spectra{};
@@ -68,7 +79,7 @@ struct LaunchParameters
 		cudaTextureObject_t dielectricInnerAlbedo{};
 		cudaTextureObject_t reflectiveDielectricOuterAlbedo{};
 		cudaTextureObject_t reflectiveDielectricInnerAlbedo{};
-	} LUTs;
+	} LUTs{};
 
 	CUPTR(DenseSpectrum) sensorSpectralCurveA{};
 	CUPTR(DenseSpectrum) sensorSpectralCurveB{};

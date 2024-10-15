@@ -25,6 +25,7 @@ enum class TextureType
 	R32G32B32A32_UINT,
 	R32_FLOAT,
 	R32G32_FLOAT,
+	R32G32B32_FLOAT,
 	R32G32B32A32_FLOAT,
 
 	DESC
@@ -155,6 +156,10 @@ public:
 				initialize(width, height, depth,
 						32, 32, 0, 0, cudaChannelFormatKindFloat);
 				break;
+			case TextureType::R32G32B32_FLOAT:
+				initialize(width, height, depth,
+						32, 32, 32, 0, cudaChannelFormatKindFloat);
+				break;
 			case TextureType::R32G32B32A32_FLOAT:
 				initialize(width, height, depth,
 						32, 32, 32, 32, cudaChannelFormatKindFloat);
@@ -177,6 +182,8 @@ public:
 	}
 	CudaImage& operator=(CudaImage&& tex)
 	{
+		destroy();
+
 		m_width = tex.m_width;
 		m_height = tex.m_height;
 		m_depth = tex.m_depth;
@@ -443,6 +450,12 @@ public:
 						true,
 						16, cudaFilterModeLinear);
 				break;
+			case TextureType::R32G32B32_FLOAT:
+				initialize(cudaAddressModeX, cudaAddressModeY, cudaAddressModeZ, cudaFilterMode, cudaReadModeElementType,
+						colorTexture,
+						true,
+						16, cudaFilterModeLinear);
+				break;
 			case TextureType::R32G32B32A32_FLOAT:
 				initialize(cudaAddressModeX, cudaAddressModeY, cudaAddressModeZ, cudaFilterMode, cudaReadModeElementType,
 						colorTexture,
@@ -464,6 +477,8 @@ public:
 	}
 	CudaTexture& operator=(CudaTexture&& tex)
 	{
+		destroy();
+
 		m_internalImage = tex.m_internalImage;
 		m_texture = tex.m_texture;
 	

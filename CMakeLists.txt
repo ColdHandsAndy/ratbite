@@ -46,6 +46,7 @@ project(ratbiteCUDA LANGUAGES CUDA)
 
 set(cuda_ptx_source_files "${CMAKE_SOURCE_DIR}/src/kernels/pathtrace.cu")
 list(APPEND cuda_ptx_source_files "${CMAKE_SOURCE_DIR}/src/kernels/image.cu")
+list(APPEND cuda_ptx_source_files "${CMAKE_SOURCE_DIR}/src/kernels/cdf.cu")
 add_library(ptx OBJECT ${cuda_ptx_source_files})
 set_property(TARGET ptx PROPERTY CUDA_STANDARD 20)
 set_property(TARGET ptx PROPERTY CUDA_STANDARD_REQUIRED ON)

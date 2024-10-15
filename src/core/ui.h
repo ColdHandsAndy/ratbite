@@ -58,6 +58,34 @@ public:
 	UI &operator=(const UI&) = default;
 	~UI() = default;
 
+	std::string getFileFromFileDialogWindow(GLFWwindow* window, const char* defaultPath, const char* fileFilters)
+	{
+		std::string resPath{};
+		nfdfilteritem_t filters{ .name = "Filters", .spec = fileFilters };
+		nfdwindowhandle_t parentWindow{};
+		NFD_GetNativeWindowFromGLFWWindow(window, &parentWindow);
+		nfdopendialogu8args_t dialogArgs{
+			.filterList = &filters,
+			.filterCount = 1,
+			.defaultPath = defaultPath,
+			.parentWindow = parentWindow };
+
+		nfdu8char_t* outPath{};
+		nfdresult_t dialogResult{ NFD_OpenDialogU8_With(&outPath, &dialogArgs) };
+		if (dialogResult == NFD_OKAY)
+		{
+			resPath = outPath;
+			NFD_PathSet_FreePath(outPath);
+		}
+		else if (dialogResult == NFD_CANCEL)
+		{
+		}
+		else
+		{
+			R_ERR_LOG(NFD_GetError());
+		}
+		return resPath;
+	}
 	std::vector<std::filesystem::path> getFilesFromFileDialogWindow(GLFWwindow* window, const char* defaultPath, const char* fileFilters) const
 	{
 		nfdfilteritem_t filters{ .name = "Filters", .spec = fileFilters };
@@ -179,7 +207,7 @@ private:
 			float& renderWinWidth, float& renderWinHeight,
 			GLuint renderResult, float renderScale);
 	void recordRenderSettingsWindow(CommandBuffer& commands, Camera& camera, RenderContext& rContext, float& renderScale, float renderWinWidth, float renderWinHeight);
-	void recordSceneGeneralSettings(CommandBuffer& commands, Camera& camera);
+	void recordSceneGeneralSettings(CommandBuffer& commands, Window& window, SceneData& scene, Camera& camera, const ImVec4& infoColor);
 	void recordSceneModelsSettings(CommandBuffer& commands, Window& window, SceneData& scene, const ImVec4& infoColor);
 	void recordSceneLightsSettings(CommandBuffer& commands, SceneData& scene, const ImVec4& infoColor);
 	void recordInformationWindow(SceneData& scene, int currentSampleCount);

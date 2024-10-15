@@ -54,7 +54,7 @@ namespace
 		SceneData::Model model{};
 		model.id = id;
 		model.path = path;
-		model.name = path.parent_path().filename().string();
+		model.name = path.filename().stem() == "scene" ? path.parent_path().filename().string() : path.stem().string();
 		model.transform = transform;
 
 		std::vector<SceneData::Model::ImageData>& imageData{ model.imageData };

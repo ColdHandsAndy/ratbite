@@ -40,6 +40,7 @@ private:
 		DESC
 	};
 	CudaCombinedTexture m_lookUpTables[DESC]{};
+	CudaCombinedTexture m_envMap{};
 
 	OptixTraversableHandle m_iasHandle{};
 	CUdeviceptr m_iasBuffer{};
@@ -80,6 +81,17 @@ private:
 	cudaGraphicsResource_t m_graphicsResource{};
 	cudaArray_t m_imageCudaArray{};
 	cudaSurfaceObject_t m_imageCudaSurface{};
+
+	CUmodule m_CDFModule{};
+	std::array<CUfunction, 4> m_buildCDFFunctions{};
+	const std::array<const char*, 4> m_buildCDFFuncNames{
+		"buildCDFLatLongRGBUpTo4k",
+		"buildCDFLatLongRGBUpTo8k",
+		"buildCDFLatLongRGBUpTo16k",
+		"buildCDFLatLongRGBUpTo32k",
+	};
+	CUfunction m_invertCDFToIndicesFunction{};
+	const char* m_invertCDFToIndicesFuncName{ "invertCDFToIndices" };
 
 	cudaEvent_t m_execEvent{};
 	cudaStream_t m_streams[5]{};
@@ -144,6 +156,7 @@ private:
 
 	void createOptixContext();
 	void createRenderResolveProgram();
+	void createCDFBuildProgram();
 	void createConstantSBTRecords();
 	void createModulesProgramGroupsPipeline();
 	void fillSpectralCurvesData();
@@ -155,6 +168,7 @@ private:
 	void loadLights(SceneData& scene, const Camera& camera);
 	void removeModel(uint32_t modelID);
 	void removeLight(uint32_t lightID);
+	void loadEnvironmentMap(const char* path);
 
 	void fillModelMaterials(RenderingInterface::ModelResource& modelRes, SceneData::Model& model);
 	uint32_t fillLightMaterial(const SceneData::MaterialDescriptor& desc);

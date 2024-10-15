@@ -445,6 +445,21 @@ void RenderingInterface::createRenderResolveProgram()
 	CUDA_CHECK(cuModuleGetFunction(&m_resolveRenderDataFunc, m_imageModule, m_renderResolveFunctionName.c_str()));
 	delete[] input;
 }
+void RenderingInterface::createCDFBuildProgram()
+{
+	std::ifstream ifstr{ getExeDir() / "cdf.ptx", std::ios_base::binary | std::ios_base::ate };
+	size_t inputSize{ static_cast<size_t>(ifstr.tellg()) };
+	char* input{ new char[inputSize + 1] };
+	ifstr.seekg(0);
+	ifstr.read(input, inputSize);
+	input[inputSize] = '\0';
+	CUDA_CHECK(cuModuleLoadData(&m_CDFModule, input));
+	R_ASSERT(m_buildCDFFunctions.size() == m_buildCDFFuncNames.size());
+	for (int i{ 0 }; i < m_buildCDFFunctions.size(); ++i)
+		CUDA_CHECK(cuModuleGetFunction(&m_buildCDFFunctions[i], m_CDFModule, m_buildCDFFuncNames[i]));
+	CUDA_CHECK(cuModuleGetFunction(&m_invertCDFToIndicesFunction, m_CDFModule, m_invertCDFToIndicesFuncName));
+	delete[] input;
+}
 void RenderingInterface::createConstantSBTRecords()
 {
 	//Fill raygen and miss records
@@ -659,56 +674,56 @@ void RenderingInterface::prepareDataForPreviewDrawing()
 	CUDA_CHECK(cudaGraphicsGLRegisterImage(&m_graphicsResource, m_glTexture, GL_TEXTURE_2D, cudaGraphicsRegisterFlagsSurfaceLoadStore));
 	glBindTexture(GL_TEXTURE_2D, 0);
 
-	glGenVertexArrays(1, &m_VAO);
-
-	const char* vShaderCode{
-		"#version 430 core\n"
-
-		"out vec2 uv;\n"
-
-		"void main()\n"
-		"{\n"
-			"uv = vec2((gl_VertexID << 1) & 2, gl_VertexID & 2);\n"
-			"gl_Position = vec4(uv * 2.0f - 1.0f, 0.0f, 1.0f);\n"
-		"}\0"
-	};
-	const char* fShaderCode{
-		"#version 430 core\n"
-		"uniform sampler2D tex;\n"
-		"uniform vec2 uvScale;\n"
-		"uniform vec2 uvOffset;\n"
-
-		"in vec2 uv;\n"
-
-		"out vec4 FragColor;\n"
-
-		"void main()\n"
-		"{\n"
-			"vec2 fitUV = uv * uvScale + uvOffset;\n"
-			"vec3 color = texture(tex, fitUV).xyz;\n"
-			"if (fitUV.x < 0.0f || fitUV.x > 1.0f || fitUV.y < 0.0f || fitUV.y > 1.0f) color.xyz = vec3(0.0f);\n"
-			"FragColor = vec4(color, 1.0f);\n"
-		"}\0"
-	};
-
-	uint32_t vertexShader{ glCreateShader(GL_VERTEX_SHADER) };
-	glShaderSource(vertexShader, 1, &vShaderCode, NULL);
-	glCompileShader(vertexShader);
-	checkGLShaderCompileErrors(vertexShader);
-
-	uint32_t fragmentShader{ glCreateShader(GL_FRAGMENT_SHADER) };
-	glShaderSource(fragmentShader, 1, &fShaderCode, NULL);
-	glCompileShader(fragmentShader);
-	checkGLShaderCompileErrors(fragmentShader);
-
-	m_drawProgram = glCreateProgram();
-	glAttachShader(m_drawProgram, vertexShader);
-	glAttachShader(m_drawProgram, fragmentShader);
-	glLinkProgram(m_drawProgram);
-	checkGLProgramLinkingErrors(m_drawProgram);
-
-	glDeleteShader(vertexShader);
-	glDeleteShader(fragmentShader);
+	// glGenVertexArrays(1, &m_VAO);
+	//
+	// const char* vShaderCode{
+	// 	"#version 430 core\n"
+	//
+	// 	"out vec2 uv;\n"
+	//
+	// 	"void main()\n"
+	// 	"{\n"
+	// 		"uv = vec2((gl_VertexID << 1) & 2, gl_VertexID & 2);\n"
+	// 		"gl_Position = vec4(uv * 2.0f - 1.0f, 0.0f, 1.0f);\n"
+	// 	"}\0"
+	// };
+	// const char* fShaderCode{
+	// 	"#version 430 core\n"
+	// 	"uniform sampler2D tex;\n"
+	// 	"uniform vec2 uvScale;\n"
+	// 	"uniform vec2 uvOffset;\n"
+	//
+	// 	"in vec2 uv;\n"
+	//
+	// 	"out vec4 FragColor;\n"
+	//
+	// 	"void main()\n"
+	// 	"{\n"
+	// 		"vec2 fitUV = uv * uvScale + uvOffset;\n"
+	// 		"vec3 color = texture(tex, fitUV).xyz;\n"
+	// 		"if (fitUV.x < 0.0f || fitUV.x > 1.0f || fitUV.y < 0.0f || fitUV.y > 1.0f) color.xyz = vec3(0.0f);\n"
+	// 		"FragColor = vec4(color, 1.0f);\n"
+	// 	"}\0"
+	// };
+	//
+	// uint32_t vertexShader{ glCreateShader(GL_VERTEX_SHADER) };
+	// glShaderSource(vertexShader, 1, &vShaderCode, NULL);
+	// glCompileShader(vertexShader);
+	// checkGLShaderCompileErrors(vertexShader);
+	//
+	// uint32_t fragmentShader{ glCreateShader(GL_FRAGMENT_SHADER) };
+	// glShaderSource(fragmentShader, 1, &fShaderCode, NULL);
+	// glCompileShader(fragmentShader);
+	// checkGLShaderCompileErrors(fragmentShader);
+	//
+	// m_drawProgram = glCreateProgram();
+	// glAttachShader(m_drawProgram, vertexShader);
+	// glAttachShader(m_drawProgram, fragmentShader);
+	// glLinkProgram(m_drawProgram);
+	// checkGLProgramLinkingErrors(m_drawProgram);
+	//
+	// glDeleteShader(vertexShader);
+	// glDeleteShader(fragmentShader);
 }
 
 void RenderingInterface::buildGeometryAccelerationStructures(RenderingInterface::ModelResource& modelRes, SceneData::Model& model)
@@ -999,7 +1014,6 @@ void RenderingInterface::updateInstanceAccelerationStructure(const SceneData& sc
 
 			instances[inst].instanceId = inst;
 			instances[inst].sbtOffset = sbtOffset;
-			// instances[inst].sbtOffset = 2;
 			instances[inst].traversableHandle = modelRes.gasHandles[instance.meshIndex];
 			instances[inst].visibilityMask = 0xFF;
 			instances[inst].flags = OPTIX_INSTANCE_FLAG_NONE;
@@ -1198,6 +1212,100 @@ void RenderingInterface::removeLight(uint32_t lightID)
 	m_freeMaterialsIndices.push(m_lightResources[lightID].materialIndex);
 	m_lightResources.erase(lightID);
 }
+void RenderingInterface::loadEnvironmentMap(const char* path)
+{
+	LaunchParameters::EnvironmentMap envMap{};
+
+	// Free previous environment map data if needed
+	if (m_launchParameters.envMap.conditionalCDFIndices != CUdeviceptr{})
+		CUDA_CHECK(cudaFree(reinterpret_cast<void*>(m_launchParameters.envMap.conditionalCDFIndices)));
+	if (m_launchParameters.envMap.marginalCDFIndices != CUdeviceptr{})
+		CUDA_CHECK(cudaFree(reinterpret_cast<void*>(m_launchParameters.envMap.marginalCDFIndices)));
+	// Load HDRI map into memory
+	int w{};
+	int h{};
+	int n{};
+	float* data{ stbi_loadf(path, &w, &h, &n, 4) };
+	R_ASSERT_LOG(data != nullptr, "Loading environment image failed");
+	envMap.width = static_cast<float>(w);
+	envMap.height = static_cast<float>(h);
+	R_ASSERT_LOG((w % 4 == 0) && (h % 4 == 0), "Image dimensions are not divisible by 4");
+	m_envMap = CudaCombinedTexture{ static_cast<uint32_t>(w), static_cast<uint32_t>(h), 1, TextureType::R32G32B32A32_FLOAT,
+		TextureAddress::CLAMP, TextureAddress::CLAMP, TextureAddress::CLAMP,
+		TextureFilter::LINEAR, false /*HDRI is already in linear colorspace*/ };
+	envMap.environmentTexture = m_envMap.texture.getTextureObject();
+	m_envMap.image.fill(data, 0, 0, 0, w, h, 1, cudaMemcpyHostToDevice);
+	stbi_image_free(data);
+	// Compute CDFs and integrals
+	CUdeviceptr cdfConditional{};
+	CUDA_CHECK(cudaMalloc(reinterpret_cast<void**>(&cdfConditional), w * h * sizeof(float)));
+	CUdeviceptr cdfMarginal{};
+	CUDA_CHECK(cudaMalloc(reinterpret_cast<void**>(&cdfMarginal), h * sizeof(float)));
+	CUdeviceptr integral{};
+	CUDA_CHECK(cudaMalloc(reinterpret_cast<void**>(&integral), sizeof(float)));
+	constexpr int numAtomics{ 1 };
+	CUdeviceptr counter{};
+	CUDA_CHECK(cudaMalloc(reinterpret_cast<void**>(&counter), numAtomics * sizeof(int)));
+	CUDA_CHECK(cudaMemset(reinterpret_cast<void*>(counter), 0, numAtomics * sizeof(int)));
+	cudaResourceDesc resDesc{};
+	resDesc.resType = cudaResourceTypeArray;
+	resDesc.res.array.array = m_envMap.image.getData();
+	cudaSurfaceObject_t surface{ 0 };
+	CUDA_CHECK(cudaCreateSurfaceObject(&surface, &resDesc));
+	void* buildCdfParams[]{ &w, &h, &surface, &cdfConditional, &cdfMarginal, &integral, &counter };
+	int numElements{ DISPATCH_SIZE(w, 4) };
+	const int kBlockSize{ (numElements <= 256 ? 256 :
+			(numElements <= 512 ? 512 : 1024)) };
+	dim3 numBlocks{ 1, static_cast<unsigned int>(h) };
+	dim3 blockSize{ static_cast<unsigned int>(kBlockSize), 1 };
+	int blocksPerRaw{ DISPATCH_SIZE(numElements, kBlockSize) };
+	int buildCDFFuncIndex{};
+	if (blocksPerRaw == 1)
+		buildCDFFuncIndex = 0;
+	else if (blocksPerRaw == 2)
+		buildCDFFuncIndex = 1;
+	else if (blocksPerRaw <= 4)
+		buildCDFFuncIndex = 2;
+	else if (blocksPerRaw <= 8)
+		buildCDFFuncIndex = 3;
+	else
+		R_ERR_LOG("Light map resolution exceeds limit of 32k.");
+	CUDA_SYNC_DEVICE();
+	CUDA_CHECK(cuLaunchKernel(m_buildCDFFunctions[buildCDFFuncIndex],
+				numBlocks.x, numBlocks.y, numBlocks.z,
+				blockSize.x, blockSize.y, blockSize.z,
+				kBlockSize * sizeof(float),
+				m_streams[0],
+				buildCdfParams, nullptr));
+	CUDA_CHECK(cudaMemcpyAsync(&envMap.integral, reinterpret_cast<void*>(integral), sizeof(float), cudaMemcpyDeviceToHost, m_streams[0]));
+	envMap.integral /= static_cast<float>(w) * static_cast<float>(h);
+	// Invert CDF to indices
+	CUdeviceptr conditionalCDFIndices{};
+	CUDA_CHECK(cudaMalloc(reinterpret_cast<void**>(&conditionalCDFIndices), w * h * sizeof(uint16_t)));
+	envMap.conditionalCDFIndices = conditionalCDFIndices;
+	CUdeviceptr marginalCDFIndices{};
+	CUDA_CHECK(cudaMalloc(reinterpret_cast<void**>(&marginalCDFIndices), h * sizeof(uint16_t)));
+	envMap.marginalCDFIndices = marginalCDFIndices;
+	void* invertCDFParams[]{ &w, &h, &cdfConditional, &cdfMarginal, &conditionalCDFIndices, &marginalCDFIndices };
+	CUDA_CHECK(cuLaunchKernel(m_invertCDFToIndicesFunction,
+				h + 1, DISPATCH_SIZE(std::max(w, h), 1024), 1,
+				1024, 1, 1,
+				0,
+				m_streams[0],
+				invertCDFParams, nullptr));
+	// Free temporary resources
+	CUDA_SYNC_DEVICE();
+	CUDA_CHECK(cudaFree(reinterpret_cast<void*>(counter)));
+	CUDA_CHECK(cudaFree(reinterpret_cast<void*>(cdfMarginal)));
+	CUDA_CHECK(cudaFree(reinterpret_cast<void*>(cdfConditional)));
+	CUDA_CHECK(cudaDestroySurfaceObject(surface));
+	// Copy image data to image texture
+	// Free temporary resources
+	CUDA_CHECK(cudaFree(reinterpret_cast<void*>(integral)));
+
+	envMap.enabled = true;
+	m_launchParameters.envMap = envMap;
+}
 
 void RenderingInterface::resolveRender(const glm::mat3& colorspaceTransform)
 {
@@ -1312,6 +1420,13 @@ void RenderingInterface::processCommands(CommandBuffer& commands, RenderContext&
 					m_launchParameters.cameraState.camU = camera.getU();
 					m_launchParameters.cameraState.camV = camera.getV();
 					m_launchParameters.cameraState.camW = camera.getW();
+					restartRender = true;
+					break;
+				}
+			case CommandType::ADD_ENVIRONMENT_MAP:
+				{
+					const CommandPayloads::EnvironmentMap* envMapPayload{ reinterpret_cast<const CommandPayloads::EnvironmentMap*>(payload) };
+					loadEnvironmentMap(envMapPayload->path.c_str());
 					restartRender = true;
 					break;
 				}
@@ -1601,6 +1716,7 @@ void RenderingInterface::cleanup()
 	glDeleteProgram(m_drawProgram);
 	CUDA_CHECK(cudaGraphicsUnregisterResource(m_graphicsResource));
 	CUDA_CHECK(cuModuleUnload(m_imageModule));
+	CUDA_CHECK(cuModuleUnload(m_CDFModule));
 	CUDA_CHECK(cudaFree(reinterpret_cast<void*>(m_sbt.raygenRecord)));
 	CUDA_CHECK(cudaFree(reinterpret_cast<void*>(m_sbt.missRecordBase)));
 	CUDA_CHECK(cudaFree(reinterpret_cast<void*>(m_sbt.hitgroupRecordBase)));
@@ -1621,6 +1737,14 @@ void RenderingInterface::cleanup()
 	CUDA_CHECK(cudaFree(reinterpret_cast<void*>(m_spectralBasisData)));
 	CUDA_CHECK(cudaFree(reinterpret_cast<void*>(m_lpBuffer)));
 	CUDA_CHECK(cudaFree(reinterpret_cast<void*>(m_renderData)));
+
+	if (m_launchParameters.envMap.environmentTexture != cudaTextureObject_t{})
+		CUDA_CHECK(cudaDestroyTextureObject(m_launchParameters.envMap.environmentTexture));
+	if (m_launchParameters.envMap.marginalCDFIndices != CUdeviceptr{})
+		CUDA_CHECK(cudaFree(reinterpret_cast<void*>(m_launchParameters.envMap.marginalCDFIndices)));
+	if (m_launchParameters.envMap.conditionalCDFIndices != CUdeviceptr{})
+		CUDA_CHECK(cudaFree(reinterpret_cast<void*>(m_launchParameters.envMap.conditionalCDFIndices)));
+
 	if (m_launchParameters.lights.orderedCount != CUdeviceptr{})
 		CUDA_CHECK(cudaFree(reinterpret_cast<void*>(m_launchParameters.lights.orderedCount)));
 	if (m_materialData != CUdeviceptr{})
@@ -1635,8 +1759,15 @@ void RenderingInterface::cleanup()
 
 RenderingInterface::RenderingInterface(const Camera& camera, const RenderContext& renderContext, SceneData& scene)
 {
+	int lowP;
+	int highP;
+	CUDA_CHECK(cudaDeviceGetStreamPriorityRange(&lowP, &highP));
+	CUDA_CHECK(cudaStreamCreateWithPriority(m_streams + 0, cudaStreamNonBlocking, highP));
+	CUDA_CHECK(cudaStreamCreateWithPriority(m_streams + 1, cudaStreamNonBlocking, lowP));
+
 	createOptixContext();
 	createRenderResolveProgram();
+	createCDFBuildProgram();
 	createModulesProgramGroupsPipeline();
 	createConstantSBTRecords();
 	fillSpectralCurvesData();
@@ -1652,11 +1783,6 @@ RenderingInterface::RenderingInterface(const Camera& camera, const RenderContext
 	prepareDataForPreviewDrawing();
 
 	CUDA_CHECK(cudaEventCreateWithFlags(&m_execEvent, cudaEventDisableTiming));
-	int lowP;
-	int highP;
-	CUDA_CHECK(cudaDeviceGetStreamPriorityRange(&lowP, &highP));
-	CUDA_CHECK(cudaStreamCreateWithPriority(m_streams + 0, cudaStreamNonBlocking, highP));
-	CUDA_CHECK(cudaStreamCreateWithPriority(m_streams + 1, cudaStreamNonBlocking, lowP));
 }
 
 void RenderingInterface::render(CommandBuffer& commands, RenderContext& renderContext, Camera& camera, SceneData& scene)

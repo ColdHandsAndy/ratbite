@@ -413,27 +413,12 @@ struct SceneData
 	std::vector<SceneData::DiskLight> diskLights{};
 	std::vector<SceneData::SphereLight> sphereLights{};
 
+	std::string environmentMapPath{};
+
 	int getLightCount() const { return diskLights.size() + sphereLights.size(); }
 
 	SceneData()
 	{
-		// loadModel("A:/Models/gltf/mc_village.glb");
-		// SphereLight sphere{ {-78.0f, 214.0f, 339.5f}, 90.0f, 0.1f,
-		// 	MaterialDescriptor{.name = "Light 0",
-		// 				.bxdf = BxDF::PURE_CONDUCTOR,
-		// 				.baseIOR = SpectralData::SpectralDataType::C_METAL_AL_IOR,
-		// 				.baseAC = SpectralData::SpectralDataType::C_METAL_AL_AC,
-		// 				.baseEmission = SpectralData::SpectralDataType::ILLUM_D65,
-		// 				.roughness = 1.0f} };
-		// sphereLights.push_back(sphere);
-		//
-		// DiskLight disk{ {-78.0f, 214.0f, 339.5f}, 90.0f, {0.0f, -1.0f, 0.0f}, 0.1f,
-		// 	MaterialDescriptor{.name = "Light 1",
-		// 				.bxdf = BxDF::PURE_CONDUCTOR,
-		// 				.baseIOR = SpectralData::SpectralDataType::C_METAL_AL_IOR,
-		// 				.baseAC = SpectralData::SpectralDataType::C_METAL_AL_AC,
-		// 				.baseEmission = SpectralData::SpectralDataType::ILLUM_D65,
-		// 				.roughness = 1.0f} };
-		// diskLights.push_back(disk);
+		
 	}
 };

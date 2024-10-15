@@ -32,6 +32,7 @@ enum class PathStateBitfield : uint32_t
 	TRIANGULAR_GEOMETRY   = 1 << 5,
 	RIGHT_HANDED_FRAME    = 1 << 6,
 	REFRACTION_HAPPENED   = 1 << 7,
+	FINISHED              = 1 << 8,
 };
 ENABLE_ENUM_BITWISE_OPERATORS(PathStateBitfield);
 
@@ -284,7 +285,7 @@ CU_DEVICE CU_INLINE void resolveTextures(const MaterialData& material,
 	surface.specular.ior = material.ior;
 }
 
-CU_DEVICE CU_INLINE SampledSpectrum emittedLightEval(const LaunchParameters& params, const SampledWavelengths& wavelengths, PathStateBitfield stateFlags,
+CU_DEVICE CU_INLINE SampledSpectrum emittedLightEval(const LaunchParameters& params, const SampledWavelengths& wavelengths, PathStateBitfield& stateFlags,
 		LightType type, uint16_t index, 
 		const SampledSpectrum& throughputWeight, float bxdfPDF,
 		uint32_t depth, const glm::vec3& rayOrigin, const glm::vec3& rayDir, float sqrdDistToLight)
@@ -292,10 +293,9 @@ CU_DEVICE CU_INLINE SampledSpectrum emittedLightEval(const LaunchParameters& par
 	if (type == LightType::NONE)
 		return SampledSpectrum{0.0f};
 
-	float lightStructurePDF{ 1.0f / params.lights.lightCount };
+	float lightStructurePDF{ 1.0f / (params.lights.lightCount + (params.envMap.enabled ? 1.0f : 0.0f)) };
 	float lightPDF{};
-	float lightPowerScale{};
-	uint16_t emissionSpectrumDataIndex{};
+	SampledSpectrum Le{};
 
 	switch (type)
 	{
@@ -306,16 +306,41 @@ CU_DEVICE CU_INLINE SampledSpectrum emittedLightEval(const LaunchParameters& par
 				float lCos{ -glm::dot(rayDir, norm) };
 				float surfacePDF{ 1.0f / (glm::pi<float>() * disk.radius * disk.radius) };
 				lightPDF = surfacePDF * sqrdDistToLight / lCos;
-				lightPowerScale = disk.powerScale * (lCos > 0.0f ? 1.0f : 0.0f);
-				emissionSpectrumDataIndex = params.materials[disk.materialIndex].emissionSpectrumDataIndex;
+				float lightPowerScale{ disk.powerScale * (lCos > 0.0f ? 1.0f : 0.0f) };
+				uint32_t emissionSpectrumDataIndex{ params.materials[disk.materialIndex].emissionSpectrumDataIndex };
+				Le = params.spectra[emissionSpectrumDataIndex].sample(wavelengths) * lightPowerScale;
 			}
 			break;
 		case LightType::SPHERE:
 			{
 				const SphereLightData& sphere{ params.lights.spheres[index] };
 				lightPDF = sampling::sphere::pdfUniformSolidAngle(rayOrigin, sphere.position, sphere.radius);
-				lightPowerScale = sphere.powerScale;
-				emissionSpectrumDataIndex = params.materials[sphere.materialIndex].emissionSpectrumDataIndex;
+				float lightPowerScale{ sphere.powerScale };
+				uint32_t emissionSpectrumDataIndex{ params.materials[sphere.materialIndex].emissionSpectrumDataIndex };
+				Le = params.spectra[emissionSpectrumDataIndex].sample(wavelengths) * lightPowerScale;
+			}
+			break;
+		case LightType::SKY:
+			{
+				if (params.envMap.enabled)
+				{
+					float phi{ cuda::std::atan2(rayDir.x, rayDir.z) };
+					float theta{ cuda::std::acos(rayDir.y) };
+					float4 skyMap{ tex2D<float4>(params.envMap.environmentTexture,
+							0.5f + phi / (2.0f * glm::pi<float>()), theta / glm::pi<float>()) };
+					glm::vec3 skyColor{ skyMap.x, skyMap.y, skyMap.z };
+					float surfacePDF{ 1.0f / (4.0f * glm::pi<float>()) };
+					lightPDF = surfacePDF * ((skyColor.x + skyColor.y + skyColor.z) / 3.0f)
+						* cuda::std::sin(theta) // Applying Cartesian to spherical Jacobian
+						/ params.envMap.integral;
+					Le = color::RGBtoSpectrum(skyColor, wavelengths, *params.spectralBasisR, *params.spectralBasisG, *params.spectralBasisB) * 0.01f;
+					stateFlags |= PathStateBitfield::FINISHED;
+				}
+				else
+				{
+					stateFlags |= PathStateBitfield::FINISHED;
+					return SampledSpectrum{0.0f};
+				}
 			}
 			break;
 		default:
@@ -323,7 +348,6 @@ CU_DEVICE CU_INLINE SampledSpectrum emittedLightEval(const LaunchParameters& par
 	}
 	lightPDF *= lightStructurePDF;
 
-	SampledSpectrum Le{ params.spectra[emissionSpectrumDataIndex].sample(wavelengths) * lightPowerScale };
 	float emissionWeight{};
 	if (depth == 0 || static_cast<bool>(stateFlags & PathStateBitfield::PREVIOUS_HIT_SPECULAR))
 		emissionWeight = 1.0f;
@@ -340,26 +364,33 @@ CU_DEVICE CU_INLINE DirectLightSampleData sampledLightEval(const LaunchParameter
 	LightType type{};
 	uint16_t index{};
 
-	float lightStructurePDF{ params.lights.lightCount };
-	uint16_t sampledLightIndex{ static_cast<uint16_t>((params.lights.lightCount - 0.0001f) * rand.z) };
-	uint32_t lightC{ 0 };
-	for (int i{ 0 }; i < KSampleableLightCount; ++i)
-	{
-		lightC += params.lights.orderedCount[i];
-		if (sampledLightIndex < lightC)
-		{
-			type = KOrderedTypes[i];
-			index = sampledLightIndex - (lightC - params.lights.orderedCount[i]);
-			break;
-		}
-	}
-	lightStructurePDF = 1.0f / lightStructurePDF;
-
-	if (lightC == 0)
+	if (params.lights.lightCount == 0.0f && !params.envMap.enabled)
 	{
 		dlSampleData.occluded = true;
 		return dlSampleData;
 	}
+
+	float lightStructurePDF{ 1.0f / (params.lights.lightCount + (params.envMap.enabled ? 1.0f : 0.0f)) };
+	uint16_t sampledLightIndex{ static_cast<uint16_t>((params.lights.lightCount + (params.envMap.enabled ? 1.0f : 0.0f) - 0.0001f) * rand.z) };
+	if (sampledLightIndex != static_cast<uint16_t>(params.lights.lightCount + 0.001f))
+	{
+		uint32_t lightC{ 0 };
+		for (int i{ 0 }; i < KSampleableLightCount; ++i)
+		{
+			lightC += params.lights.orderedCount[i];
+			if (sampledLightIndex < lightC)
+			{
+				type = KOrderedTypes[i];
+				index = sampledLightIndex - (lightC - params.lights.orderedCount[i]);
+				break;
+			}
+		}
+	}
+	else
+	{
+		type = LightType::SKY;
+	}
+
 
 	float dToL{};
 	float lightPDF{};
@@ -397,6 +428,43 @@ CU_DEVICE CU_INLINE DirectLightSampleData sampledLightEval(const LaunchParameter
 					dlSampleData.occluded = true;
 			}
 			break;
+		case LightType::SKY:
+			{
+				// Importance sampling environment map with interpolated inverted CDF indices
+				glm::vec2 fullC{
+					cuda::std::fmin(rand.x * (params.envMap.width - 1.0f), params.envMap.width - 1.0001f),
+					cuda::std::fmin(rand.y * (params.envMap.height - 1.0f), params.envMap.height - 1.0001f) };
+				glm::vec2 floorC{ glm::floor(fullC) };
+				glm::vec2 fractC{ fullC - floorC };
+				glm::uvec2 floorCI{ floorC };
+
+				glm::vec2 cdfIndicesM{
+					params.envMap.marginalCDFIndices[floorCI.y],
+					params.envMap.marginalCDFIndices[floorCI.y + 1] };
+				glm::vec2 cdfIndicesC{
+					params.envMap.conditionalCDFIndices[static_cast<uint32_t>(cdfIndicesM.x * params.envMap.width) + floorCI.x],
+					params.envMap.conditionalCDFIndices[static_cast<uint32_t>(cdfIndicesM.x * params.envMap.width) + floorCI.x + 1] };
+
+				glm::vec2 impSample{
+					glm::mix(cdfIndicesC.x, cdfIndicesC.y, fractC.x) * (1.0f / params.envMap.width),
+					glm::mix(cdfIndicesM.x, cdfIndicesM.y, fractC.y) * (1.0f / params.envMap.height) };
+
+				float phi{ 2.0f * glm::pi<float>() * impSample.x };
+				float theta{ glm::pi<float>() * impSample.y };
+				dlSampleData.lightDir = glm::vec3{
+					-cuda::std::sin(theta) * cuda::std::sin(phi),
+					cuda::std::cos(theta),
+					-cuda::std::sin(theta) * cuda::std::cos(phi) };
+				float4 rgbSample{ tex2D<float4>(params.envMap.environmentTexture, impSample.x, impSample.y) };
+				dlSampleData.spectrumSample = color::RGBtoSpectrum(glm::vec3{rgbSample.x, rgbSample.y, rgbSample.z},
+						wavelengths, *params.spectralBasisR, *params.spectralBasisG, *params.spectralBasisB) * 0.01f;
+				float surfacePDF{ 1.0f / (4.0f * glm::pi<float>()) };
+				lightPDF = surfacePDF * ((rgbSample.x + rgbSample.y + rgbSample.z) / 3.0f)
+					* cuda::std::sin(theta) // Applying Cartesian to spherical Jacobian
+					/ params.envMap.integral;
+				dToL = FLT_MAX;
+			}
+			break;
 		default:
 			break;
 	}
@@ -407,7 +475,7 @@ CU_DEVICE CU_INLINE DirectLightSampleData sampledLightEval(const LaunchParameter
 	const glm::vec3& lD{ dlSampleData.lightDir };
 	if (!dlSampleData.occluded)
 	{
-		optixTraverse(parameters.traversable,
+		optixTraverse(params.traversable,
 				{ rO.x, rO.y, rO.z },
 				{ lD.x, lD.y, lD.z },
 				0.0f,
@@ -896,8 +964,8 @@ extern "C" __device__ void __direct_callable__ComplexSurface_BxDF(const Material
 	float alpha{ utility::roughnessToAlpha(roughness) };
 	microfacet::Alpha alphaMS{ .alphaX = alpha, .alphaY = alpha };
 
-	// if (static_cast<bool>(stateFlags & PathStateBitfield::REGULARIZED))
-	// 	alphaMS.regularize();
+	if (static_cast<bool>(stateFlags & PathStateBitfield::REGULARIZED))
+		alphaMS.regularize();
 	glm::vec3 wo{ locWo };
 	microfacet::ContextOutgoing ctxo{ microfacet::createContextOutgoing(wo) };
 	glm::vec3 wm{};
@@ -1161,18 +1229,14 @@ extern "C" __global__ void __raygen__main()
 					lightType, lightIndex, &material, normalTransform,
 					pl);
 
-			if (lightType == LightType::SKY)
-			{
-				L += throughputWeight * color::RGBtoSpectrum(glm::vec3{0.246f, 0.623f, 0.956f} * 0.002f, wavelengths, *parameters.spectralBasisR, *parameters.spectralBasisG, *parameters.spectralBasisB);
-
-				goto breakPath;
-			}
-
 			glm::vec3 toHit{ hP - rO };
 			L += emittedLightEval(parameters, wavelengths, stateFlags,
 					lightType, lightIndex,
 					throughputWeight, bxdfPDF,
 					depth, rO, rD, toHit.x * toHit.x + toHit.y * toHit.y + toHit.z * toHit.z);
+
+			if (static_cast<bool>(stateFlags & PathStateBitfield::FINISHED))
+				goto finishPath;
 
 			glm::vec3 hNG{ utility::octohedral::decodeU32(encHitGNormal) }; //Hit normal geometry
 			DirectLightSampleData directLightData{ sampledLightEval(parameters, wavelengths,
@@ -1229,7 +1293,7 @@ extern "C" __global__ void __raygen__main()
 				float q{ cuda::std::fmax(0.0f, 1.0f - tMax) };
 				q = q * q;
 				if (QRNG::Sobol::sample1D(qrngState, QRNG::DimensionOffset::ROULETTE) < q)
-					goto breakPath;
+					goto finishPath;
 				throughputWeight /= 1.0f - q;
 			}
 
@@ -1252,7 +1316,7 @@ extern "C" __global__ void __raygen__main()
 			updateStateFlags(stateFlags);
 			qrngState.advanceBounce();
 		} while (continuePath && !terminated);
-	breakPath:
+	finishPath:
 		qrngState.advanceSample();
 
 		if (!terminated)

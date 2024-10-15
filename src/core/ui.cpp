@@ -12,7 +12,7 @@
 
 namespace ImGuiWidgets
 {
-	bool Knob(const char* label, float* p_value, float v_min, float v_max)
+	bool Knob(const char* label, float* p_value, float v_min, float v_max, bool bounded = false)
 	{
 		ImGuiIO& io = ImGui::GetIO();
 		ImGuiStyle& style = ImGui::GetStyle();
@@ -35,8 +35,11 @@ namespace ImGuiWidgets
 		{
 			float step = (v_max - v_min) / 200.0f;
 			*p_value += io.MouseDelta.x * step;
-			if (*p_value < v_min) *p_value = v_min;
-			if (*p_value > v_max) *p_value = v_max;
+			if (bounded)
+			{
+				if (*p_value < v_min) *p_value = v_min;
+				if (*p_value > v_max) *p_value = v_max;
+			}
 			value_changed = true;
 		}
 
@@ -356,7 +359,7 @@ void UI::recordRenderSettingsWindow(CommandBuffer& commands, Camera& camera, Ren
 
 	ImGui::End();
 }
-void UI::recordSceneGeneralSettings(CommandBuffer& commands, Camera& camera)
+void UI::recordSceneGeneralSettings(CommandBuffer& commands, Window& window, SceneData& scene, Camera& camera, const ImVec4& infoColor)
 {
 	bool changed{ false };
 
@@ -365,6 +368,24 @@ void UI::recordSceneGeneralSettings(CommandBuffer& commands, Camera& camera)
 	static float movingSpeed{ static_cast<float>(camera.getMovingSpeed()) };
 	changed = ImGui::DragFloat("Moving speed", &movingSpeed, 0.5f, 0.01f, 1000.0f);
 	if (changed) camera.setMovingSpeed(movingSpeed);
+
+	ImGui::Text("Environment Map:"); ImGui::SameLine();
+	bool envMapPresent{ !scene.environmentMapPath.empty() };
+	if (!envMapPresent)
+		ImGui::PushStyleColor(ImGuiCol_Text, ImGui::GetColorU32(infoColor));
+	if (ImGui::SmallButton(((envMapPresent ? scene.environmentMapPath : "None") + "###EnvironmentMapButton").c_str()))
+	{
+		std::string resFile{ getFileFromFileDialogWindow(window.getGLFWwindow(), "A:/HDRIs", "hdr") };
+		if (!resFile.empty())
+		{
+			scene.environmentMapPath = resFile;
+			static CommandPayloads::EnvironmentMap envMapPayload{};
+			envMapPayload.path = resFile;
+			commands.pushCommand(Command{.type = CommandType::ADD_ENVIRONMENT_MAP, .payload = &envMapPayload});
+		}
+	}
+	if (!envMapPresent)
+		ImGui::PopStyleColor();
 }
 void UI::recordSceneModelsSettings(CommandBuffer& commands, Window& window, SceneData& scene, const ImVec4& infoColor)
 {
@@ -797,7 +818,7 @@ void UI::recordInterface(CommandBuffer& commands, Window& window, Camera& camera
 
 	ImGui::SetNextWindowViewport(ImGui::GetMainViewport()->ID);
 	ImGui::Begin("Scene settings");
-	recordSceneGeneralSettings(commands, camera);
+	recordSceneGeneralSettings(commands, window, scene, camera, infoColor);
 	recordSceneModelsSettings(commands, window, scene, infoColor);
 	recordSceneLightsSettings(commands, scene, infoColor);
 	ImGui::End();

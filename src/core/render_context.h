@@ -1,5 +1,6 @@
 #pragma once
 
+#include <string>
 #include <glm/mat3x3.hpp>
 
 #include "color.h"

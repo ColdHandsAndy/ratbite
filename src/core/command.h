@@ -21,6 +21,8 @@ enum class CommandType : int
 	CHANGE_CAMERA_POS,
 	CHANGE_CAMERA_ORIENTATION,
 
+	ADD_ENVIRONMENT_MAP,
+
 	ADD_LIGHT,
 	CHANGE_LIGHT_POSITION,
 	CHANGE_LIGHT_SIZE,
@@ -39,6 +41,10 @@ enum class CommandType : int
 
 namespace CommandPayloads
 {
+	struct EnvironmentMap
+	{
+		std::string path{};
+	};
 	struct Light
 	{
 		LightType type{};
