@@ -88,7 +88,7 @@ void UI::recordDockspace(CommandBuffer& commands, Window& window, bool& openImag
 	{
 		if (ImGui::BeginMenuBar())
 		{
-			ImGui::MenuItem("Render Image", nullptr, &openImageRenderSettings);
+			ImGui::MenuItem("Render To Image", nullptr, &openImageRenderSettings);
 			ImGui::EndMenuBar();
 		}
 	}
@@ -283,6 +283,15 @@ void UI::recordRenderSettingsWindow(CommandBuffer& commands, Camera& camera, Ren
 		commands.pushCommand(Command{ .type = CommandType::CHANGE_SAMPLE_COUNT });
 	}
 
+	constexpr float exposureParameterization{ 10.0f };
+	static float exposure{ rContext.getImageExposure() * (1.0f / exposureParameterization) };
+	changed = ImGui::SliderFloat("Image exposure", &exposure, -1.0f, 1.0f, "%.5f", ImGuiSliderFlags_AlwaysClamp | ImGuiSliderFlags_Logarithmic);
+	if (changed)
+	{
+		rContext.setImageExposure(exposure * exposureParameterization);
+		commands.pushCommand(Command{ .type = CommandType::CHANGE_IMAGE_EXPOSURE });
+	}
+
 	if (ImGui::TreeNode("Path depth"))
 	{
 		int pathDepth{};
@@ -348,15 +357,6 @@ void UI::recordRenderSettingsWindow(CommandBuffer& commands, Camera& camera, Ren
 		ImGui::TreePop();
 	}
 
-	constexpr float exposureParameterization{ 10.0f };
-	static float exposure{ rContext.getImageExposure() * (1.0f / exposureParameterization) };
-	changed = ImGui::SliderFloat("Image exposure", &exposure, -1.0f, 1.0f, "%.5f", ImGuiSliderFlags_AlwaysClamp | ImGuiSliderFlags_Logarithmic);
-	if (changed)
-	{
-		rContext.setImageExposure(exposure * exposureParameterization);
-		commands.pushCommand(Command{ .type = CommandType::CHANGE_IMAGE_EXPOSURE });
-	}
-
 	ImGui::End();
 }
 void UI::recordSceneGeneralSettings(CommandBuffer& commands, Window& window, SceneData& scene, Camera& camera, const ImVec4& infoColor)
@@ -368,24 +368,6 @@ void UI::recordSceneGeneralSettings(CommandBuffer& commands, Window& window, Sce
 	static float movingSpeed{ static_cast<float>(camera.getMovingSpeed()) };
 	changed = ImGui::DragFloat("Moving speed", &movingSpeed, 0.5f, 0.01f, 1000.0f);
 	if (changed) camera.setMovingSpeed(movingSpeed);
-
-	ImGui::Text("Environment Map:"); ImGui::SameLine();
-	bool envMapPresent{ !scene.environmentMapPath.empty() };
-	if (!envMapPresent)
-		ImGui::PushStyleColor(ImGuiCol_Text, ImGui::GetColorU32(infoColor));
-	if (ImGui::SmallButton(((envMapPresent ? scene.environmentMapPath : "None") + "###EnvironmentMapButton").c_str()))
-	{
-		std::string resFile{ getFileFromFileDialogWindow(window.getGLFWwindow(), "A:/HDRIs", "hdr") };
-		if (!resFile.empty())
-		{
-			scene.environmentMapPath = resFile;
-			static CommandPayloads::EnvironmentMap envMapPayload{};
-			envMapPayload.path = resFile;
-			commands.pushCommand(Command{.type = CommandType::ADD_ENVIRONMENT_MAP, .payload = &envMapPayload});
-		}
-	}
-	if (!envMapPresent)
-		ImGui::PopStyleColor();
 }
 void UI::recordSceneModelsSettings(CommandBuffer& commands, Window& window, SceneData& scene, const ImVec4& infoColor)
 {
@@ -751,6 +733,26 @@ void UI::recordSceneLightsSettings(CommandBuffer& commands, SceneData& scene, co
 	}
 	ImGui::EndChild();
 }
+void UI::recordSceneEnvironmentMapSettings(CommandBuffer& commands, Window& window, SceneData& scene, const ImVec4& infoColor)
+{
+	ImGui::SeparatorText("Environment Map");
+	bool envMapPresent{ !scene.environmentMapPath.empty() };
+	if (!envMapPresent)
+		ImGui::PushStyleColor(ImGuiCol_Text, ImGui::GetColorU32(ImVec4(infoColor)));
+	if (ImGui::SmallButton(((envMapPresent ? scene.environmentMapPath : "None") + "###EnvironmentMapButton").c_str()))
+	{
+		std::string resFile{ getFileFromFileDialogWindow(window.getGLFWwindow(), "A:/HDRIs", "hdr") };
+		if (!resFile.empty())
+		{
+			scene.environmentMapPath = resFile;
+			static CommandPayloads::EnvironmentMap envMapPayload{};
+			envMapPayload.path = resFile;
+			commands.pushCommand(Command{.type = CommandType::ADD_ENVIRONMENT_MAP, .payload = &envMapPayload});
+		}
+	}
+	if (!envMapPresent)
+		ImGui::PopStyleColor();
+}
 void UI::recordInformationWindow(SceneData& scene, int currentSampleCount)
 {
 	ImGui::Begin("Information");
@@ -821,6 +823,7 @@ void UI::recordInterface(CommandBuffer& commands, Window& window, Camera& camera
 	recordSceneGeneralSettings(commands, window, scene, camera, infoColor);
 	recordSceneModelsSettings(commands, window, scene, infoColor);
 	recordSceneLightsSettings(commands, scene, infoColor);
+	recordSceneEnvironmentMapSettings(commands, window, scene, infoColor);
 	ImGui::End();
 
 	ImGui::SetNextWindowViewport(ImGui::GetMainViewport()->ID);

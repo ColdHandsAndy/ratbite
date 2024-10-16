@@ -210,6 +210,7 @@ private:
 	void recordSceneGeneralSettings(CommandBuffer& commands, Window& window, SceneData& scene, Camera& camera, const ImVec4& infoColor);
 	void recordSceneModelsSettings(CommandBuffer& commands, Window& window, SceneData& scene, const ImVec4& infoColor);
 	void recordSceneLightsSettings(CommandBuffer& commands, SceneData& scene, const ImVec4& infoColor);
+	void recordSceneEnvironmentMapSettings(CommandBuffer& commands, Window& window, SceneData& scene, const ImVec4& infoColor);
 	void recordInformationWindow(SceneData& scene, int currentSampleCount);
 
 private:
