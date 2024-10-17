@@ -631,8 +631,8 @@ void RenderingInterface::prepareDataForRendering(const Camera& camera, const Ren
 		.filmHeight = static_cast<uint32_t>(renderContext.getRenderHeight()),
 		.invFilmWidth = renderContext.getRenderInvWidth(),
 		.invFilmHeight = renderContext.getRenderInvHeight(),
-		.camPerspectiveScaleW = static_cast<float>(glm::tan((glm::radians(45.0) * 0.5))) * (static_cast<float>(renderContext.getRenderWidth()) / static_cast<float>(renderContext.getRenderHeight())),
-		.camPerspectiveScaleH = static_cast<float>(glm::tan((glm::radians(45.0) * 0.5))) };
+		.perspectiveScaleW = static_cast<float>(glm::tan(camera.getFieldOfView() * 0.5)) * (static_cast<float>(renderContext.getRenderWidth()) / static_cast<float>(renderContext.getRenderHeight())),
+		.perspectiveScaleH = static_cast<float>(glm::tan(camera.getFieldOfView() * 0.5)) };
 	int maxPathDepth{ std::max(1, renderContext.getMaxPathDepth()) };
 	m_launchParameters.pathState.maxPathDepth = maxPathDepth;
 	m_launchParameters.pathState.maxReflectedPathDepth = std::min(maxPathDepth, renderContext.getMaxReflectedPathDepth());
@@ -1384,12 +1384,12 @@ void RenderingInterface::processCommands(CommandBuffer& commands, RenderContext&
 					m_launchWidth = renderContext.getRenderWidth();
 					m_launchHeight = renderContext.getRenderHeight();
 					LaunchParameters::ResolutionState newResolutionState{
-						.filmWidth = static_cast<uint32_t>(renderContext.getRenderWidth()),
+							.filmWidth = static_cast<uint32_t>(renderContext.getRenderWidth()),
 							.filmHeight = static_cast<uint32_t>(renderContext.getRenderHeight()),
 							.invFilmWidth = renderContext.getRenderInvWidth(),
 							.invFilmHeight = renderContext.getRenderInvHeight(),
-							.camPerspectiveScaleW = static_cast<float>(glm::tan((glm::radians(45.0) * 0.5))) * (static_cast<float>(renderContext.getRenderWidth()) / static_cast<float>(renderContext.getRenderHeight())),
-							.camPerspectiveScaleH = static_cast<float>(glm::tan((glm::radians(45.0) * 0.5))) };
+							.perspectiveScaleW = static_cast<float>(glm::tan(camera.getFieldOfView() * 0.5)) * (static_cast<float>(renderContext.getRenderWidth()) / static_cast<float>(renderContext.getRenderHeight())),
+							.perspectiveScaleH = static_cast<float>(glm::tan(camera.getFieldOfView() * 0.5)) };
 
 					m_launchParameters.resolutionState = newResolutionState;
 
@@ -1420,6 +1420,21 @@ void RenderingInterface::processCommands(CommandBuffer& commands, RenderContext&
 					m_launchParameters.cameraState.camU = camera.getU();
 					m_launchParameters.cameraState.camV = camera.getV();
 					m_launchParameters.cameraState.camW = camera.getW();
+					restartRender = true;
+					break;
+				}
+			case CommandType::CHANGE_CAMERA_FIELD_OF_VIEW:
+				{
+					LaunchParameters::ResolutionState newResolutionState{
+							.filmWidth = static_cast<uint32_t>(renderContext.getRenderWidth()),
+							.filmHeight = static_cast<uint32_t>(renderContext.getRenderHeight()),
+							.invFilmWidth = renderContext.getRenderInvWidth(),
+							.invFilmHeight = renderContext.getRenderInvHeight(),
+							.perspectiveScaleW = static_cast<float>(glm::tan(camera.getFieldOfView() * 0.5)) * (static_cast<float>(renderContext.getRenderWidth()) / static_cast<float>(renderContext.getRenderHeight())),
+							.perspectiveScaleH = static_cast<float>(glm::tan(camera.getFieldOfView() * 0.5)) };
+
+					m_launchParameters.resolutionState = newResolutionState;
+
 					restartRender = true;
 					break;
 				}

@@ -22,8 +22,8 @@ struct LaunchParameters
 		uint32_t filmHeight{};
 		float invFilmWidth{};
 		float invFilmHeight{};
-		float camPerspectiveScaleW{};
-		float camPerspectiveScaleH{};
+		float perspectiveScaleW{};
+		float perspectiveScaleH{};
 	} resolutionState{};
 	struct PathState
 	{

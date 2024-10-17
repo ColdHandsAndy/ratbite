@@ -18,6 +18,8 @@ private:
 	glm::dvec3 m_w{};
 	glm::dvec3 m_upWorld{};
 
+	double m_fieldOfViewRad{ glm::radians(70.0f) };
+
 	double m_speed{ 3.0 };
 	double m_rotationSpeed{ 0.002 };
 
@@ -98,6 +100,7 @@ public:
 		}
 		m_v = glm::cross(m_w, m_u);
 	}
+	void setFieldOfView(double radians) { m_fieldOfViewRad = radians; }
 	void setMovingSpeed(double speed) { m_speed = speed; }
 	void setRotationSpeed(double speed) { m_rotationSpeed = speed; }
 	void setFocusDistance(double fd) { m_focusDistance = std::max(0.0, std::min(65504.0, fd)); }
@@ -107,6 +110,7 @@ public:
 	const glm::dvec3& getU() const { return m_u; }
 	const glm::dvec3& getV() const { return m_v; }
 	const glm::dvec3& getW() const { return m_w; }
+	const double getFieldOfView() const { return m_fieldOfViewRad; }
 	const double getMovingSpeed() const { return m_speed; }
 	const double getRotationSpeed() const { return m_rotationSpeed; }
 	const double getFocusDistance() const { return m_focusDistance; }

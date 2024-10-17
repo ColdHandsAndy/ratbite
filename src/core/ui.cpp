@@ -94,7 +94,7 @@ void UI::recordDockspace(CommandBuffer& commands, Window& window, bool& openImag
 	}
 	ImGui::End();
 }
-void UI::recordImageRenderSettingsWindow(CommandBuffer& commands, RenderContext& rContext, bool openImageRenderSettings)
+void UI::recordImageRenderSettingsWindow(CommandBuffer& commands, RenderContext& rContext, GLuint renderResult, bool openImageRenderSettings)
 {
 	m_imageRenderSettingsWindowIsOpen = openImageRenderSettings ? 1 : m_imageRenderSettingsWindowIsOpen;
 	if (m_imageRenderSettingsWindowIsOpen)
@@ -105,8 +105,14 @@ void UI::recordImageRenderSettingsWindow(CommandBuffer& commands, RenderContext&
 
 		bool changed{ false };
 
-		static int renderWidth{ rContext.getRenderWidth() };
-		static int renderHeight{ rContext.getRenderHeight() };
+		// Set width and height for potential render and keep preview proportions if needed
+		static int renderWidth{};
+		static int renderHeight{};
+		if (openImageRenderSettings)
+		{
+			renderWidth = rContext.getRenderWidth();
+			renderHeight = rContext.getRenderHeight();
+		}
 		static bool keepProportions{ true };
 		static float prop{ renderWidth / static_cast<float>(renderHeight) };
 		if (ImGui::Checkbox("Keep proportions", &keepProportions))
@@ -124,29 +130,38 @@ void UI::recordImageRenderSettingsWindow(CommandBuffer& commands, RenderContext&
 			renderWidth = renderHeight * prop;
 		renderHeight = std::max(1, std::min(renderHeight, 16384));
 
+		// Draw a small preview to see how render would look like
 		ImDrawList* drawList{ ImGui::GetWindowDrawList() };
 		const ImVec2 cursorPos{ ImGui::GetWindowPos().x + ImGui::GetCursorPos().x, ImGui::GetWindowPos().y + ImGui::GetCursorPos().y };
 		float rectPixelWidth{};
 		float rectPixelHeight{};
 		if (renderWidth > renderHeight)
 		{
-			rectPixelWidth = 100.0f;
-			rectPixelHeight = rectPixelWidth * (static_cast<float>(renderHeight) / static_cast<float>(renderWidth));
+			rectPixelWidth = 150.0f;
+			rectPixelHeight = std::max(1.0f, rectPixelWidth * (static_cast<float>(renderHeight) / static_cast<float>(renderWidth)));
 		}
 		else
 		{
-			rectPixelHeight = 100.0f;
-			rectPixelWidth = rectPixelHeight * (static_cast<float>(renderWidth) / static_cast<float>(renderHeight));
+			rectPixelHeight = 150.0f;
+			rectPixelWidth = std::max(1.0f, rectPixelHeight * (static_cast<float>(renderWidth) / static_cast<float>(renderHeight)));
 		}
-		drawList->AddRectFilledMultiColor(cursorPos,ImVec2(cursorPos.x + rectPixelWidth, cursorPos.y + rectPixelHeight),
-				ImColor(0.0f, 1.0f, 0.0f, 1.0f),
-				ImColor(1.0f, 1.0f, 0.0f, 1.0f),
-				ImColor(1.0f, 0.0f, 0.0f, 1.0f),
-				ImColor(0.0f, 0.0f, 0.0f, 1.0f));
+		if (static_cast<int>(rectPixelHeight) != rContext.getRenderHeight() || static_cast<int>(rectPixelWidth) != rContext.getRenderWidth())
+		{
+			rContext.setRenderWidth(rectPixelWidth);
+			rContext.setRenderHeight(rectPixelHeight);
+			commands.pushCommand(Command{.type = CommandType::CHANGE_RENDER_RESOLUTION});
+		}
+		else
+		{
+			drawList->AddImage(reinterpret_cast<ImTextureID>(renderResult),
+					ImVec2(cursorPos.x, cursorPos.y), ImVec2(cursorPos.x + rectPixelWidth, cursorPos.y + rectPixelHeight),
+					ImVec2(0.0f, 1.0f), ImVec2(1.0f, 0.0f));
+		}
 		drawList->AddRect(cursorPos,ImVec2(cursorPos.x + rectPixelWidth, cursorPos.y + rectPixelHeight),
 				ImGui::GetColorU32(ImGuiCol_Border, 1.0f));
 		ImGui::Dummy(ImVec2(rectPixelWidth, rectPixelHeight));
 
+		// Start render button
 		ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.0f, 1.0f, 0.0f, 0.75f));
 		ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.0f, 1.0f, 0.0f, 0.5f));
 		ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(0.0f, 1.0f, 0.0f, 1.0f));
@@ -175,7 +190,8 @@ void UI::recordImageRenderWindow(CommandBuffer& commands, Window& window, Render
 				ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoDocking | ImGuiWindowFlags_AlwaysAutoResize);
 		ImGui::SetWindowFocus();
 		ImVec2 vMin{ ImGui::GetWindowContentRegionMin() };
-		ImVec2 vMax{ ImGui::GetWindowContentRegionMax() };
+		ImVec2 vMax{ vMin.x + static_cast<float>(rContext.getRenderWidth()),
+					 vMin.y + static_cast<float>(rContext.getRenderHeight()) };
 		vMin.x += ImGui::GetWindowPos().x;
 		vMin.y += ImGui::GetWindowPos().y;
 		vMax.x += ImGui::GetWindowPos().x;
@@ -183,7 +199,12 @@ void UI::recordImageRenderWindow(CommandBuffer& commands, Window& window, Render
 		ImGui::GetWindowDrawList()->AddImage(reinterpret_cast<ImTextureID>(renderResult), vMin, vMax, ImVec2(0.0f, 1.0f), ImVec2(1.0f, 0.0f));
 		ImGui::Dummy(ImVec2(rContext.getRenderWidth(), rContext.getRenderHeight()));
 
-		bool save{ ImGui::Button("Save") };
+		ImGui::PushStyleColor(ImGuiCol_Button, ImVec4(0.0f, 1.0f, 0.0f, 0.75f));
+		ImGui::PushStyleColor(ImGuiCol_ButtonHovered, ImVec4(0.0f, 1.0f, 0.0f, 0.5f));
+		ImGui::PushStyleColor(ImGuiCol_ButtonActive, ImVec4(0.0f, 1.0f, 0.0f, 1.0f));
+		ImGui::PushStyleColor(ImGuiCol_Text, ImVec4(0.0f, 0.0f, 0.0f, 1.0f));
+		bool save{ ImGui::Button("Save", ImVec2(rContext.getRenderWidth(), 0.0f)) };
+		ImGui::PopStyleColor(4);
 		if (save)
 		{
 			std::string savePath{ saveFilesWithFileDialogWindow(window.getGLFWwindow(), getExeDir().string().c_str(), "ptresult.png", "png") };
@@ -229,16 +250,18 @@ void UI::recordPreviewWindow(CommandBuffer& commands, RenderContext& rContext,
 	renderWinWidth = vMax.x - vMin.x;
 	renderWinHeight = vMax.y - vMin.y;
 
-	int renderWidth{ std::max(std::min(4096, static_cast<int>(renderWinWidth * renderScale)), 0) };
-	int renderHeight{ std::max(std::min(4096, static_cast<int>(renderWinHeight * renderScale)), 0) };
-	if ((renderHeight != rContext.getRenderHeight() || renderWidth != rContext.getRenderWidth()) && !m_imageRenderWindowIsOpen)
+	int renderWidth{ std::max(std::min(4096, static_cast<int>(renderWinWidth * renderScale)), 1) };
+	int renderHeight{ std::max(std::min(4096, static_cast<int>(renderWinHeight * renderScale)), 1) };
+	if ((renderHeight != rContext.getRenderHeight() || renderWidth != rContext.getRenderWidth())
+			&& !m_imageRenderWindowIsOpen && !m_imageRenderSettingsWindowIsOpen)
 	{
-		rContext.setRenderWidth(std::max(renderWidth, 1));
-		rContext.setRenderHeight(std::max(renderHeight, 1));
+		rContext.setRenderWidth(renderWidth);
+		rContext.setRenderHeight(renderHeight);
 		commands.pushCommand(Command{ .type = CommandType::CHANGE_RENDER_RESOLUTION });
 	}
 
-	if (renderWidth != 0 && renderHeight != 0 && !ImGui::IsWindowCollapsed() && !m_imageRenderWindowIsOpen)
+	if (renderWidth != 0 && renderHeight != 0 && !ImGui::IsWindowCollapsed()
+			&& !m_imageRenderWindowIsOpen && !m_imageRenderSettingsWindowIsOpen)
 	{
 		ImGui::GetWindowDrawList()->AddImage(reinterpret_cast<ImTextureID>(renderResult), vMin, vMax, ImVec2(0.0f, 1.0f), ImVec2(1.0f, 0.0f));
 		static bool startInside{ false };
@@ -266,10 +289,11 @@ void UI::recordRenderSettingsWindow(CommandBuffer& commands, Camera& camera, Ren
 	{
 		int renderWidth{ std::max(std::min(4096, static_cast<int>(renderWinWidth * renderScale)), 1) };
 		int renderHeight{ std::max(std::min(4096, static_cast<int>(renderWinHeight * renderScale)), 1) };
-		if ((renderHeight != rContext.getRenderHeight() || renderWidth != rContext.getRenderWidth()) && !m_imageRenderWindowIsOpen)
+		if ((renderHeight != rContext.getRenderHeight() || renderWidth != rContext.getRenderWidth())
+				&& !m_imageRenderWindowIsOpen && !m_imageRenderSettingsWindowIsOpen)
 		{
-			rContext.setRenderWidth(std::max(renderWidth, 1));
-			rContext.setRenderHeight(std::max(renderHeight, 1));
+			rContext.setRenderWidth(renderWidth);
+			rContext.setRenderHeight(renderHeight);
 			commands.pushCommand(Command{ .type = CommandType::CHANGE_RENDER_RESOLUTION });
 		}
 	}
@@ -281,6 +305,15 @@ void UI::recordRenderSettingsWindow(CommandBuffer& commands, Camera& camera, Ren
 	{
 		rContext.setSampleCount(sampleCount);
 		commands.pushCommand(Command{ .type = CommandType::CHANGE_SAMPLE_COUNT });
+	}
+
+	static float fieldOfView{};
+	fieldOfView = static_cast<float>(glm::degrees(camera.getFieldOfView()));
+	changed = ImGui::SliderFloat("Field of view", &fieldOfView, 1.0f, 179.0f, "%.0f", ImGuiSliderFlags_AlwaysClamp);
+	if (changed)
+	{
+		camera.setFieldOfView(glm::radians(fieldOfView));
+		commands.pushCommand(Command{ .type = CommandType::CHANGE_CAMERA_FIELD_OF_VIEW} );
 	}
 
 	constexpr float exposureParameterization{ 10.0f };
@@ -799,18 +832,19 @@ void UI::recordInterface(CommandBuffer& commands, Window& window, Camera& camera
 	startImGuiRecording();
 	constexpr ImColor infoColor{ 0.99f, 0.33f, 0.29f };
 
+	static float renderScale{ 0.33f };
+	float renderWinWidth{};
+	float renderWinHeight{};
+
 	bool openImageRenderSettings{ false };
 	recordDockspace(commands, window, openImageRenderSettings);
 
-	recordImageRenderSettingsWindow(commands, rContext, openImageRenderSettings);
+	recordImageRenderSettingsWindow(commands, rContext, renderResult, openImageRenderSettings);
 	recordImageRenderWindow(commands, window, rContext, renderResult, currentSampleCount);
 
 	if (m_imageRenderWindowIsOpen || m_imageRenderSettingsWindowIsOpen)
 		ImGui::BeginDisabled();
 
-	static float renderScale{ 0.33f };
-	float renderWinWidth{};
-	float renderWinHeight{};
 	ImGui::SetNextWindowViewport(ImGui::GetMainViewport()->ID);
 	recordPreviewWindow(commands, rContext, renderWinWidth, renderWinHeight,
 			renderResult, renderScale);

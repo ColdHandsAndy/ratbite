@@ -35,6 +35,7 @@ public:
 		io.ConfigFlags |= ImGuiConfigFlags_NavEnableKeyboard;
 		io.ConfigFlags |= ImGuiConfigFlags_DockingEnable;
 		io.ConfigFlags |= ImGuiConfigFlags_ViewportsEnable;
+		io.ConfigWindowsMoveFromTitleBarOnly = true;
 		setTheme();
 		ImGui_ImplGlfw_InitForOpenGL(window, true);
 		ImGui_ImplOpenGL3_Init();
@@ -201,7 +202,7 @@ private:
 	}
 
 	void recordDockspace(CommandBuffer& commands, Window& window, bool& openImageRenderSettings);
-	void recordImageRenderSettingsWindow(CommandBuffer& commands, RenderContext& rContext, bool openImageRenderSettings);
+	void recordImageRenderSettingsWindow(CommandBuffer& commands, RenderContext& rContext, GLuint renderResult, bool openImageRenderSettings);
 	void recordImageRenderWindow(CommandBuffer& commands, Window& window, RenderContext& rContext, GLuint renderResult, int currentSampleCount);
 	void recordPreviewWindow(CommandBuffer& commands, RenderContext& rContext,
 			float& renderWinWidth, float& renderWinHeight,

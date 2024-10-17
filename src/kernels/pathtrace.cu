@@ -1178,13 +1178,13 @@ extern "C" __global__ void __raygen__main()
 		{
 			ray = generateThinLensCamera(subsampleCoordinate,
 					lensSample, parameters.cameraState.focusDistance, parameters.cameraState.appertureSize,
-					glm::vec2{resState.invFilmWidth, resState.invFilmHeight}, glm::vec2{resState.camPerspectiveScaleW, resState.camPerspectiveScaleH},
+					glm::vec2{resState.invFilmWidth, resState.invFilmHeight}, glm::vec2{resState.perspectiveScaleW, resState.perspectiveScaleH},
 					parameters.cameraState.camU, parameters.cameraState.camV, parameters.cameraState.camW);
 		}
 		else
 		{
 			ray = generatePinholeCameraDirection(subsampleCoordinate,
-					glm::vec2{resState.invFilmWidth, resState.invFilmHeight}, glm::vec2{resState.camPerspectiveScaleW, resState.camPerspectiveScaleH},
+					glm::vec2{resState.invFilmWidth, resState.invFilmHeight}, glm::vec2{resState.perspectiveScaleW, resState.perspectiveScaleH},
 					parameters.cameraState.camU, parameters.cameraState.camV, parameters.cameraState.camW);
 		}
 		glm::vec3& rO{ ray.o };
