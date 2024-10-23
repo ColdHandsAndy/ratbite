@@ -8,10 +8,10 @@ namespace Program
     static constexpr unsigned int maxDCDepth{ 1 };
     static constexpr unsigned int maxCCDepth{ 0 };
 
-    static constexpr unsigned int payloadValueCount{ 17 };
+    static constexpr unsigned int payloadValueCount{ 23 };
     static constexpr unsigned int payloadSemantics[payloadValueCount]
     {
-        // Position
+        // Hit position (Triangle vertex A)
         OPTIX_PAYLOAD_SEMANTICS_TRACE_CALLER_READ |
         OPTIX_PAYLOAD_SEMANTICS_CH_WRITE          |
         OPTIX_PAYLOAD_SEMANTICS_MS_NONE           |
@@ -118,6 +118,44 @@ namespace Program
         OPTIX_PAYLOAD_SEMANTICS_MS_NONE           |
         OPTIX_PAYLOAD_SEMANTICS_AH_NONE           |
         OPTIX_PAYLOAD_SEMANTICS_IS_NONE,
+
+		// Triangle vertices B and C
+        OPTIX_PAYLOAD_SEMANTICS_TRACE_CALLER_READ |
+        OPTIX_PAYLOAD_SEMANTICS_CH_WRITE          |
+        OPTIX_PAYLOAD_SEMANTICS_MS_NONE           |
+        OPTIX_PAYLOAD_SEMANTICS_AH_NONE           |
+        OPTIX_PAYLOAD_SEMANTICS_IS_NONE,
+
+        OPTIX_PAYLOAD_SEMANTICS_TRACE_CALLER_READ |
+        OPTIX_PAYLOAD_SEMANTICS_CH_WRITE          |
+        OPTIX_PAYLOAD_SEMANTICS_MS_NONE           |
+        OPTIX_PAYLOAD_SEMANTICS_AH_NONE           |
+        OPTIX_PAYLOAD_SEMANTICS_IS_NONE,
+
+        OPTIX_PAYLOAD_SEMANTICS_TRACE_CALLER_READ |
+        OPTIX_PAYLOAD_SEMANTICS_CH_WRITE          |
+        OPTIX_PAYLOAD_SEMANTICS_MS_NONE           |
+        OPTIX_PAYLOAD_SEMANTICS_AH_NONE           |
+        OPTIX_PAYLOAD_SEMANTICS_IS_NONE,
+
+        OPTIX_PAYLOAD_SEMANTICS_TRACE_CALLER_READ |
+        OPTIX_PAYLOAD_SEMANTICS_CH_WRITE          |
+        OPTIX_PAYLOAD_SEMANTICS_MS_NONE           |
+        OPTIX_PAYLOAD_SEMANTICS_AH_NONE           |
+        OPTIX_PAYLOAD_SEMANTICS_IS_NONE,
+
+        OPTIX_PAYLOAD_SEMANTICS_TRACE_CALLER_READ |
+        OPTIX_PAYLOAD_SEMANTICS_CH_WRITE          |
+        OPTIX_PAYLOAD_SEMANTICS_MS_NONE           |
+        OPTIX_PAYLOAD_SEMANTICS_AH_NONE           |
+        OPTIX_PAYLOAD_SEMANTICS_IS_NONE,
+
+        OPTIX_PAYLOAD_SEMANTICS_TRACE_CALLER_READ |
+        OPTIX_PAYLOAD_SEMANTICS_CH_WRITE          |
+        OPTIX_PAYLOAD_SEMANTICS_MS_NONE           |
+        OPTIX_PAYLOAD_SEMANTICS_AH_NONE           |
+        OPTIX_PAYLOAD_SEMANTICS_IS_NONE,
+
     };
 
     static constexpr char raygenName[]{ "__raygen__main" };

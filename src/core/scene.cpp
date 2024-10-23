@@ -134,30 +134,29 @@ namespace
 		{
 			const cgltf_texture* tex{ data->textures + i };
 			TextureFilter filter{ TextureFilter::LINEAR };
-			if (tex->sampler->mag_filter == 9728)
-				filter = TextureFilter::NEAREST;
-			else if (tex->sampler->mag_filter == 9729)
-				filter = TextureFilter::LINEAR;
+			TextureAddress addressX{ TextureAddress::WRAP };
+			TextureAddress addressY{ TextureAddress::WRAP };
+			if (tex->sampler != nullptr)
+			{
+				if (tex->sampler->mag_filter == 9728)
+					filter = TextureFilter::NEAREST;
+				else if (tex->sampler->mag_filter == 9729)
+					filter = TextureFilter::LINEAR;
 
-			TextureAddress addressX{};
-			if (tex->sampler->wrap_s == 10497)
-				addressX = TextureAddress::WRAP;
-			else if (tex->sampler->wrap_s == 33071)
-				addressX = TextureAddress::CLAMP;
-			else if (tex->sampler->wrap_s == 33648)
-				addressX = TextureAddress::MIRROR;
-			else
-				addressX = TextureAddress::WRAP;
+				if (tex->sampler->wrap_s == 10497)
+					addressX = TextureAddress::WRAP;
+				else if (tex->sampler->wrap_s == 33071)
+					addressX = TextureAddress::CLAMP;
+				else if (tex->sampler->wrap_s == 33648)
+					addressX = TextureAddress::MIRROR;
 
-			TextureAddress addressY{};
-			if (tex->sampler->wrap_t == 10497)
-				addressY = TextureAddress::WRAP;
-			else if (tex->sampler->wrap_t == 33071)
-				addressY = TextureAddress::CLAMP;
-			else if (tex->sampler->wrap_t == 33648)
-				addressY = TextureAddress::MIRROR;
-			else
-				addressY = TextureAddress::WRAP;
+				if (tex->sampler->wrap_t == 10497)
+					addressY = TextureAddress::WRAP;
+				else if (tex->sampler->wrap_t == 33071)
+					addressY = TextureAddress::CLAMP;
+				else if (tex->sampler->wrap_t == 33648)
+					addressY = TextureAddress::MIRROR;
+			}
 
 			textureData.emplace_back(static_cast<int>(cgltf_image_index(data, tex->image)), false, filter, addressX, addressY);
 		}

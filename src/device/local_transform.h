@@ -27,6 +27,8 @@ public:
 		m_TBN = glm::transpose(glm::mat3_cast(frame));
 	}
 
+	CU_DEVICE CU_INLINE glm::vec3 getNormal() const { return glm::transpose(m_TBN)[2]; }
+
 	CU_DEVICE CU_INLINE static float cos2Theta(const glm::vec3& w) { return w.z * w.z; };
 	CU_DEVICE CU_INLINE static float sin2Theta(const glm::vec3& w) { return glm::max(0.0f, 1.0f - cos2Theta(w)); };
 	CU_DEVICE CU_INLINE static float tan2Theta(const glm::vec3& w) { return sin2Theta(w) / cos2Theta(w); };

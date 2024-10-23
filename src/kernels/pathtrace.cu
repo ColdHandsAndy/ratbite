@@ -49,7 +49,8 @@ struct DirectLightSampleData
 	bool occluded{};
 };
 
-CU_DEVICE CU_INLINE void unpackTraceData(const LaunchParameters& params, glm::vec3& hP, uint32_t& encHGN,
+
+CU_DEVICE CU_INLINE void unpackTraceData(const LaunchParameters& params, glm::vec3& hitPosition, glm::vec3* vertexPositions, uint32_t& encHGN,
 		PathStateBitfield& stateFlags,
 		uint32_t& primitiveIndex, glm::vec2& barycentrics,
 		LightType& lightType, uint16_t& lightIndex,
@@ -57,7 +58,6 @@ CU_DEVICE CU_INLINE void unpackTraceData(const LaunchParameters& params, glm::ve
 		glm::mat3& normalTransform,
 		uint32_t* pl)
 {
-	hP = glm::vec3{ __uint_as_float(pl[0]), __uint_as_float(pl[1]), __uint_as_float(pl[2]) };
 	encHGN = pl[3];
 	uint32_t matIndex{ pl[7] & 0xFFFF };
 	*materialDataPtr = params.materials + matIndex;
@@ -67,9 +67,18 @@ CU_DEVICE CU_INLINE void unpackTraceData(const LaunchParameters& params, glm::ve
 	{
 		primitiveIndex = pl[4];
 		barycentrics = {__uint_as_float(pl[5]), __uint_as_float(pl[6])};
+		vertexPositions[0] = glm::vec3{ __uint_as_float(pl[0]), __uint_as_float(pl[1]), __uint_as_float(pl[2]) };
+		vertexPositions[1] = glm::vec3{ __uint_as_float(pl[17]), __uint_as_float(pl[18]), __uint_as_float(pl[19]) };
+		vertexPositions[2] = glm::vec3{ __uint_as_float(pl[20]), __uint_as_float(pl[21]), __uint_as_float(pl[22]) };
+		hitPosition.x = vertexPositions[0].x * (1.0f - barycentrics.x - barycentrics.y) + vertexPositions[1].x * barycentrics.x + vertexPositions[2].x * barycentrics.y;
+		hitPosition.y = vertexPositions[0].y * (1.0f - barycentrics.x - barycentrics.y) + vertexPositions[1].y * barycentrics.x + vertexPositions[2].y * barycentrics.y;
+		hitPosition.z = vertexPositions[0].z * (1.0f - barycentrics.x - barycentrics.y) + vertexPositions[1].z * barycentrics.x + vertexPositions[2].z * barycentrics.y;
 	}
 	else
+	{
+		hitPosition = glm::vec3{ __uint_as_float(pl[0]), __uint_as_float(pl[1]), __uint_as_float(pl[2]) };
 		lightIndex = pl[4];
+	}
 	normalTransform[0][0] = __uint_as_float(pl[8]);
 	normalTransform[1][0] = __uint_as_float(pl[9]);
 	normalTransform[2][0] = __uint_as_float(pl[10]);
@@ -97,9 +106,10 @@ CU_DEVICE CU_INLINE void resolveSample(SampledSpectrum& L, const SampledSpectrum
 		L[i] = pdf[i] != 0.0f ? L[i] / pdf[i] : 0.0f;
 	}
 }
-CU_DEVICE CU_INLINE void resolveAttributes(const MaterialData& material, const PathStateBitfield& stateFlags, const glm::vec2& barycentrics, uint32_t primitiveIndex,
-		const glm::vec3& geoNormal, const glm::mat3& normalTransform,
-		glm::vec2& texCoord1, glm::vec2& texCoord2, glm::vec3& normal, glm::vec3& tangent, bool& flipBitangent)
+CU_DEVICE CU_INLINE void resolveAttributes(const MaterialData& material, const PathStateBitfield& stateFlags,
+		const glm::vec3* vertexPositions, const glm::vec2& barycentrics, uint32_t primitiveIndex,
+		const glm::vec3& geoNormal, const glm::mat3& normalTransform, const glm::vec3& hitPosition,
+		glm::vec3& hitPositionInterpolatedSurface, glm::vec2& texCoord1, glm::vec2& texCoord2, glm::vec3& normal, glm::vec3& tangent, bool& flipBitangent)
 {
 	float baryWeights[3]{ 1.0f - barycentrics.x - barycentrics.y, barycentrics.x, barycentrics.y };
 	uint32_t indices[3];
@@ -136,6 +146,7 @@ CU_DEVICE CU_INLINE void resolveAttributes(const MaterialData& material, const P
 	{
 		glm::vec3 shadingNormal{};
 		glm::vec3 shadingTangent{};
+		glm::vec3 normals[3]{};
 		if (static_cast<bool>(material.attributes & MaterialData::AttributeTypeBitfield::FRAME))
 		{
 			attr = attribBuffer + material.frameOffset;
@@ -149,7 +160,9 @@ CU_DEVICE CU_INLINE void resolveAttributes(const MaterialData& material, const P
 				glm::mat3_cast(frames[0]),
 				glm::mat3_cast(frames[1]),
 				glm::mat3_cast(frames[2]), };
-			glm::vec3 normals[3]{ frameMats[0][1], frameMats[1][1], frameMats[2][1] };
+			normals[0] = frameMats[0][1];
+			normals[1] = frameMats[1][1];
+			normals[2] = frameMats[2][1];
 			glm::vec3 tangents[3]{ frameMats[0][0], frameMats[1][0], frameMats[2][0] };
 			shadingNormal = glm::vec3{
 					baryWeights[0] * normals[0]
@@ -168,21 +181,41 @@ CU_DEVICE CU_INLINE void resolveAttributes(const MaterialData& material, const P
 		{
 			attr = attribBuffer + material.normalOffset;
 
-			glm::vec3 normals[3]{
-				utility::octohedral::decode(*reinterpret_cast<glm::vec2*>(attr + attributesStride * indices[0])),
-				utility::octohedral::decode(*reinterpret_cast<glm::vec2*>(attr + attributesStride * indices[1])),
-				utility::octohedral::decode(*reinterpret_cast<glm::vec2*>(attr + attributesStride * indices[2])), };
+			normals[0] = utility::octohedral::decode(*reinterpret_cast<glm::vec2*>(attr + attributesStride * indices[0]));
+			normals[1] = utility::octohedral::decode(*reinterpret_cast<glm::vec2*>(attr + attributesStride * indices[1]));
+			normals[2] = utility::octohedral::decode(*reinterpret_cast<glm::vec2*>(attr + attributesStride * indices[2]));
 			shadingNormal = glm::vec3{
-				(1.0f - barycentrics.x - barycentrics.y) * normals[0]
+				baryWeights[0] * normals[0]
 				+
-				barycentrics.x * normals[1]
+				baryWeights[1] * normals[1]
 				+
-				barycentrics.y * normals[2] };
+				baryWeights[2] * normals[2] };
 			float sign{ cuda::std::copysignf(1.0f, shadingNormal.z) };
 			float a{ -1.0f / (sign + shadingNormal.z) };
 			float b{ shadingNormal.x * shadingNormal.y * a };
 			shadingTangent = glm::vec3(1.0f + sign * (shadingNormal.x * shadingNormal.x) * a, sign * b, -sign * shadingNormal.x);
 		}
+
+		// Offset hit position according to shading normals https://jo.dreggn.org/home/2021_terminator.pdf
+		const glm::vec3& A{ vertexPositions[0] };
+		const glm::vec3& B{ vertexPositions[1] };
+		const glm::vec3& C{ vertexPositions[2] };
+		const glm::vec3& P{ hitPosition };
+		const glm::vec3 nA{ glm::normalize(normalTransform * normals[0]) };
+		const glm::vec3 nB{ glm::normalize(normalTransform * normals[1]) };
+		const glm::vec3 nC{ glm::normalize(normalTransform * normals[2]) };
+		const float u{ baryWeights[0] };
+		const float v{ baryWeights[1] };
+		const float w{ baryWeights[2] };
+		glm::vec3 tmpu = P - A, tmpv = P - B, tmpw = P - C;
+		float dotu = cuda::std::fmin(0.0f, glm::dot(tmpu, nA));
+		float dotv = cuda::std::fmin(0.0f, glm::dot(tmpv, nB));
+		float dotw = cuda::std::fmin(0.0f, glm::dot(tmpw, nC));
+		tmpu -= dotu * nA;
+		tmpv -= dotv * nB;
+		tmpw -= dotw * nC;
+		glm::vec3 Pp = P + u * tmpu + v * tmpv + w * tmpw;
+		hitPositionInterpolatedSurface = Pp;
 
 		normal = glm::normalize(normalTransform * shadingNormal);
 		glm::mat3 vectorTransform{ glm::inverse(glm::transpose(normalTransform)) };
@@ -357,7 +390,7 @@ CU_DEVICE CU_INLINE SampledSpectrum emittedLightEval(const LaunchParameters& par
 	return throughputWeight * Le * emissionWeight;
 }
 CU_DEVICE CU_INLINE DirectLightSampleData sampledLightEval(const LaunchParameters& params, const SampledWavelengths& wavelengths,
-		const glm::vec3& hitPoint, const glm::vec3& hitNormal,
+		const glm::vec3& hitPosition, const glm::vec3& hitPositionInterpolatedSurface, const glm::vec3& hitNormal,
 		const glm::vec3& rand)
 {
 	DirectLightSampleData dlSampleData{};
@@ -391,7 +424,6 @@ CU_DEVICE CU_INLINE DirectLightSampleData sampledLightEval(const LaunchParameter
 		type = LightType::SKY;
 	}
 
-
 	float dToL{};
 	float lightPDF{};
 	switch (type)
@@ -402,7 +434,7 @@ CU_DEVICE CU_INLINE DirectLightSampleData sampledLightEval(const LaunchParameter
 				dlSampleData.spectrumSample = params.spectra[params.materials[disk.materialIndex].emissionSpectrumDataIndex].sample(wavelengths) * disk.powerScale;
 				glm::mat3 matframe{ glm::mat3_cast(disk.frame) };
 				glm::vec3 lSmplPos{ disk.position + sampling::disk::sampleUniform3D(glm::vec2{rand.x, rand.y}, matframe) * disk.radius };
-				glm::vec3 rToLight{ lSmplPos - hitPoint };
+				glm::vec3 rToLight{ lSmplPos - hitPosition };
 				float sqrdToLight{ rToLight.x * rToLight.x + rToLight.y * rToLight.y + rToLight.z * rToLight.z };
 				dToL = cuda::std::sqrtf(sqrdToLight);
 				dlSampleData.lightDir = rToLight / dToL;
@@ -418,9 +450,9 @@ CU_DEVICE CU_INLINE DirectLightSampleData sampledLightEval(const LaunchParameter
 			{
 				const SphereLightData& sphere{ params.lights.spheres[index] };
 				dlSampleData.spectrumSample = params.spectra[params.materials[sphere.materialIndex].emissionSpectrumDataIndex].sample(wavelengths) * sphere.powerScale;
-				glm::vec3 lSmplPos{ sampling::sphere::sampleUniformWorldSolidAngle(glm::vec2{rand.x, rand.y}, hitPoint, sphere.position, sphere.radius, lightPDF)};
+				glm::vec3 lSmplPos{ sampling::sphere::sampleUniformWorldSolidAngle(glm::vec2{rand.x, rand.y}, hitPosition, sphere.position, sphere.radius, lightPDF)};
 
-				glm::vec3 rToLight{ lSmplPos - hitPoint };
+				glm::vec3 rToLight{ lSmplPos - hitPosition };
 				dToL = glm::length(rToLight);
 				dlSampleData.lightDir = rToLight / dToL;
 
@@ -471,7 +503,7 @@ CU_DEVICE CU_INLINE DirectLightSampleData sampledLightEval(const LaunchParameter
 	dlSampleData.lightSamplePDF = lightPDF * lightStructurePDF;
 
 	bool offsetOutside{ glm::dot(hitNormal, dlSampleData.lightDir) > 0.0f };
-	glm::vec3 rO{ utility::offsetPoint(hitPoint, offsetOutside ? hitNormal : -hitNormal) };
+	glm::vec3 rO{ utility::offsetPoint(offsetOutside ? hitPositionInterpolatedSurface : hitPosition, offsetOutside ? hitNormal : -hitNormal) };
 	const glm::vec3& lD{ dlSampleData.lightDir };
 	if (!dlSampleData.occluded)
 	{
@@ -492,6 +524,7 @@ CU_DEVICE CU_INLINE DirectLightSampleData sampledLightEval(const LaunchParameter
 	return dlSampleData;
 }
 
+
 extern "C" __global__ void __closesthit__triangle()
 {
 	optixSetPayloadTypes(OPTIX_PAYLOAD_TYPE_ID_0);
@@ -501,25 +534,25 @@ extern "C" __global__ void __closesthit__triangle()
 	uint32_t primitiveIndex{ optixGetPrimitiveIndex() };
 	float2 barycentrics{ optixGetTriangleBarycentrics() };
 
-	float3 vertexObjectData[3];
-	optixGetTriangleVertexData(optixGetGASTraversableHandle(), optixGetPrimitiveIndex(), optixGetSbtGASIndex(), 0.0f, vertexObjectData);
+	float3 verticesObj[3];
+	optixGetTriangleVertexData(optixGetGASTraversableHandle(), optixGetPrimitiveIndex(), optixGetSbtGASIndex(), 0.0f, verticesObj);
 	
-	float3 hposO;
-	hposO.x = vertexObjectData[0].x * (1.0f - barycentrics.x - barycentrics.y) + vertexObjectData[1].x * barycentrics.x + vertexObjectData[2].x * barycentrics.y;
-	hposO.y = vertexObjectData[0].y * (1.0f - barycentrics.x - barycentrics.y) + vertexObjectData[1].y * barycentrics.x + vertexObjectData[2].y * barycentrics.y;
-	hposO.z = vertexObjectData[0].z * (1.0f - barycentrics.x - barycentrics.y) + vertexObjectData[1].z * barycentrics.x + vertexObjectData[2].z * barycentrics.y;
+	// float3 hposO;
+	// hposO.x = vertexObjectData[0].x * (1.0f - barycentrics.x - barycentrics.y) + vertexObjectData[1].x * barycentrics.x + vertexObjectData[2].x * barycentrics.y;
+	// hposO.y = vertexObjectData[0].y * (1.0f - barycentrics.x - barycentrics.y) + vertexObjectData[1].y * barycentrics.x + vertexObjectData[2].y * barycentrics.y;
+	// hposO.z = vertexObjectData[0].z * (1.0f - barycentrics.x - barycentrics.y) + vertexObjectData[1].z * barycentrics.x + vertexObjectData[2].z * barycentrics.y;
 
 	float WFO[12]{};
 	optixGetObjectToWorldTransformMatrix(WFO);
 	float OFW[12]{};
 	optixGetWorldToObjectTransformMatrix(OFW);
 
-	float3 hpos{ hposO.x * WFO[0] + hposO.y * WFO[1] + hposO.z * WFO[2]  + WFO[3], 
-				 hposO.x * WFO[4] + hposO.y * WFO[5] + hposO.z * WFO[6]  + WFO[7], 
-				 hposO.x * WFO[8] + hposO.y * WFO[9] + hposO.z * WFO[10] + WFO[11] };
+	// float3 hpos{ hposO.x * WFO[0] + hposO.y * WFO[1] + hposO.z * WFO[2]  + WFO[3], 
+	// 			 hposO.x * WFO[4] + hposO.y * WFO[5] + hposO.z * WFO[6]  + WFO[7], 
+	// 			 hposO.x * WFO[8] + hposO.y * WFO[9] + hposO.z * WFO[10] + WFO[11] };
 
-	float3 u{ vertexObjectData[2].x - vertexObjectData[0].x, vertexObjectData[2].y - vertexObjectData[0].y, vertexObjectData[2].z - vertexObjectData[0].z };
-	float3 v{ vertexObjectData[1].x - vertexObjectData[0].x, vertexObjectData[1].y - vertexObjectData[0].y, vertexObjectData[1].z - vertexObjectData[0].z };
+	float3 u{ verticesObj[2].x - verticesObj[0].x, verticesObj[2].y - verticesObj[0].y, verticesObj[2].z - verticesObj[0].z };
+	float3 v{ verticesObj[1].x - verticesObj[0].x, verticesObj[1].y - verticesObj[0].y, verticesObj[1].z - verticesObj[0].z };
 	float3 geometryNormal{u.y * v.z - u.z * v.y,
 						  u.z * v.x - u.x * v.z,
 						  u.x * v.y - u.y * v.x};
@@ -533,9 +566,14 @@ extern "C" __global__ void __closesthit__triangle()
 	uint32_t encGeometryNormal{ utility::octohedral::encodeU32(glm::vec3{geometryNormal.x, geometryNormal.y, geometryNormal.z}) };
 
 
-	optixSetPayload_0(__float_as_uint(hpos.x));
-	optixSetPayload_1(__float_as_uint(hpos.y));
-	optixSetPayload_2(__float_as_uint(hpos.z));
+	// optixSetPayload_0(__float_as_uint(hpos.x));
+	// optixSetPayload_1(__float_as_uint(hpos.y));
+	// optixSetPayload_2(__float_as_uint(hpos.z));
+	//
+	optixSetPayload_0(__float_as_uint(verticesObj[0].x * WFO[0] + verticesObj[0].y * WFO[1] + verticesObj[0].z * WFO[2]   + WFO[3]));
+	optixSetPayload_1(__float_as_uint(verticesObj[0].x * WFO[4] + verticesObj[0].y * WFO[5] + verticesObj[0].z * WFO[6]   + WFO[7]));
+	optixSetPayload_2(__float_as_uint(verticesObj[0].x * WFO[8] + verticesObj[0].y * WFO[9] + verticesObj[0].z * WFO[10]  + WFO[11]));
+	//
 	optixSetPayload_3(encGeometryNormal);
 	optixSetPayload_4(primitiveIndex);
 	optixSetPayload_5(__float_as_uint(barycentrics.x));
@@ -553,6 +591,14 @@ extern "C" __global__ void __closesthit__triangle()
 	optixSetPayload_14(__float_as_uint(OFW[2]));
 	optixSetPayload_15(__float_as_uint(OFW[6]));
 	optixSetPayload_16(__float_as_uint(OFW[10]));
+	//
+	optixSetPayload_17(__float_as_uint(verticesObj[1].x * WFO[0] + verticesObj[1].y * WFO[1] + verticesObj[1].z * WFO[2]   + WFO[3]));
+	optixSetPayload_18(__float_as_uint(verticesObj[1].x * WFO[4] + verticesObj[1].y * WFO[5] + verticesObj[1].z * WFO[6]   + WFO[7]));
+	optixSetPayload_19(__float_as_uint(verticesObj[1].x * WFO[8] + verticesObj[1].y * WFO[9] + verticesObj[1].z * WFO[10]  + WFO[11]));
+	optixSetPayload_20(__float_as_uint(verticesObj[2].x * WFO[0] + verticesObj[2].y * WFO[1] + verticesObj[2].z * WFO[2]   + WFO[3]));
+	optixSetPayload_21(__float_as_uint(verticesObj[2].x * WFO[4] + verticesObj[2].y * WFO[5] + verticesObj[2].z * WFO[6]   + WFO[7]));
+	optixSetPayload_22(__float_as_uint(verticesObj[2].x * WFO[8] + verticesObj[2].y * WFO[9] + verticesObj[2].z * WFO[10]  + WFO[11]));
+	//
 }
 extern "C" __global__ void __intersection__disk()
 {
@@ -994,6 +1040,8 @@ extern "C" __device__ void __direct_callable__ComplexSurface_BxDF(const Material
 		if (!reflect)
 			etaR = eta;
 		wm = glm::normalize(wi * etaR + wo);
+		if (wm.z < 0.0f)
+			wm = -wm;
 		microfacet::ContextMicronormal ctxm{ microfacet::createContextMicronormal(wm) };
 
 		const float wowmAbsDot{ cuda::std::fabs(glm::dot(wo, wm)) };
@@ -1168,8 +1216,10 @@ extern "C" __global__ void __raygen__main()
 	glm::dvec4 result{ parameters.samplingState.offset != 0 ? parameters.renderData[li.y * resState.filmWidth + li.x] : glm::dvec4{0.0} };
 	uint32_t sample{ 0 };
 	bool terminated{ false };
+	// Sample loop (Processing multiple samples and store them)
 	do
 	{
+		//Defining the path state
 		const glm::vec2 subsample{ QRNG::Sobol::sample2D(qrngState, QRNG::DimensionOffset::FILTER) };
 		const glm::vec2 subsampleCoordinate{ pixelCoordinate + filter::gaussian::sampleDistribution(subsample) };
 		const glm::vec2 lensSample{ QRNG::Sobol::sample2D(qrngState, QRNG::DimensionOffset::LENS) };
@@ -1189,20 +1239,19 @@ extern "C" __global__ void __raygen__main()
 		}
 		glm::vec3& rO{ ray.o };
 		glm::vec3& rD{ ray.d };
-
 		SampledWavelengths wavelengths{ SampledWavelengths::sampleVisible(QRNG::Sobol::sample1D(qrngState, QRNG::DimensionOffset::WAVELENGTH)) };
 		SampledSpectrum L{ 0.0f };
 		SampledSpectrum throughputWeight{ 1.0f };
 		float refractionScale{ 1.0f };
 		float bxdfPDF{ 1.0f };
-		LightType lightType{ LightType::NONE };
-		uint16_t lightIndex{};
 		PathStateBitfield stateFlags{ 0 };
 		bool continuePath{};
 		uint32_t depth{ 0 };
+
+		// Trace loop (Processing the path and gathering transfered radiance)
 		do
 		{
-			uint32_t pl[17];
+			uint32_t pl[23];
 			optixTrace(OPTIX_PAYLOAD_TYPE_ID_0, //Payload type
 					   parameters.traversable, //Traversable handle
 					   { rO.x, rO.y, rO.z }, //Ray origin
@@ -1215,38 +1264,109 @@ extern "C" __global__ void __raygen__main()
 					   0, //SBT offset
 					   1, //SBT stride
 					   0, //SBT miss program index
-					   pl[0], pl[1], pl[2], pl[3], pl[4], pl[5], pl[6], pl[7], pl[8], pl[9], pl[10], pl[11], pl[12], pl[13], pl[14], pl[15], pl[16]); //Payload
+					   pl[0], pl[1], pl[2],
+					   pl[3], pl[4], pl[5], pl[6], pl[7],
+					   pl[8], pl[9], pl[10], pl[11], pl[12], pl[13], pl[14], pl[15], pl[16],
+					   pl[17], pl[18], pl[19], pl[20], pl[21], pl[22]);
 
-			glm::vec3 hP; //Hit position
+			glm::vec3 hitPos;
+			glm::vec3 vertPositions[3];
 			uint32_t encHitGNormal;
 			uint32_t primitiveIndex;
 			glm::vec2 barycentrics;
+			LightType hitLightType{ LightType::NONE };
+			uint16_t hitLightIndex{};
 			MaterialData* material;
 			glm::mat3 normalTransform;
-			unpackTraceData(parameters, hP, encHitGNormal,
+			unpackTraceData(parameters, hitPos, vertPositions, encHitGNormal,
 					stateFlags,
 					primitiveIndex, barycentrics,
-					lightType, lightIndex, &material, normalTransform,
+					hitLightType, hitLightIndex, &material, normalTransform,
 					pl);
 
-			glm::vec3 toHit{ hP - rO };
-			L += emittedLightEval(parameters, wavelengths, stateFlags,
-					lightType, lightIndex,
-					throughputWeight, bxdfPDF,
-					depth, rO, rD, toHit.x * toHit.x + toHit.y * toHit.y + toHit.z * toHit.z);
+			// Hit emission estimation
+			if (hitLightType != LightType::NONE)
+			{
+				glm::vec3 toHit{ hitPos - rO };
+				float sqrdDistToLight{ toHit.x * toHit.x + toHit.y * toHit.y + toHit.z * toHit.z };
+
+				float lightStructurePDF{ 1.0f / (parameters.lights.lightCount + (parameters.envMap.enabled ? 1.0f : 0.0f)) };
+				float lightPDF{};
+				SampledSpectrum Le{};
+				bool noEmission{ false };
+
+				switch (hitLightType)
+				{
+					case LightType::DISK:
+						{
+							const DiskLightData& disk{ parameters.lights.disks[hitLightIndex] };
+							glm::vec3 norm{ glm::mat3_cast(disk.frame)[2] };
+							float lCos{ -glm::dot(rD, norm) };
+							float surfacePDF{ 1.0f / (glm::pi<float>() * disk.radius * disk.radius) };
+							lightPDF = surfacePDF * sqrdDistToLight / lCos;
+							float lightPowerScale{ disk.powerScale * (lCos > 0.0f ? 1.0f : 0.0f) };
+							uint32_t emissionSpectrumDataIndex{ parameters.materials[disk.materialIndex].emissionSpectrumDataIndex };
+							Le = parameters.spectra[emissionSpectrumDataIndex].sample(wavelengths) * lightPowerScale;
+						}
+						break;
+					case LightType::SPHERE:
+						{
+							const SphereLightData& sphere{ parameters.lights.spheres[hitLightIndex] };
+							lightPDF = sampling::sphere::pdfUniformSolidAngle(rO, sphere.position, sphere.radius);
+							float lightPowerScale{ sphere.powerScale };
+							uint32_t emissionSpectrumDataIndex{ parameters.materials[sphere.materialIndex].emissionSpectrumDataIndex };
+							Le = parameters.spectra[emissionSpectrumDataIndex].sample(wavelengths) * lightPowerScale;
+						}
+						break;
+					case LightType::SKY:
+						{
+							if (parameters.envMap.enabled)
+							{
+								float phi{ cuda::std::atan2(rD.x, rD.z) };
+								float theta{ cuda::std::acos(rD.y) };
+								float4 skyMap{ tex2D<float4>(parameters.envMap.environmentTexture,
+										0.5f + phi / (2.0f * glm::pi<float>()), theta / glm::pi<float>()) };
+								glm::vec3 skyColor{ skyMap.x, skyMap.y, skyMap.z };
+								float surfacePDF{ 1.0f / (4.0f * glm::pi<float>()) };
+								lightPDF = surfacePDF * ((skyColor.x + skyColor.y + skyColor.z) / 3.0f)
+									* cuda::std::sin(theta) // Applying Cartesian to spherical Jacobian
+									/ parameters.envMap.integral;
+								Le = color::RGBtoSpectrum(skyColor, wavelengths, *parameters.spectralBasisR, *parameters.spectralBasisG, *parameters.spectralBasisB) * 0.01f;
+								stateFlags |= PathStateBitfield::FINISHED;
+							}
+							else
+							{
+								stateFlags |= PathStateBitfield::FINISHED;
+								noEmission = true;
+							}
+						}
+						break;
+					default:
+						break;
+				}
+
+				if (!noEmission)
+				{
+					lightPDF *= lightStructurePDF;
+
+					float emissionWeight{};
+					if (depth == 0 || static_cast<bool>(stateFlags & PathStateBitfield::PREVIOUS_HIT_SPECULAR))
+						emissionWeight = 1.0f;
+					else
+						emissionWeight = MIS::powerHeuristic(1, bxdfPDF, 1, lightPDF);
+
+					L += throughputWeight * Le * emissionWeight;
+				}
+			}
 
 			if (static_cast<bool>(stateFlags & PathStateBitfield::FINISHED))
 				goto finishPath;
 
-			glm::vec3 hNG{ utility::octohedral::decodeU32(encHitGNormal) }; //Hit normal geometry
-			DirectLightSampleData directLightData{ sampledLightEval(parameters, wavelengths,
-						hP, hNG,
-						QRNG::Sobol::sample3D(qrngState, QRNG::DimensionOffset::LIGHT)) };
+			glm::vec3 hitNormalGeo{ utility::octohedral::decodeU32(encHitGNormal) }; //Hit normal geometry
 
 			bool skipHit{ false };
-
-			// Launch BxDF evaluation
-			LocalTransform localTransform;
+			glm::vec3 hitPosInterpSurface{ hitPos }; //Hit position interpolated surface
+			LocalTransform localTransform{};
 			microsurface::Surface surface{};
 			if (static_cast<bool>(stateFlags & PathStateBitfield::TRIANGULAR_GEOMETRY))
 			{
@@ -1255,17 +1375,383 @@ extern "C" __global__ void __raygen__main()
 				glm::vec3 normal;
 				glm::vec3 tangent;
 				bool flipTangent{ false };
-				resolveAttributes(*material, stateFlags, barycentrics, primitiveIndex, hNG, normalTransform,
-						texC1, texC2, normal, tangent, flipTangent);
-				resolveTextures(*material, stateFlags, rD, texC1, texC2, normal, tangent, flipTangent, localTransform, surface, skipHit);
+
+				// Unpack vertex attributes
+				{
+					float baryWeights[3]{ 1.0f - barycentrics.x - barycentrics.y, barycentrics.x, barycentrics.y };
+					uint32_t indices[3];
+					switch (material->indexType)
+					{
+						case IndexType::UINT_16:
+							{
+								uint16_t* idata{ reinterpret_cast<uint16_t*>(material->indices) + primitiveIndex * 3 };
+								indices[0] = idata[0];
+								indices[1] = idata[1];
+								indices[2] = idata[2];
+							}
+							break;
+						case IndexType::UINT_32:
+							{
+								uint32_t* idata{ reinterpret_cast<uint32_t*>(material->indices) + primitiveIndex * 3 };
+								indices[0] = idata[0];
+								indices[1] = idata[1];
+								indices[2] = idata[2];
+							}
+							break;
+						default:
+							break;
+					}
+					uint8_t* attribBuffer{ material->attributeData };
+					uint32_t attributesStride{ material->attributeStride };
+
+					uint8_t* attr;
+
+					// attr = material.attributeData + material.colorOffset;
+					// if (static_cast<bool>(material.attributes & MaterialData::AttributeTypeBitfield::COLOR))
+					// 	;
+					if (static_cast<bool>(material->attributes & (MaterialData::AttributeTypeBitfield::NORMAL | MaterialData::AttributeTypeBitfield::FRAME)))
+					{
+						glm::vec3 shadingNormal{};
+						glm::vec3 shadingTangent{};
+						glm::vec3 normals[3]{};
+						if (static_cast<bool>(material->attributes & MaterialData::AttributeTypeBitfield::FRAME))
+						{
+							attr = attribBuffer + material->frameOffset;
+
+							glm::quat frames[3]{
+								*reinterpret_cast<glm::quat*>(attr + attributesStride * indices[0]),
+								*reinterpret_cast<glm::quat*>(attr + attributesStride * indices[1]),
+								*reinterpret_cast<glm::quat*>(attr + attributesStride * indices[2]), };
+							flipTangent = cuda::std::signbit(frames[0].w);
+							glm::mat3 frameMats[3]{
+								glm::mat3_cast(frames[0]),
+								glm::mat3_cast(frames[1]),
+								glm::mat3_cast(frames[2]), };
+							normals[0] = frameMats[0][1];
+							normals[1] = frameMats[1][1];
+							normals[2] = frameMats[2][1];
+							glm::vec3 tangents[3]{ frameMats[0][0], frameMats[1][0], frameMats[2][0] };
+							shadingNormal =
+								baryWeights[0] * normals[0]
+								+
+								baryWeights[1] * normals[1]
+								+
+								baryWeights[2] * normals[2];
+							shadingTangent =
+								baryWeights[0] * tangents[0]
+								+
+								baryWeights[1] * tangents[1]
+								+
+								baryWeights[2] * tangents[2];
+						}
+						else
+						{
+							attr = attribBuffer + material->normalOffset;
+
+							normals[0] = utility::octohedral::decode(*reinterpret_cast<glm::vec2*>(attr + attributesStride * indices[0]));
+							normals[1] = utility::octohedral::decode(*reinterpret_cast<glm::vec2*>(attr + attributesStride * indices[1]));
+							normals[2] = utility::octohedral::decode(*reinterpret_cast<glm::vec2*>(attr + attributesStride * indices[2]));
+							shadingNormal = glm::vec3{
+								baryWeights[0] * normals[0]
+									+
+									baryWeights[1] * normals[1]
+									+
+									baryWeights[2] * normals[2] };
+							float sign{ cuda::std::copysignf(1.0f, shadingNormal.z) };
+							float a{ -1.0f / (sign + shadingNormal.z) };
+							float b{ shadingNormal.x * shadingNormal.y * a };
+							shadingTangent = glm::vec3(1.0f + sign * (shadingNormal.x * shadingNormal.x) * a, sign * b, -sign * shadingNormal.x);
+						}
+
+						// Offset hit position according to shading normals https://jo.dreggn.org/home/2021_terminator.pdf
+						const glm::vec3& A{ vertPositions[0] };
+						const glm::vec3& B{ vertPositions[1] };
+						const glm::vec3& C{ vertPositions[2] };
+						const glm::vec3& P{ hitPos };
+						const glm::vec3 nA{ glm::normalize(normalTransform * normals[0]) };
+						const glm::vec3 nB{ glm::normalize(normalTransform * normals[1]) };
+						const glm::vec3 nC{ glm::normalize(normalTransform * normals[2]) };
+						const float u{ baryWeights[0] };
+						const float v{ baryWeights[1] };
+						const float w{ baryWeights[2] };
+						glm::vec3 tmpu = P - A, tmpv = P - B, tmpw = P - C;
+						float dotu = cuda::std::fmin(0.0f, glm::dot(tmpu, nA));
+						float dotv = cuda::std::fmin(0.0f, glm::dot(tmpv, nB));
+						float dotw = cuda::std::fmin(0.0f, glm::dot(tmpw, nC));
+						tmpu -= dotu * nA;
+						tmpv -= dotv * nB;
+						tmpw -= dotw * nC;
+						glm::vec3 Pp = P + u * tmpu + v * tmpv + w * tmpw;
+						hitPosInterpSurface = Pp;
+
+						normal = glm::normalize(normalTransform * shadingNormal);
+						glm::mat3 vectorTransform{ glm::inverse(glm::transpose(normalTransform)) };
+						tangent = glm::normalize(vectorTransform * shadingTangent);
+					}
+					else
+					{
+						normal = hitNormalGeo;
+						float sign{ cuda::std::copysignf(1.0f, hitNormalGeo.z) };
+						float a{ -1.0f / (sign + hitNormalGeo.z) };
+						float b{ hitNormalGeo.x * hitNormalGeo.y * a };
+						tangent = glm::vec3(1.0f + sign * (hitNormalGeo.x * hitNormalGeo.x) * a, sign * b, -sign * hitNormalGeo.x);
+					}
+					if (static_cast<bool>(material->attributes & MaterialData::AttributeTypeBitfield::TEX_COORD_1))
+					{
+						attr = attribBuffer + material->texCoord1Offset;
+						texC1 =
+							baryWeights[0] * (*reinterpret_cast<glm::vec2*>(attr + indices[0] * attributesStride)) +
+							baryWeights[1] * (*reinterpret_cast<glm::vec2*>(attr + indices[1] * attributesStride)) +
+							baryWeights[2] * (*reinterpret_cast<glm::vec2*>(attr + indices[2] * attributesStride));
+					}
+					if (static_cast<bool>(material->attributes & MaterialData::AttributeTypeBitfield::TEX_COORD_2))
+					{
+						attr = attribBuffer + material->texCoord2Offset;
+						texC2 =
+							baryWeights[0] * (*reinterpret_cast<glm::vec2*>(attr + indices[0] * attributesStride)) +
+							baryWeights[1] * (*reinterpret_cast<glm::vec2*>(attr + indices[1] * attributesStride)) +
+							baryWeights[2] * (*reinterpret_cast<glm::vec2*>(attr + indices[2] * attributesStride));
+					}
+				}
+				// Unpack textures
+				{
+					glm::vec3 bitangent{ glm::cross(tangent, normal) * (flipTangent ? -1.0f : 1.0f) };
+					glm::mat3 frame{ bitangent, tangent, normal };
+					glm::vec3 n{};
+					if (static_cast<bool>(material->textures & MaterialData::TextureTypeBitfield::NORMAL))
+					{
+						float2 uv{ material->nmTexCoordSetIndex ? float2{texC2.x, texC2.y} : float2{texC2.x, texC2.y} };
+						float4 nm{ tex2D<float4>(material->normalTexture, uv.x, uv.y) };
+						n = glm::normalize(glm::vec3{nm.y * 2.0f - 1.0f, nm.x * 2.0f - 1.0f, nm.z * 2.0f - 1.0f});
+					}
+					else
+						n = glm::vec3{0.0f, 0.0f, 1.0f};
+					n = frame * n;
+
+					// TODO: Normal correction for cases when:
+						// dot(Ns, Ri) > 0.0f when dot(Ng, Ri) < 0.0f
+						// dot(Ns, Ri) < 0.0f when dot(Ng, Ri) > 0.0f
+
+					glm::vec3 shadingBitangent{ glm::normalize(glm::cross(tangent, n)) };
+					glm::vec3 shadingTangent{ glm::normalize(glm::cross(n, shadingBitangent)) };
+					shadingBitangent *= (flipTangent ? -1.0f : 1.0f);
+					frame = glm::mat3{shadingBitangent, shadingTangent, n};
+					localTransform = LocalTransform{frame};
+
+					bool bcTexture{ static_cast<bool>(material->textures & MaterialData::TextureTypeBitfield::BASE_COLOR) };
+					bool bcFactor{ static_cast<bool>(material->factors & MaterialData::FactorTypeBitfield::BASE_COLOR) };
+					if (bcTexture)
+					{
+						float2 uv{ material->nmTexCoordSetIndex ? float2{texC2.x, texC2.y} : float2{texC1.x, texC1.y} };
+						float4 bcTexData{ tex2D<float4>(material->baseColorTexture, uv.x, uv.y) };
+						surface.base.color = glm::vec3{bcTexData.x, bcTexData.y, bcTexData.z};
+						if (bcFactor)
+							surface.base.color *= glm::vec3{material->baseColorFactor[0], material->baseColorFactor[1], material->baseColorFactor[2]};
+						bool cutoff{ static_cast<bool>(material->factors & MaterialData::FactorTypeBitfield::CUTOFF) };
+						if (bcTexData.w < material->alphaCutoff && cutoff)
+							skipHit = true;
+					}
+					else if (bcFactor)
+						surface.base.color = glm::vec3{material->baseColorFactor[0], material->baseColorFactor[1], material->baseColorFactor[2]};
+
+					bool mrTexture{ static_cast<bool>(material->textures & MaterialData::TextureTypeBitfield::MET_ROUGH) };
+					bool metFactor{ static_cast<bool>(material->factors & MaterialData::FactorTypeBitfield::METALNESS) };
+					bool roughFactor{ static_cast<bool>(material->factors & MaterialData::FactorTypeBitfield::ROUGHNESS) };
+					if (mrTexture)
+					{
+						float2 uv{ material->mrTexCoordSetIndex ? float2{texC2.x, texC2.y} : float2{texC1.x, texC1.y} };
+						float4 mrTexData{ tex2D<float4>(material->pbrMetalRoughnessTexture, uv.x, uv.y) };
+						surface.base.metalness = mrTexData.z * (metFactor ? material->metalnessFactor : 1.0f);
+						surface.specular.roughness = mrTexData.y * (roughFactor ? material->roughnessFactor : 1.0f);
+					}
+					else
+					{
+						surface.base.metalness = metFactor ? material->metalnessFactor : surface.base.metalness;
+						surface.specular.roughness = roughFactor ? material->roughnessFactor : surface.specular.roughness;
+					}
+
+					bool trTexture{ static_cast<bool>(material->textures & MaterialData::TextureTypeBitfield::TRANSMISSION) };
+					bool trFactor{ static_cast<bool>(material->factors & MaterialData::FactorTypeBitfield::TRANSMISSION) };
+					if (trTexture)
+					{
+						float2 uv{ material->trTexCoordSetIndex ? float2{texC2.x, texC2.y} : float2{texC1.x, texC1.y} };
+						float trTexData{ tex2D<float>(material->transmissionTexture, uv.x, uv.y) };
+						surface.transmission.weight = trTexData;
+					}
+					else
+					{
+						surface.transmission.weight = trFactor ? material->transmissionFactor : surface.transmission.weight;
+					}
+					surface.specular.ior = material->ior;
+				}
 			}
 			else
-				localTransform = LocalTransform{hNG};
+			{
+				localTransform = LocalTransform{hitNormalGeo};
+			}
 
-			hNG = cuda::std::copysign(1.0f, -glm::dot(hNG, rD)) * hNG; // Turn into hit relative normal
+			bool surfaceCanTransmit{ surface.transmission.weight != 0.0f };
+			glm::vec3 hitNormalShad{ localTransform.getNormal() };
+			bool surfaceIsHitFromInside{ -glm::dot(hitNormalGeo, rD) < 0.0f };
 
 			if (!skipHit)
 			{
+				// Next event estimation data
+				DirectLightSampleData directLightData{};
+				if (parameters.lights.lightCount == 0.0f && !parameters.envMap.enabled)
+				{
+					directLightData.occluded = true;
+				}
+				else
+				{
+					glm::vec3 rand{ QRNG::Sobol::sample3D(qrngState, QRNG::DimensionOffset::LIGHT) };
+
+					// Sample light structure
+					LightType type{};
+					uint16_t index{};
+					float lightStructurePDF{ 1.0f / (parameters.lights.lightCount + (parameters.envMap.enabled ? 1.0f : 0.0f)) };
+					uint16_t sampledLightIndex{ static_cast<uint16_t>((parameters.lights.lightCount + (parameters.envMap.enabled ? 1.0f : 0.0f) - 0.0001f) * rand.z) };
+					if (sampledLightIndex != static_cast<uint16_t>(parameters.lights.lightCount + 0.001f))
+					{
+						uint32_t lightC{ 0 };
+						for (int i{ 0 }; i < KSampleableLightCount; ++i)
+						{
+							lightC += parameters.lights.orderedCount[i];
+							if (sampledLightIndex < lightC)
+							{
+								type = KOrderedTypes[i];
+								index = sampledLightIndex - (lightC - parameters.lights.orderedCount[i]);
+								break;
+							}
+						}
+					}
+					else
+					{
+						type = LightType::SKY;
+					}
+
+					// Take the light sample
+					glm::vec3 lightRayOrigin{};
+					float dToL{};
+					float lightPDF{};
+					switch (type)
+					{
+						case LightType::DISK:
+							{
+								const DiskLightData& disk{ parameters.lights.disks[index] };
+								directLightData.spectrumSample = parameters.spectra[parameters.materials[disk.materialIndex].emissionSpectrumDataIndex].sample(wavelengths) * disk.powerScale;
+								glm::mat3 matframe{ glm::mat3_cast(disk.frame) };
+								glm::vec3 lSmplPos{ disk.position + sampling::disk::sampleUniform3D(glm::vec2{rand.x, rand.y}, matframe) * disk.radius };
+								//
+								const glm::vec3& gn{ hitNormalGeo };
+								const glm::vec3& sn{ hitNormalShad };
+								const glm::vec3 sr{ lSmplPos - hitPos };
+								const bool inSample{ glm::dot(sn, sr) < 0.0f };
+								if ((inSample && !surfaceCanTransmit) || (inSample && (glm::dot(gn, sr) > 0.0f)))
+									directLightData.occluded = true;
+								lightRayOrigin = utility::offsetPoint(
+										inSample ? hitPos : hitPosInterpSurface,
+										inSample ? -gn : gn);
+								//
+								glm::vec3 rToLight{ lSmplPos - lightRayOrigin };
+								float sqrdToLight{ rToLight.x * rToLight.x + rToLight.y * rToLight.y + rToLight.z * rToLight.z };
+								dToL = cuda::std::sqrtf(sqrdToLight);
+								directLightData.lightDir = rToLight / dToL;
+								float lCos{ -glm::dot(matframe[2], directLightData.lightDir) };
+
+								directLightData.occluded = lCos <= 0.0f;
+
+								float surfacePDF{ 1.0f / (glm::pi<float>() * disk.radius * disk.radius) };
+								lightPDF = surfacePDF * sqrdToLight / lCos;
+							}
+							break;
+						case LightType::SPHERE:
+							{
+								const SphereLightData& sphere{ parameters.lights.spheres[index] };
+								directLightData.spectrumSample = parameters.spectra[parameters.materials[sphere.materialIndex].emissionSpectrumDataIndex].sample(wavelengths) * sphere.powerScale;
+								glm::vec3 lSmplPos{ sampling::sphere::sampleUniformWorldSolidAngle(glm::vec2{rand.x, rand.y}, hitPos, sphere.position, sphere.radius, lightPDF)};
+								//
+								const glm::vec3& gn{ hitNormalGeo };
+								const glm::vec3& sn{ hitNormalShad };
+								const glm::vec3 sr{ lSmplPos - hitPos };
+								const bool inSample{ glm::dot(sn, sr) < 0.0f };
+								if ((inSample && !surfaceCanTransmit) || (inSample && (glm::dot(gn, sr) > 0.0f)))
+									directLightData.occluded = true;
+								lightRayOrigin = utility::offsetPoint(
+										inSample ? hitPos : hitPosInterpSurface,
+										inSample ? -gn : gn);
+								//
+								glm::vec3 rToLight{ lSmplPos - lightRayOrigin };
+								dToL = glm::length(rToLight);
+								directLightData.lightDir = rToLight / dToL;
+
+								if (lightPDF == 0.0f || dToL <= 0.0f)
+									directLightData.occluded = true;
+							}
+							break;
+						case LightType::SKY:
+							{
+								// Importance sampling environment map with interpolated inverted CDF indices
+								glm::vec2 fullC{
+									cuda::std::fmin(rand.x * (parameters.envMap.width - 1.0f), parameters.envMap.width - 1.0001f),
+									cuda::std::fmin(rand.y * (parameters.envMap.height - 1.0f), parameters.envMap.height - 1.0001f) };
+								glm::vec2 floorC{ glm::floor(fullC) };
+								glm::vec2 fractC{ fullC - floorC };
+								glm::uvec2 floorCI{ floorC };
+
+								glm::vec2 cdfIndicesM{
+									parameters.envMap.marginalCDFIndices[floorCI.y],
+									parameters.envMap.marginalCDFIndices[floorCI.y + 1] };
+								glm::vec2 cdfIndicesC{
+									parameters.envMap.conditionalCDFIndices[static_cast<uint32_t>(cdfIndicesM.x * parameters.envMap.width) + floorCI.x],
+									parameters.envMap.conditionalCDFIndices[static_cast<uint32_t>(cdfIndicesM.x * parameters.envMap.width) + floorCI.x + 1] };
+
+								glm::vec2 impSample{
+									glm::mix(cdfIndicesC.x, cdfIndicesC.y, fractC.x) * (1.0f / parameters.envMap.width),
+										glm::mix(cdfIndicesM.x, cdfIndicesM.y, fractC.y) * (1.0f / parameters.envMap.height) };
+
+								float phi{ 2.0f * glm::pi<float>() * impSample.x };
+								float theta{ glm::pi<float>() * impSample.y };
+								directLightData.lightDir = glm::vec3{
+									-cuda::std::sin(theta) * cuda::std::sin(phi),
+										cuda::std::cos(theta),
+										-cuda::std::sin(theta) * cuda::std::cos(phi) };
+								float4 rgbSample{ tex2D<float4>(parameters.envMap.environmentTexture, impSample.x, impSample.y) };
+								directLightData.spectrumSample = color::RGBtoSpectrum(glm::vec3{rgbSample.x, rgbSample.y, rgbSample.z},
+										wavelengths, *parameters.spectralBasisR, *parameters.spectralBasisG, *parameters.spectralBasisB) * 0.01f;
+								float surfacePDF{ 1.0f / (4.0f * glm::pi<float>()) };
+								lightPDF = surfacePDF * ((rgbSample.x + rgbSample.y + rgbSample.z) / 3.0f)
+									* cuda::std::sin(theta) // Applying Cartesian to spherical Jacobian
+									/ parameters.envMap.integral;
+								dToL = FLT_MAX;
+								lightRayOrigin = hitPosInterpSurface;
+							}
+							break;
+						default:
+							break;
+					}
+					directLightData.lightSamplePDF = lightPDF * lightStructurePDF;
+
+					const glm::vec3& rO{ lightRayOrigin };
+					const glm::vec3& lD{ directLightData.lightDir };
+					if (!directLightData.occluded)
+					{
+						optixTraverse(parameters.traversable,
+								{ rO.x, rO.y, rO.z },
+								{ lD.x, lD.y, lD.z },
+								0.0f,
+								dToL - 0.1f,
+								0.0f,
+								0xFF,
+								OPTIX_RAY_FLAG_TERMINATE_ON_FIRST_HIT,
+								0,
+								0,
+								0);
+						directLightData.occluded = optixHitObjectIsHit();
+					}
+				}
+
+				// BxDF evaluation
 				optixDirectCall<void, 
 					const MaterialData&, const DirectLightSampleData&, const QRNG::State&,
 					const LocalTransform&, const microsurface::Surface&,
@@ -1278,16 +1764,7 @@ extern "C" __global__ void __raygen__main()
 						 bxdfPDF, rD, stateFlags, refractionScale);
 			}
 
-			// TODO: Debug color output
-			//
-			// glm::vec3 c{};
-			// if ((static_cast<uint32_t>(texC1.x * 50.0f) % 2) == ((static_cast<uint32_t>(texC1.y * 50.0f) % 2) == 0 ? 1 : 0))
-			// 	c = glm::vec3{0.8f};
-			// else
-			// 	c = glm::vec3{0.5f};
-			// L = color::RGBtoSpectrum(c, wavelengths, *parameters.spectralBasisR, *parameters.spectralBasisG, *parameters.spectralBasisB);
-			//
-
+			// Russian roulette
 			if (float tMax{ throughputWeight.max() * refractionScale }; tMax < 1.0f && depth > 0)
 			{
 				float q{ cuda::std::fmax(0.0f, 1.0f - tMax) };
@@ -1297,12 +1774,16 @@ extern "C" __global__ void __raygen__main()
 				throughputWeight /= 1.0f - q;
 			}
 
-			hNG = static_cast<bool>(stateFlags & PathStateBitfield::RAY_REFRACTED) || skipHit ? -hNG : hNG;
-			float rCorrection{ glm::dot(hNG, rD) };
-			if (rCorrection < 0.0f)
-				rD = glm::normalize(rD + (hNG * (-rCorrection + 0.01f)));
-			rO = utility::offsetPoint(hP, hNG);
+			// TODO: Direction correction when:
+				// dot(Ng, Ro) > 0.0f when !surfaceIsHitFromInside && RAY_REFRACTED
+				// dot(Ng, Ro) > 0.0f when surfaceIsHitFromInside && !RAY_REFRACTED
+			// Offset new ray origin
+			bool in{ static_cast<bool>(stateFlags & PathStateBitfield::RAY_REFRACTED) || skipHit };
+			const glm::vec3& chosenOrigin{ in == surfaceIsHitFromInside ? hitPosInterpSurface : hitPos };
+			const glm::vec3& chosenOffset{ in == surfaceIsHitFromInside ? hitNormalGeo : -hitNormalGeo };
+			rO = utility::offsetPoint(chosenOrigin, chosenOffset);
 
+			// Check if path depth threshold was passed
 			continuePath = ++depth < parameters.pathState.maxPathDepth;
 			if (!static_cast<bool>(stateFlags & PathStateBitfield::CURRENT_HIT_SPECULAR) && !skipHit)
 			{
@@ -1312,6 +1793,7 @@ extern "C" __global__ void __raygen__main()
 					continuePath = depth < parameters.pathState.maxReflectedPathDepth;
 			}
 
+			// Preparing to next trace or terminating
 			terminated = static_cast<bool>(stateFlags & PathStateBitfield::PATH_TERMINATED);
 			updateStateFlags(stateFlags);
 			qrngState.advanceBounce();
