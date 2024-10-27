@@ -240,10 +240,10 @@ struct SceneData
 	{
 	private:
 		uint32_t m_id{};
-		glm::vec3 m_pos{ -278.0f, 514.0f, 279.5f };
-		float m_radius{ 80.0f };
+		glm::vec3 m_pos{ 0.0f };
+		float m_radius{ 1.0f };
 		// float m_area{ glm::pi<float>() * m_radius * m_radius };
-		glm::vec3 m_normal{ glm::normalize(glm::vec3{0.0f, -1.0f, 0.0f}) };
+		glm::vec3 m_normal{ glm::normalize(glm::vec3{0.0f, 0.0f, -1.0f}) };
 		glm::quat m_frame{ genDiskFrame() };
 		float m_scale{ 1.0f };
 
@@ -319,7 +319,7 @@ struct SceneData
 	private:
 		glm::quat genDiskFrame() const
 		{
-			glm::vec3 tang{ glm::normalize(glm::cross(glm::abs(glm::dot(glm::vec3{0.0f, 1.0f, 0.0f}, m_normal)) < 0.9999f ? glm::vec3{0.0f, 1.0f, 0.0f} : glm::vec3{1.0f, 0.0f, 0.0f}, m_normal)) };
+			glm::vec3 tang{ glm::normalize(glm::cross(glm::abs(glm::dot(glm::vec3{0.0f, 0.0f, 1.0f}, m_normal)) < 0.9999f ? glm::vec3{0.0f, 0.0f, 1.0f} : glm::vec3{1.0f, 0.0f, 0.0f}, m_normal)) };
 			glm::vec3 bitang{ glm::cross(m_normal, tang) };
 			return glm::quat_cast(glm::mat3(tang, bitang, m_normal));
 		}
@@ -329,17 +329,17 @@ struct SceneData
 	{
 	private:
 		uint32_t m_id{};
-		glm::vec3 m_pos{ -278.0f, 514.0f, 279.5f };
-		float m_radius{ 50.0f };
+		glm::vec3 m_pos{ 0.0f };
+		float m_radius{ 1.0f };
 		// float m_area{ 4.0f * glm::pi<float>() * m_radius * m_radius };
-		glm::vec3 m_normal{ glm::normalize(glm::vec3{0.0f, 1.0f, 0.0f}) };
+		glm::vec3 m_normal{ glm::normalize(glm::vec3{0.0f, 0.0f, 1.0f}) };
 		glm::quat m_frame{ genDiskFrame() };
 		float m_scale{ 1.0f };
 
 		MaterialDescriptor m_matDesc{};
 	public:
 		SphereLight(const glm::vec3& position, float radius, float powerScale, const MaterialDescriptor& matDesc)
-			: m_pos{ position }, m_radius{ radius }, m_normal{ 0.0f, 1.0f, 0.0f }, m_scale{ powerScale }, m_matDesc{ matDesc }, m_id{ ++m_idGen }
+			: m_pos{ position }, m_radius{ radius }, m_normal{ 0.0f, 0.0f, 1.0f }, m_scale{ powerScale }, m_matDesc{ matDesc }, m_id{ ++m_idGen }
 		{}
 		SphereLight& operator=(const SphereLight& light)
 		{
@@ -405,7 +405,7 @@ struct SceneData
 	private:
 		glm::quat genDiskFrame() const
 		{
-			glm::vec3 tang{ glm::normalize(glm::cross(glm::abs(glm::dot(glm::vec3{0.0f, 1.0f, 0.0f}, m_normal)) < 0.9999f ? glm::vec3{0.0f, 1.0f, 0.0f} : glm::vec3{1.0f, 0.0f, 0.0f}, m_normal)) };
+			glm::vec3 tang{ glm::normalize(glm::cross(glm::abs(glm::dot(glm::vec3{0.0f, 0.0f, 1.0f}, m_normal)) < 0.9999f ? glm::vec3{0.0f, 0.0f, 1.0f} : glm::vec3{1.0f, 0.0f, 0.0f}, m_normal)) };
 			glm::vec3 bitang{ glm::cross(m_normal, tang) };
 			return glm::quat_cast(glm::mat3(tang, bitang, m_normal));
 		}

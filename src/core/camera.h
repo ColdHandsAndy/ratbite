@@ -32,9 +32,9 @@ private:
 public:
 	Camera(const glm::dvec3& position, const glm::dvec3& viewDirection, const glm::dvec3& upDirection) : m_pos{ position }, m_upWorld{ glm::normalize(upDirection) }
 	{
-		m_w = glm::normalize(viewDirection);
-		m_u = glm::normalize(glm::cross(glm::normalize(upDirection), m_w));
-		m_v = glm::cross(m_w, m_u);
+		m_v = glm::normalize(viewDirection);
+		m_u = glm::normalize(glm::cross(m_v, glm::normalize(upDirection)));
+		m_w = glm::cross(m_u, m_v);
 	}
 	Camera() = delete;
 	~Camera() = default;
@@ -54,10 +54,10 @@ public:
 		switch (dir)
 		{
 			case Direction::FORWARD:
-				m_step.z += 1;
+				m_step.y += 1;
 				break;
 			case Direction::BACKWARD:
-				m_step.z -= 1;
+				m_step.y -= 1;
 				break;
 			case Direction::RIGHT:
 				m_step.x += 1;
@@ -66,10 +66,10 @@ public:
 				m_step.x -= 1;
 				break;
 			case Direction::UP:
-				m_step.y += 1;
+				m_step.z += 1;
 				break;
 			case Direction::DOWN:
-				m_step.y -= 1;
+				m_step.z -= 1;
 				break;
 			default:
 				R_ASSERT_LOG(true, "Unknown direction passed.");
@@ -82,23 +82,23 @@ public:
 			return false;
 		glm::dvec3 dirStep{ glm::normalize(glm::dvec3{m_step}) * m_speed * delta };
 		m_pos += m_u * dirStep.x;
-		m_pos += m_upWorld * dirStep.y;
-		m_pos += m_w * dirStep.z;
-		m_step = glm::ivec3{};
+		m_pos += m_upWorld * dirStep.z;
+		m_pos += m_v * dirStep.y;
+		m_step = glm::ivec3{ 0 };
 		return true;
 	}
 	void rotate(double xp, double yp)
 	{
-		m_w = glm::dvec3{glm::rotate(xp * m_rotationSpeed, m_upWorld) * glm::dvec4{m_w, 1.0}};
-		m_u = glm::normalize(glm::cross(m_upWorld, m_w));
-		glm::dvec3 newW{ glm::dvec3{glm::rotate(yp * m_rotationSpeed, m_u) * glm::dvec4{m_w, 1.0}} };
-		glm::dvec3 newU{ glm::normalize(glm::cross(m_upWorld, newW)) };
+		m_v = glm::dvec3{glm::rotate(-xp * m_rotationSpeed, m_upWorld) * glm::dvec4{m_v, 1.0}};
+		m_u = glm::normalize(glm::cross(m_v, m_upWorld));
+		glm::dvec3 newV{ glm::dvec3{glm::rotate(-yp * m_rotationSpeed, m_u) * glm::dvec4{m_v, 1.0}} };
+		glm::dvec3 newU{ glm::normalize(glm::cross(newV, m_upWorld)) };
 		if (glm::dot(newU, m_u) > 0.0)
 		{
-			m_w = newW;
+			m_v = newV;
 			m_u = newU;
 		}
-		m_v = glm::cross(m_w, m_u);
+		m_w = glm::cross(m_u, m_v);
 	}
 	void setFieldOfView(double radians) { m_fieldOfViewRad = radians; }
 	void setMovingSpeed(double speed) { m_speed = speed; }

@@ -580,7 +580,7 @@ void UI::recordSceneLightsSettings(CommandBuffer& commands, SceneData& scene, co
 	ImGui::SameLine();
 	if (ImGui::Button("Add disk light"))
 	{
-		scene.diskLights.emplace_back(glm::vec3{0.0f}, 1.0f, glm::vec3{0.0f, -1.0f, 0.0f}, 0.1f,
+		scene.diskLights.emplace_back(glm::vec3{0.0f}, 1.0f, glm::vec3{0.0f, 0.0f, -1.0f}, 0.1f,
 				SceneData::MaterialDescriptor{.bxdf = SceneData::BxDF::PURE_CONDUCTOR,
 				.baseIOR = SpectralData::SpectralDataType::C_METAL_AG_IOR,
 				.baseAC = SpectralData::SpectralDataType::C_METAL_AG_AC,
@@ -633,7 +633,7 @@ void UI::recordSceneLightsSettings(CommandBuffer& commands, SceneData& scene, co
 			SceneData::SphereLight& l{ scene.sphereLights[selectedIndex] };
 
 			float v[3]{ l.getPosition().x, l.getPosition().y, l.getPosition().z };
-			changed = ImGui::DragFloat3("Position", v, 0.5f);
+			changed = ImGui::DragFloat3("Position", v, 0.05f);
 			if (changed)
 			{
 				l.setPosition(glm::vec3{v[0], v[1], v[2]});
@@ -678,7 +678,7 @@ void UI::recordSceneLightsSettings(CommandBuffer& commands, SceneData& scene, co
 			SceneData::DiskLight& l{ scene.diskLights[selectedIndex] };
 
 			float v[3]{ l.getPosition().x, l.getPosition().y, l.getPosition().z };
-			changed = ImGui::DragFloat3("Position", v, 0.5f);
+			changed = ImGui::DragFloat3("Position", v, 0.05f);
 			if (changed)
 			{
 				l.setPosition(glm::vec3{v[0], v[1], v[2]});
@@ -710,15 +710,15 @@ void UI::recordSceneLightsSettings(CommandBuffer& commands, SceneData& scene, co
 			static float theta{};
 			static float phi{};
 			const glm::vec3& norm{ l.getNormal() };
-			float xzL{ glm::length(glm::vec2(norm.x, norm.z)) };
-			if (xzL > 0.0001f)
-				phi = (norm.z > 0.0f ? 1.0f : -1.0f) * std::acos(norm.x / xzL);
-			theta = std::acos(norm.y);
+			float xyL{ glm::length(glm::vec2(norm.x, norm.y)) };
+			if (xyL > 0.0001f)
+				phi = (norm.y > 0.0f ? 1.0f : -1.0f) * std::acos(norm.x / xyL);
+			theta = std::acos(norm.z);
 			changed = ImGui::DragFloat("Phi", &phi, 2.0f * glm::pi<float>() / 360.0f, glm::pi<float>(), glm::pi<float>());
 			changed = ImGui::DragFloat("Theta", &theta, 2.0f * glm::pi<float>() / 360.0f, 0.0f, glm::pi<float>()) || changed;
 			if (changed)
 			{
-				l.setNormal(glm::normalize(glm::vec3{std::sin(theta) * std::cos(phi), std::cos(theta), std::sin(theta) * std::sin(phi)}));
+				l.setNormal(glm::normalize(glm::vec3{std::sin(theta) * std::cos(phi), std::sin(theta) * std::sin(phi), std::cos(theta)}));
 				static CommandPayloads::Light lightPayload{};
 				lightPayload = { .type = LightType::DISK, .index = static_cast<uint32_t>(selectedIndex) };
 				commands.pushCommand(Command{ .type = CommandType::CHANGE_LIGHT_ORIENTATION, .payload = &lightPayload });

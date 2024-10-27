@@ -192,9 +192,9 @@ void RenderingInterface::fillModelMaterials(RenderingInterface::ModelResource& m
 				const float& y{ vec.y };
 				const float& z{ vec.z };
 
-				glm::vec2 p{ glm::vec2{x, z} * (1.0f / (std::fabs(x) + std::fabs(y) + std::fabs(z))) };
+				glm::vec2 p{ glm::vec2{x, y} * (1.0f / (std::fabs(x) + std::fabs(y) + std::fabs(z))) };
 				glm::vec2 res{
-					y <= 0.0f
+					z <= 0.0f
 						?
 						(glm::vec2{1.0f} - glm::vec2{std::fabs(p.y), std::fabs(p.x)}) * glm::vec2{(p.x >= 0.0f) ? +1.0f : -1.0f, (p.y >= 0.0f) ? +1.0f : -1.0f}
 					:
@@ -208,10 +208,11 @@ void RenderingInterface::fillModelMaterials(RenderingInterface::ModelResource& m
 					*reinterpret_cast<glm::vec2*>(attr + mat.normalOffset) = encodeNormal(submesh.normals[i]);
 				if (frameAttr)
 				{
-					glm::quat frame{ glm::quat_cast( glm::mat3{
+					glm::quat frame{ glm::quat_cast(glm::mat3{
 							submesh.tangents[i],
+							glm::cross(glm::vec3{submesh.normals[i]}, glm::vec3{submesh.tangents[i]}),
 							submesh.normals[i],
-							glm::cross(glm::vec3{submesh.tangents[i]}, glm::vec3{submesh.normals[i]})}) };
+							}) };
 					if (frame.w == 0.0f)
 					{
 						union

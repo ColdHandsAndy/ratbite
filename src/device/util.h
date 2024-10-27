@@ -109,9 +109,9 @@ namespace utility
 			const float& y{ vec.y };
 			const float& z{ vec.z };
 
-			glm::vec2 p{ glm::vec2{x, z} * (1.0f / (cuda::std::fabs(x) + cuda::std::fabs(y) + cuda::std::fabs(z))) };
+			glm::vec2 p{ glm::vec2{x, y} * (1.0f / (cuda::std::fabs(x) + cuda::std::fabs(y) + cuda::std::fabs(z))) };
 			glm::vec2 res{
-				y <= 0.0f
+				z <= 0.0f
 					?
 					(glm::vec2{1.0f} - glm::vec2{cuda::std::fabs(p.y), cuda::std::fabs(p.x)}) * glm::vec2{(p.x >= 0.0f) ? +1.0f : -1.0f, (p.y >= 0.0f) ? +1.0f : -1.0f}
 					:
@@ -125,14 +125,14 @@ namespace utility
 			const float& v{ encvec.y };
 
 			glm::vec3 vec;
-			vec.y = 1.0f - cuda::std::fabs(u) - cuda::std::fabs(v);
+			vec.z = 1.0f - cuda::std::fabs(u) - cuda::std::fabs(v);
 			vec.x = u;
-			vec.z = v;
+			vec.y = v;
 
-			float t{ cuda::std::fmaxf(0.0f, -vec.y) };
+			float t{ cuda::std::fmaxf(0.0f, -vec.z) };
 
 			vec.x += vec.x >= 0.0f ? -t : t;
-			vec.z += vec.z >= 0.0f ? -t : t;
+			vec.y += vec.y >= 0.0f ? -t : t;
 
 			return glm::normalize(vec);
 		}

@@ -59,7 +59,7 @@ int main(int argc, char** argv)
 	constexpr uint32_t windowHeight{ 720 };
 
 	Window window{ windowWidth, windowHeight };
-	Camera camera{ {0.0f, 0.0f, 5.0f}, {0.0f, 0.0f, -1.0f}, {0.0f, 1.0f, 0.0f} };
+	Camera camera{ {0.0f, 5.0f, 0.0f}, {0.0f, -1.0f, 0.0f}, {0.0f, 0.0f, 1.0f} };
 	SceneData scene{};
 	RenderContext rContext{};
 	RenderingInterface rInterface{ camera, rContext, scene };

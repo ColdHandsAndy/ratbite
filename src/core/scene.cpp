@@ -16,11 +16,17 @@ namespace
 	{
 		cgltf_float localMat[16]{};
 		cgltf_node_transform_local(node, localMat);
-		glm::mat4 world{ transform * glm::mat4{
-				glm::vec4{localMat[0], -localMat[1], -localMat[2], localMat[3]},
-				glm::vec4{-localMat[4], localMat[5], localMat[6], localMat[7]},
-				glm::vec4{-localMat[8], localMat[9], localMat[10], localMat[11]},
-				glm::vec4{-localMat[12], localMat[13], localMat[14], localMat[15]}} };
+		const cgltf_float* c0{ localMat + 0 };
+		const cgltf_float* c1{ localMat + 4 };
+		const cgltf_float* c2{ localMat + 8 };
+		const cgltf_float* c3{ localMat + 12 };
+		glm::mat4 coordinateCorrectedLocalTransform{
+			glm::vec4{ c0[0],-c0[2],-c0[1],-c0[3]},
+			glm::vec4{-c2[0], c2[2], c2[1], c2[3]},
+			glm::vec4{-c1[0], c1[2], c1[1], c1[3]},
+			glm::vec4{-c3[0], c3[2], c3[1], c3[3]},
+		};
+		glm::mat4 world{ transform * coordinateCorrectedLocalTransform };
 
 		if (node->mesh != nullptr)
 		{
@@ -300,6 +306,7 @@ namespace
 					R_ASSERT_LOG(stride == attribute.data->buffer_view->stride || attribute.data->buffer_view->stride == 0, "Buffer stride is not equal to accessor stride");
 					offset = attribute.data->buffer_view->offset + attribute.data->offset;
 
+					auto coordinateChange{ [](const glm::vec3& v)->glm::vec3 { return {-v.x, v.z, v.y}; } };
 					switch (attribute.type)
 					{
 						case cgltf_attribute_type_position:
@@ -308,7 +315,7 @@ namespace
 								{
 									uint8_t* bufferData{ reinterpret_cast<uint8_t*>(attribute.data->buffer_view->buffer->data) };
 									float* vec{ reinterpret_cast<float*>(bufferData + offset + i * stride) };
-									sceneSubmesh.vertices[i] = glm::vec4{-vec[0], vec[1], vec[2], 0.0f};
+									sceneSubmesh.vertices[i] = glm::vec4{coordinateChange({vec[0], vec[1], vec[2]}), 0.0f};
 								}
 							}
 							break;
@@ -319,7 +326,7 @@ namespace
 								{
 									uint8_t* bufferData{ reinterpret_cast<uint8_t*>(attribute.data->buffer_view->buffer->data) };
 									float* vec{ reinterpret_cast<float*>(bufferData + offset + i * stride) };
-									sceneSubmesh.normals[i] = glm::vec4{-vec[0], vec[1], vec[2], 0.0f};
+									sceneSubmesh.normals[i] = glm::vec4{coordinateChange({vec[0], vec[1], vec[2]}), 0.0f};
 								}
 							}
 							break;
@@ -330,7 +337,7 @@ namespace
 								{
 									uint8_t* bufferData{ reinterpret_cast<uint8_t*>(attribute.data->buffer_view->buffer->data) };
 									float* vec{ reinterpret_cast<float*>(bufferData + offset + i * stride) };
-									sceneSubmesh.tangents[i] = glm::vec4{-vec[0], vec[1], vec[2], vec[3]};
+									sceneSubmesh.tangents[i] = glm::vec4{coordinateChange({vec[0], vec[1], vec[2]}), vec[3]};
 								}
 							}
 							break;

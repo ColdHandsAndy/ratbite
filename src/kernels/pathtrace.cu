@@ -98,8 +98,8 @@ extern "C" __global__ void __closesthit__triangle()
 	float OFW[12]{};
 	optixGetWorldToObjectTransformMatrix(OFW);
 
-	float3 u{ verticesObj[2].x - verticesObj[0].x, verticesObj[2].y - verticesObj[0].y, verticesObj[2].z - verticesObj[0].z };
-	float3 v{ verticesObj[1].x - verticesObj[0].x, verticesObj[1].y - verticesObj[0].y, verticesObj[1].z - verticesObj[0].z };
+	float3 u{ verticesObj[1].x - verticesObj[0].x, verticesObj[1].y - verticesObj[0].y, verticesObj[1].z - verticesObj[0].z };
+	float3 v{ verticesObj[2].x - verticesObj[0].x, verticesObj[2].y - verticesObj[0].y, verticesObj[2].z - verticesObj[0].z };
 	float3 geometryNormal{u.y * v.z - u.z * v.y,
 						  u.z * v.x - u.x * v.z,
 						  u.x * v.y - u.y * v.x};
@@ -908,10 +908,10 @@ extern "C" __global__ void __raygen__main()
 						{
 							if (parameters.envMap.enabled)
 							{
-								float phi{ cuda::std::atan2(path.ray.d.x, path.ray.d.z) };
-								float theta{ cuda::std::acos(path.ray.d.y) };
+								float phi{ cuda::std::atan2(path.ray.d.y, path.ray.d.x) };
+								float theta{ cuda::std::acos(path.ray.d.z) };
 								float4 skyMap{ tex2D<float4>(parameters.envMap.environmentTexture,
-										0.5f + phi / (2.0f * glm::pi<float>()), theta / glm::pi<float>()) };
+										0.5f - phi / (2.0f * glm::pi<float>()), theta / glm::pi<float>()) };
 								glm::vec3 skyColor{ skyMap.x, skyMap.y, skyMap.z };
 								float surfacePDF{ 1.0f / (4.0f * glm::pi<float>()) };
 								lightPDF = surfacePDF * ((skyColor.x + skyColor.y + skyColor.z) / 3.0f)
@@ -1013,9 +1013,9 @@ extern "C" __global__ void __raygen__main()
 								glm::mat3_cast(frames[0]),
 								glm::mat3_cast(frames[1]),
 								glm::mat3_cast(frames[2]), };
-							normals[0] = frameMats[0][1];
-							normals[1] = frameMats[1][1];
-							normals[2] = frameMats[2][1];
+							normals[0] = frameMats[0][2];
+							normals[1] = frameMats[1][2];
+							normals[2] = frameMats[2][2];
 							glm::vec3 tangents[3]{ frameMats[0][0], frameMats[1][0], frameMats[2][0] };
 							shadingNormal =
 								baryWeights[0] * normals[0]
@@ -1039,10 +1039,10 @@ extern "C" __global__ void __raygen__main()
 							normals[2] = utility::octohedral::decode(*reinterpret_cast<glm::vec2*>(attr + attributesStride * indices[2]));
 							shadingNormal = glm::vec3{
 								baryWeights[0] * normals[0]
-									+
-									baryWeights[1] * normals[1]
-									+
-									baryWeights[2] * normals[2] };
+								+
+								baryWeights[1] * normals[1]
+								+
+								baryWeights[2] * normals[2] };
 							float sign{ cuda::std::copysignf(1.0f, shadingNormal.z) };
 							float a{ -1.0f / (sign + shadingNormal.z) };
 							float b{ shadingNormal.x * shadingNormal.y * a };
@@ -1103,14 +1103,14 @@ extern "C" __global__ void __raygen__main()
 				}
 				// Unpack textures
 				{
-					glm::vec3 bitangent{ glm::cross(tangent, normal) * (flipTangent ? -1.0f : 1.0f) };
-					glm::mat3 frame{ bitangent, tangent, normal };
+					glm::vec3 bitangent{ glm::cross(normal, tangent) * (flipTangent ? -1.0f : 1.0f) };
+					glm::mat3 frame{ tangent, bitangent, normal };
 					glm::vec3 n{};
 					if (static_cast<bool>(interaction.material->textures & MaterialData::TextureTypeBitfield::NORMAL))
 					{
 						float2 uv{ interaction.material->nmTexCoordSetIndex ? float2{texC2.x, texC2.y} : float2{texC1.x, texC1.y} };
 						float4 nm{ tex2D<float4>(interaction.material->normalTexture, uv.x, uv.y) };
-						n = glm::normalize(glm::vec3{nm.y * 2.0f - 1.0f, nm.x * 2.0f - 1.0f, nm.z * 2.0f - 1.0f});
+						n = glm::normalize(glm::vec3{nm.x * 2.0f - 1.0f, nm.y * 2.0f - 1.0f, nm.z * 2.0f - 1.0f});
 					}
 					else
 						n = glm::vec3{0.0f, 0.0f, 1.0f};
@@ -1125,10 +1125,10 @@ extern "C" __global__ void __raygen__main()
 					if (incFromOutside || incFromInside)
 						n = glm::normalize(n - (path.ray.d * (dotNsRi + (incFromOutside ? correctionBias : -correctionBias))));
 
-					glm::vec3 shadingBitangent{ glm::normalize(glm::cross(tangent, n)) };
-					glm::vec3 shadingTangent{ glm::normalize(glm::cross(n, shadingBitangent)) };
+					glm::vec3 shadingBitangent{ glm::normalize(glm::cross(n, tangent)) };
+					glm::vec3 shadingTangent{ glm::normalize(glm::cross(shadingBitangent, n)) };
 					shadingBitangent *= (flipTangent ? -1.0f : 1.0f);
-					frame = glm::mat3{shadingBitangent, shadingTangent, n};
+					frame = glm::mat3{shadingTangent, shadingBitangent, n};
 					localTransform = LocalTransform{frame};
 					interaction.primitive.triangle.shadingNormal = n;
 
@@ -1227,8 +1227,10 @@ extern "C" __global__ void __raygen__main()
 					glm::vec3 lightRayOrigin{};
 					float dToL{};
 					float lightPDF{};
-					bool triangularGeometry{ static_cast<bool>(path.stateFlags & PathStateBitfield::TRIANGULAR_GEOMETRY) };
-					bool surfaceCanTransmit{ surface.transmission.weight != 0.0f };
+					const bool triangularGeometry{ static_cast<bool>(path.stateFlags & PathStateBitfield::TRIANGULAR_GEOMETRY) };
+					const bool surfaceCanTransmit{ surface.transmission.weight != 0.0f };
+					const glm::vec3& gn{ interaction.geometryNormal };
+					const glm::vec3& sn{ triangularGeometry ? interaction.primitive.triangle.shadingNormal : gn };
 					switch (type)
 					{
 						case LightType::DISK:
@@ -1239,8 +1241,6 @@ extern "C" __global__ void __raygen__main()
 								glm::mat3 matframe{ glm::mat3_cast(disk.frame) };
 								glm::vec3 lSmplPos{ disk.position + sampling::disk::sampleUniform3D(glm::vec2{rand.x, rand.y}, matframe) * disk.radius };
 
-								const glm::vec3& gn{ interaction.geometryNormal };
-								const glm::vec3& sn{ triangularGeometry ? interaction.primitive.triangle.shadingNormal : gn };
 								const glm::vec3 sr{ lSmplPos - interaction.hitPos };
 								const bool inSample{ glm::dot(sn, sr) < 0.0f };
 								if ((inSample && !surfaceCanTransmit) || (inSample && (glm::dot(gn, sr) > 0.0f)))
@@ -1267,8 +1267,6 @@ extern "C" __global__ void __raygen__main()
 								directLightData.spectrumSample = parameters.spectra[parameters.materials[sphere.materialIndex].emissionSpectrumDataIndex].sample(path.wavelengths) * sphere.powerScale;
 								glm::vec3 lSmplPos{ sampling::sphere::sampleUniformWorldSolidAngle(glm::vec2{rand.x, rand.y}, interaction.hitPos, sphere.position, sphere.radius, lightPDF) };
 
-								const glm::vec3& gn{ interaction.geometryNormal };
-								const glm::vec3& sn{ triangularGeometry ? interaction.primitive.triangle.shadingNormal : gn };
 								const glm::vec3 sr{ lSmplPos - interaction.hitPos };
 								const bool inSample{ glm::dot(sn, sr) < 0.0f };
 								if ((inSample && !surfaceCanTransmit) || (inSample && (glm::dot(gn, sr) > 0.0f)))
@@ -1309,9 +1307,11 @@ extern "C" __global__ void __raygen__main()
 								float phi{ 2.0f * glm::pi<float>() * impSample.x };
 								float theta{ glm::pi<float>() * impSample.y };
 								directLightData.lightDir = glm::vec3{
-									-cuda::std::sin(theta) * cuda::std::sin(phi),
-										cuda::std::cos(theta),
-										-cuda::std::sin(theta) * cuda::std::cos(phi) };
+									-cuda::std::sin(theta) * cuda::std::cos(phi),
+									cuda::std::sin(theta) * cuda::std::sin(phi),
+									cuda::std::cos(theta), };
+								if (glm::dot(sn, directLightData.lightDir) <= 0.0f)
+									directLightData.occluded = true;
 								float4 rgbSample{ tex2D<float4>(parameters.envMap.environmentTexture, impSample.x, impSample.y) };
 								directLightData.spectrumSample = color::RGBtoSpectrum(glm::vec3{rgbSample.x, rgbSample.y, rgbSample.z},
 										path.wavelengths, *parameters.spectralBasisR, *parameters.spectralBasisG, *parameters.spectralBasisB) * 0.01f;
