@@ -437,7 +437,7 @@ void UI::recordSceneModelsSettings(CommandBuffer& commands, Window& window, Scen
 				ImGui::OpenPopup("Model settings popup");
 				selectedIndex = i;
 			}
-			else if (ImGui::IsMouseReleased(ImGuiMouseButton_Right) && ImGui::IsItemHovered())
+			else if (ImGui::IsItemClicked(ImGuiMouseButton_Right))
 			{
 				ImGui::OpenPopup("Remove model popup");
 				selectedIndex = i;
@@ -606,7 +606,7 @@ void UI::recordSceneLightsSettings(CommandBuffer& commands, SceneData& scene, co
 				ImGui::OpenPopup("Sphere light settings popup");
 				selectedIndex = i;
 			}
-			else if (ImGui::IsMouseReleased(ImGuiMouseButton_Right) && ImGui::IsItemHovered())
+			else if (ImGui::IsItemClicked(ImGuiMouseButton_Right))
 			{
 				ImGui::OpenPopup("Remove sphere light popup");
 				selectedIndex = i;
@@ -621,7 +621,7 @@ void UI::recordSceneLightsSettings(CommandBuffer& commands, SceneData& scene, co
 				ImGui::OpenPopup("Disk light settings popup");
 				selectedIndex = i;
 			}
-			else if (ImGui::IsMouseReleased(ImGuiMouseButton_Right) && ImGui::IsItemHovered())
+			else if (ImGui::IsItemClicked(ImGuiMouseButton_Right))
 			{
 				ImGui::OpenPopup("Remove disk light popup");
 				selectedIndex = i;
@@ -783,8 +783,96 @@ void UI::recordSceneEnvironmentMapSettings(CommandBuffer& commands, Window& wind
 			commands.pushCommand(Command{.type = CommandType::ADD_ENVIRONMENT_MAP, .payload = &envMapPayload});
 		}
 	}
+	else if (ImGui::IsItemClicked(ImGuiMouseButton_Right) && envMapPresent)
+	{
+		ImGui::OpenPopup("Remove environment map popup");
+	}
 	if (!envMapPresent)
 		ImGui::PopStyleColor();
+
+	if (ImGui::BeginPopup("Remove environment map popup"))
+	{
+		bool changed{ ImGui::Button("Remove") };
+		if (changed)
+		{
+			commands.pushCommand(Command{ .type = CommandType::REMOVE_ENVIRONMENT_MAP });
+			scene.environmentMapPath = {};
+			ImGui::CloseCurrentPopup();
+		}
+
+		ImGui::EndPopup();
+	}
+}
+void UI::recordCoordinateFrameWindow(Camera& camera)
+{
+	ImGui::Begin("XYZ");
+
+	ImDrawList* drawList{ ImGui::GetWindowDrawList() };
+
+	ImVec2 coordBGStartPos{ ImGui::GetCursorScreenPos() };
+	float coordBGSize{ std::min(ImGui::GetContentRegionAvail().x, ImGui::GetContentRegionAvail().y) };
+	coordBGSize = std::max(50.0f, coordBGSize);
+
+	drawList->AddRectFilled(coordBGStartPos, ImVec2(coordBGStartPos.x + coordBGSize, coordBGStartPos.y + coordBGSize),
+			IM_COL32(0, 0, 0, 255));
+	drawList->AddRect(coordBGStartPos, ImVec2(coordBGStartPos.x + coordBGSize, coordBGStartPos.y + coordBGSize), ImGui::GetColorU32(ImGuiCol_Border));
+
+	glm::vec3 coordFrame[3]{
+		{1.0f, 0.0f, 0.0f},
+			{0.0f, 1.0f, 0.0f},
+			{0.0f, 0.0f, 1.0f} };
+	glm::mat4 view{ glm::transpose(glm::mat4{
+			glm::vec4{camera.getU(), 0.0f},
+			glm::vec4{camera.getV(), 1.0f},
+			glm::vec4{camera.getW(), 0.0f},
+			glm::vec4{glm::vec3{0.0f}, 1.0f}}) };
+	glm::mat4 ortho{
+		glm::vec4{0.8f, 0.0f, 0.0f, 0.0f},
+			glm::vec4{0.0f, 0.8f, 0.0f, 0.0f},
+			glm::vec4{0.0f, 0.0f, 0.8f, 0.0f},
+			glm::vec4{0.0f, 0.0f, 0.0f, 1.0f} };
+	glm::vec2 frameOrigin{ coordBGStartPos.x + coordBGSize * 0.5f,
+		coordBGStartPos.y + coordBGSize * 0.5f };
+	glm::vec3 coordFrameScreenSpace[3]{};
+	for (int i{ 0 }; i < ARRAYSIZE(coordFrameScreenSpace); ++i)
+	{
+		coordFrameScreenSpace[i] = (ortho * view * glm::vec4{coordFrame[i], 1.0f}) * 0.5f + 0.5f;
+		coordFrameScreenSpace[i] =
+		{coordBGStartPos.x + coordFrameScreenSpace[i].x * coordBGSize,
+			coordFrameScreenSpace[i].y,
+			coordBGStartPos.y + coordBGSize * (1.0f - coordFrameScreenSpace[i].z)};
+	}
+
+	int drawOrder[3]{ 0, 1, 2 };
+	const ImU32 colors[3]{ IM_COL32(255, 0, 0, 255), IM_COL32(0, 255, 0, 255), IM_COL32(0, 0, 255, 255) };
+	const char* names[3]{ "X", "Y", "Z" };
+	for (int i{ 0 }, n{ ARRAYSIZE(drawOrder) }; i < n - 1; ++i)
+	{
+		bool swapped{ false };
+		for (int j{ 0 }; j < n - i - 1; j++)
+		{
+			if (coordFrameScreenSpace[drawOrder[j]].y
+					<
+					coordFrameScreenSpace[drawOrder[j + 1]].y)
+			{
+				int tmp{ drawOrder[j] };
+				drawOrder[j] = drawOrder[j + 1];
+				drawOrder[j + 1] = tmp;
+				swapped = true;
+			}
+		}
+		if (!swapped)
+			break;
+	}
+	for (int i{ 0 }; i < ARRAYSIZE(drawOrder); ++i)
+	{
+		drawList->AddLine(ImVec2{frameOrigin.x, frameOrigin.y},
+				ImVec2{coordFrameScreenSpace[drawOrder[i]].x, coordFrameScreenSpace[drawOrder[i]].z},
+				colors[drawOrder[i]], 3.0f);
+		drawList->AddText(ImVec2{coordFrameScreenSpace[drawOrder[i]].x, coordFrameScreenSpace[drawOrder[i]].z}, IM_COL32_WHITE, names[drawOrder[i]]);
+	}
+
+	ImGui::End();
 }
 void UI::recordInformationWindow(SceneData& scene, int currentSampleCount)
 {
@@ -860,6 +948,8 @@ void UI::recordInterface(CommandBuffer& commands, Window& window, Camera& camera
 	recordSceneEnvironmentMapSettings(commands, window, scene, infoColor);
 	ImGui::End();
 
+	ImGui::SetNextWindowViewport(ImGui::GetMainViewport()->ID);
+	recordCoordinateFrameWindow(camera);
 	ImGui::SetNextWindowViewport(ImGui::GetMainViewport()->ID);
 	recordInformationWindow(scene, currentSampleCount);
 

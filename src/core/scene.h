@@ -222,6 +222,20 @@ struct SceneData
 			imageData.emplace_back(data, width, height, byteSize);
 			return imageData.size() - 1;
 		}
+
+		void clearVertexData()
+		{
+			for (auto& mesh : meshes)
+				for (auto& submesh : mesh.submeshes)
+				{
+					submesh.vertices.clear();
+					submesh.normals.clear();
+					submesh.tangents.clear();
+					for (auto& texCoordSet : submesh.texCoordsSets)
+						texCoordSet.clear();
+					free(submesh.indices);
+				}
+		}
 		void clearImageData()
 		{
 			for(auto& tD : imageData)

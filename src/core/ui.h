@@ -212,6 +212,7 @@ private:
 	void recordSceneModelsSettings(CommandBuffer& commands, Window& window, SceneData& scene, const ImVec4& infoColor);
 	void recordSceneLightsSettings(CommandBuffer& commands, SceneData& scene, const ImVec4& infoColor);
 	void recordSceneEnvironmentMapSettings(CommandBuffer& commands, Window& window, SceneData& scene, const ImVec4& infoColor);
+	void recordCoordinateFrameWindow(Camera& camera);
 	void recordInformationWindow(SceneData& scene, int currentSampleCount);
 
 private:

@@ -252,6 +252,7 @@ void RenderingInterface::fillModelMaterials(RenderingInterface::ModelResource& m
 
 			modelRes.materialIndices.push_back(addMaterial(mat));
 		}
+	model.clearVertexData();
 }
 uint32_t RenderingInterface::fillLightMaterial(const SceneData::MaterialDescriptor& desc)
 {
@@ -1443,6 +1444,19 @@ void RenderingInterface::processCommands(CommandBuffer& commands, RenderContext&
 				{
 					const CommandPayloads::EnvironmentMap* envMapPayload{ reinterpret_cast<const CommandPayloads::EnvironmentMap*>(payload) };
 					loadEnvironmentMap(envMapPayload->path.c_str());
+					restartRender = true;
+					break;
+				}
+			case CommandType::REMOVE_ENVIRONMENT_MAP:
+				{
+					if (m_launchParameters.envMap.conditionalCDFIndices != CUdeviceptr{})
+						CUDA_CHECK(cudaFree(reinterpret_cast<void*>(m_launchParameters.envMap.conditionalCDFIndices)));
+					m_launchParameters.envMap.conditionalCDFIndices = CUdeviceptr{};
+					if (m_launchParameters.envMap.marginalCDFIndices != CUdeviceptr{})
+						CUDA_CHECK(cudaFree(reinterpret_cast<void*>(m_launchParameters.envMap.marginalCDFIndices)));
+					m_launchParameters.envMap.marginalCDFIndices = CUdeviceptr{};
+					m_envMap = CudaCombinedTexture{};
+					m_launchParameters.envMap.enabled = false;
 					restartRender = true;
 					break;
 				}
