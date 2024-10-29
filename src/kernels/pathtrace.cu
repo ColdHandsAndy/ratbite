@@ -544,8 +544,6 @@ extern "C" __device__ void __direct_callable__ComplexSurface_BxDF(const Material
 	}
 
 	float roughness{ cuda::std::fmax(0.001f, surface.specular.roughness) };
-	if (roughness < 0.01f)
-		stateFlags = stateFlags | PathStateBitfield::CURRENT_HIT_SPECULAR;
 	float alpha{ utility::roughnessToAlpha(roughness) };
 	microfacet::Alpha alphaMS{ .alphaX = alpha, .alphaY = alpha };
 
@@ -565,7 +563,7 @@ extern "C" __device__ void __direct_callable__ComplexSurface_BxDF(const Material
 	float energyPreservationTermDiffuse{ 1.0f - tex3D<float>(eta > 1.0f ? parameters.LUTs.reflectiveDielectricOuterAlbedo : parameters.LUTs.reflectiveDielectricInnerAlbedo,
 			LocalTransform::cosTheta(wo), roughness, cuda::std::sqrt(cuda::std::abs(f0Sr))) };
 
-	if (!directLightData.occluded)
+	if (!directLightData.occluded && !static_cast<bool>(stateFlags & PathStateBitfield::CURRENT_HIT_SPECULAR))
 	{
 		wi = locLi;
 		microfacet::ContextIncident ctxi{ microfacet::createContextIncident(wi) };
@@ -790,10 +788,19 @@ CU_DEVICE CU_INLINE void unpackInteractionData(const LaunchParameters& params, u
 }
 CU_DEVICE CU_INLINE void updateStateFlags(PathStateBitfield& stateFlags)
 {
-	PathStateBitfield excludeFlags{ PathStateBitfield::CURRENT_HIT_SPECULAR | PathStateBitfield::TRIANGULAR_GEOMETRY | PathStateBitfield::RIGHT_HANDED_FRAME | PathStateBitfield::RAY_REFRACTED };
-	PathStateBitfield includeFlags{ static_cast<bool>(stateFlags & PathStateBitfield::CURRENT_HIT_SPECULAR) ?
-		PathStateBitfield::PREVIOUS_HIT_SPECULAR : PathStateBitfield::REGULARIZED };
-	if (static_cast<bool>(stateFlags & (PathStateBitfield::RAY_REFRACTED)))
+	PathStateBitfield excludeFlags{
+		PathStateBitfield::CURRENT_HIT_SPECULAR |
+		PathStateBitfield::PREVIOUS_HIT_SPECULAR |
+		PathStateBitfield::TRIANGULAR_GEOMETRY |
+		PathStateBitfield::RIGHT_HANDED_FRAME |
+		PathStateBitfield::RAY_REFRACTED };
+
+	PathStateBitfield includeFlags{ PathStateBitfield::NO_FLAGS };
+	if (static_cast<bool>(stateFlags & PathStateBitfield::CURRENT_HIT_SPECULAR))
+		includeFlags |= PathStateBitfield::PREVIOUS_HIT_SPECULAR;
+	else
+		includeFlags |= PathStateBitfield::REGULARIZED;
+	if (static_cast<bool>(stateFlags & PathStateBitfield::RAY_REFRACTED))
 		includeFlags |= PathStateBitfield::REFRACTION_HAPPENED;
 
 	stateFlags = (stateFlags & (~excludeFlags)) | includeFlags;
@@ -1165,6 +1172,8 @@ extern "C" __global__ void __raygen__main()
 						surface.base.metalness = metFactor ? interaction.material->metalnessFactor : surface.base.metalness;
 						surface.specular.roughness = roughFactor ? interaction.material->roughnessFactor : surface.specular.roughness;
 					}
+					if (surface.specular.roughness < 0.001f)
+						path.stateFlags |= PathStateBitfield::CURRENT_HIT_SPECULAR;
 
 					bool trTexture{ static_cast<bool>(interaction.material->textures & MaterialData::TextureTypeBitfield::TRANSMISSION) };
 					bool trFactor{ static_cast<bool>(interaction.material->factors & MaterialData::FactorTypeBitfield::TRANSMISSION) };
@@ -1191,7 +1200,7 @@ extern "C" __global__ void __raygen__main()
 			{
 				// Next event estimation data
 				DirectLightSampleData directLightData{};
-				if (parameters.lights.lightCount == 0.0f && !parameters.envMap.enabled)
+				if ((parameters.lights.lightCount == 0.0f && !parameters.envMap.enabled) || static_cast<bool>(path.stateFlags & PathStateBitfield::CURRENT_HIT_SPECULAR))
 				{
 					directLightData.occluded = true;
 				}
