@@ -79,6 +79,7 @@ struct LaunchParameters
 		cudaTextureObject_t dielectricInnerAlbedo{};
 		cudaTextureObject_t reflectiveDielectricOuterAlbedo{};
 		cudaTextureObject_t reflectiveDielectricInnerAlbedo{};
+		cudaTextureObject_t sheenLTC{};
 	} LUTs{};
 
 	CUPTR(DenseSpectrum) sensorSpectralCurveA{};

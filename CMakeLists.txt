@@ -67,7 +67,23 @@ add_custom_command(TARGET copyPTX POST_BUILD
 
 
 add_custom_command(TARGET ratbite POST_BUILD
-	COMMAND ${CMAKE_COMMAND} -E copy_directory_if_different  ${CMAKE_SOURCE_DIR}/bin $<TARGET_FILE_DIR:ratbite>/bin)
+	COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_SOURCE_DIR}/bin/albedoConductorLUT.bin
+	$<TARGET_FILE_DIR:ratbite>/bin)
+add_custom_command(TARGET ratbite POST_BUILD
+	COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_SOURCE_DIR}/bin/albedoDielectricInnerLUT.bin
+	$<TARGET_FILE_DIR:ratbite>/bin)
+add_custom_command(TARGET ratbite POST_BUILD
+	COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_SOURCE_DIR}/bin/albedoDielectricOuterLUT.bin
+	$<TARGET_FILE_DIR:ratbite>/bin)
+add_custom_command(TARGET ratbite POST_BUILD
+	COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_SOURCE_DIR}/bin/albedoDielectricReflectiveInnerLUT.bin
+	$<TARGET_FILE_DIR:ratbite>/bin)
+add_custom_command(TARGET ratbite POST_BUILD
+	COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_SOURCE_DIR}/bin/albedoDielectricReflectiveOuterLUT.bin
+	$<TARGET_FILE_DIR:ratbite>/bin)
+add_custom_command(TARGET ratbite POST_BUILD
+	COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_SOURCE_DIR}/bin/sheenLUT.bin
+	$<TARGET_FILE_DIR:ratbite>/bin)
 
 add_custom_command(TARGET ratbite POST_BUILD
 	COMMAND ${CMAKE_COMMAND} -E copy_if_different ${CMAKE_SOURCE_DIR}/docs/pics/logo_icon_64.png $<TARGET_FILE_DIR:ratbite>)

@@ -201,16 +201,18 @@ namespace
 							textureData[cgltf_texture_index(data, material->pbr_metallic_roughness.base_color_texture.texture)].sRGB = true;
 							descriptor.baseColorTextureIndex = cgltf_texture_index(data, material->pbr_metallic_roughness.base_color_texture.texture);
 							descriptor.bcTexCoordIndex = material->pbr_metallic_roughness.base_color_texture.texcoord;
-							if (material->alpha_mode != cgltf_alpha_mode_opaque)
-							{
-								descriptor.alphaCutoffPresent = true;
-								descriptor.alphaCutoff = material->alpha_cutoff;
-							}
+							if (material->alpha_mode == cgltf_alpha_mode_mask)
+								descriptor.alphaInterpretation = SceneData::MaterialDescriptor::AlphaInterpretation::CUTOFF;
+							else if (material->alpha_mode == cgltf_alpha_mode_blend)
+								descriptor.alphaInterpretation = SceneData::MaterialDescriptor::AlphaInterpretation::BLEND;
+							else
+								descriptor.alphaInterpretation = SceneData::MaterialDescriptor::AlphaInterpretation::NONE;
+							descriptor.alphaCutoff = material->alpha_cutoff;
 						}
 						if (material->pbr_metallic_roughness.base_color_factor[0] != 1.0f ||
-								material->pbr_metallic_roughness.base_color_factor[1] != 1.0f ||
-								material->pbr_metallic_roughness.base_color_factor[2] != 1.0f ||
-								material->pbr_metallic_roughness.base_color_factor[3] != 1.0f)
+							material->pbr_metallic_roughness.base_color_factor[1] != 1.0f ||
+							material->pbr_metallic_roughness.base_color_factor[2] != 1.0f ||
+							material->pbr_metallic_roughness.base_color_factor[3] != 1.0f)
 						{
 							descriptor.bcFactorPresent = true;
 							descriptor.baseColorFactor[0] = material->pbr_metallic_roughness.base_color_factor[0];
@@ -252,6 +254,40 @@ namespace
 					{
 						descriptor.normalTextureIndex = cgltf_texture_index(data, material->normal_texture.texture);
 						descriptor.nmTexCoordIndex = material->normal_texture.texcoord;
+					}
+
+					if (material->has_sheen &&
+						!(material->sheen.sheen_color_factor[0] == 0.0f &&
+						material->sheen.sheen_color_factor[1] == 0.0f &&
+						material->sheen.sheen_color_factor[2] == 0.0f))
+					{
+						descriptor.sheenPresent = true;
+						if (material->sheen.sheen_color_factor[0] != 1.0f ||
+							material->sheen.sheen_color_factor[1] != 1.0f ||
+							material->sheen.sheen_color_factor[2] != 1.0f)
+						{
+							descriptor.sheenColorFactorPresent = true;
+							descriptor.sheenColorFactor[0] =
+								material->sheen.sheen_color_factor[0];
+							descriptor.sheenColorFactor[1] =
+								material->sheen.sheen_color_factor[1];
+							descriptor.sheenColorFactor[2] =
+								material->sheen.sheen_color_factor[2];
+						}
+						descriptor.sheenRoughnessFactorPresent = true;
+						descriptor.sheenRoughnessFactor =
+							material->sheen.sheen_roughness_factor;
+
+						if (material->sheen.sheen_color_texture.texture != nullptr)
+						{
+							descriptor.sheenColorTextureIndex = cgltf_texture_index(data, material->sheen.sheen_color_texture.texture);
+							descriptor.shcTexCoordIndex = material->sheen.sheen_color_texture.texcoord;
+						}
+						if (material->sheen.sheen_roughness_texture.texture != nullptr)
+						{
+							descriptor.sheenRoughTextureIndex = cgltf_texture_index(data, material->sheen.sheen_roughness_texture.texture);
+							descriptor.shrTexCoordIndex = material->sheen.sheen_roughness_texture.texcoord;
+						}
 					}
 				}
 				materialDescriptors.push_back(descriptor);

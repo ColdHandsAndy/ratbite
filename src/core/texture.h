@@ -171,6 +171,7 @@ public:
 	}
 	CudaImage(CudaImage&& tex)
 	{
+		m_type = tex.m_type;
 		m_width = tex.m_width;
 		m_height = tex.m_height;
 		m_depth = tex.m_depth;
@@ -184,6 +185,7 @@ public:
 	{
 		destroy();
 
+		m_type = tex.m_type;
 		m_width = tex.m_width;
 		m_height = tex.m_height;
 		m_depth = tex.m_depth;

@@ -31,6 +31,64 @@ namespace diffuse
 	}
 }
 
+namespace microflake
+{
+	// Practical Multiple-Scattering Sheen Using Linearly Transformed Cosines
+	// https://tizianzeltner.com/projects/Zeltner2022Practical/sheen.pdf
+	namespace LTC
+	{
+		struct CoefficientsLTC
+		{
+			float A{};
+			float B{};
+		};
+		CU_DEVICE CU_INLINE void getLUTData(cudaTextureObject_t LUT, float cosThetaO, float alpha,
+			CoefficientsLTC& coefficients, float& LTCAlbedo)
+		{
+			float4 data{ tex2D<float4>(LUT, cosThetaO, alpha) };
+			coefficients = { .A = data.x, .B = data.y };
+			LTCAlbedo = data.z;
+		}
+
+		CU_DEVICE CU_INLINE glm::vec3 sample(const glm::vec3& wo, const CoefficientsLTC& coefficients, const glm::vec2& uv)
+		{
+			glm::vec3 wiOriginal{ diffuse::CosWeighted::sample(uv) };
+
+			float aInv{ coefficients.A };
+			float bInv{ coefficients.B };
+			glm::vec3 wiStd{ wiOriginal.x / aInv - wiOriginal.z * bInv / aInv, wiOriginal.y / aInv, wiOriginal.z };
+
+			const float cosThetaO{ LocalTransform::cosTheta(wo) };
+			const float sinThetaO{ LocalTransform::sinTheta(cosThetaO * cosThetaO) };
+			const float cosPhi{ LocalTransform::cosPhi(wo, sinThetaO) };
+			const float sinPhi{ LocalTransform::sinPhi(wo, sinThetaO) };
+			glm::vec3 wi{ cosPhi * wiStd.x - sinPhi * wiStd.y, cosPhi * wiStd.y + sinPhi * wiStd.x, wiStd.z }; // "wi" is rotated by "+phi" to be in the correct coordinate frame
+			return glm::normalize(wo.z > 0.0f ? wi : -wi);
+		}
+		CU_DEVICE CU_INLINE void evaluate(const glm::vec3& wo, const glm::vec3& wi, const CoefficientsLTC& coefficients,
+			float& f, float& PDF)
+		{
+			const float cosThetaO{ LocalTransform::cosTheta(wo) };
+			const float sinThetaO{ LocalTransform::sinTheta(cosThetaO * cosThetaO) };
+			const float cosPhi{ LocalTransform::cosPhi(wo, sinThetaO) };
+			const float sinPhi{ LocalTransform::sinPhi(wo, sinThetaO) };
+			glm::vec3 wiStd{ cosPhi * wi.x + sinPhi * wi.y, cosPhi * wi.y - sinPhi * wi.x, wi.z }; // "wi" is rotated by "-phi" to be in the correct coordinate frame
+
+			float aInv{ coefficients.A };
+			float bInv{ coefficients.B };
+			glm::vec3 wiOriginal{ aInv * wiStd.x + bInv * wiStd.z, aInv * wiStd.y, wiStd.z };
+			float length{ glm::length(wiOriginal) };
+			wiOriginal /= length;
+			float det{ aInv * aInv };
+			float jacobian{ det / (length * length * length) };
+			float resultLTC{ diffuse::CosWeighted::PDF(LocalTransform::cosTheta(wiOriginal)) * jacobian };
+
+			f = resultLTC / cuda::std::abs(LocalTransform::cosTheta(wi));
+			PDF = resultLTC;
+		}
+	}
+}
+
 namespace microfacet
 {
 	struct ContextIncident
@@ -308,9 +366,9 @@ namespace microfacet
 					float a2{ a1 * a1 };
 					float s2{ s * s };
 					float k{ (1.0f - a2) * s2 / (s2 + a2 * wo.z * wo.z) };
-					return ndf * 2.0f * absDotWoWm / (k * wo.z + t); // Jacobian is applied outside of this function, therfore different formula
+					return ndf * 2.0f * absDotWoWm / (k * wo.z + t); // Jacobian is applied outside of this function, therefore different formula
 				}
-				return ndf * (t - wo.z) * 2.0f * absDotWoWm / len2; // Jacobian is applied outside of this function, therfore different formula
+				return ndf * (t - wo.z) * 2.0f * absDotWoWm / len2; // Jacobian is applied outside of this function, therefore different formula
 			}
 			else
 				static_assert(false);
@@ -333,14 +391,29 @@ namespace microsurface
 	};
 	struct Transmission
 	{
-		// glm::vec3 color{ 1.0f }; // Transmission color is base color
+		// glm::vec3 color{ 1.0f }; // Transmission color is the base color
 		float weight{ 0.0f };
+	};
+
+	struct Sheen
+	{
+		glm::vec3 color{ 1.0f };
+		float alpha{ 0.0f };
+	};
+
+	enum Layers : uint32_t
+	{
+		BASE =  1 << 0,
+		SHEEN = 1 << 1,
 	};
 
 	struct Surface
 	{
+		uint32_t layers{ BASE };
+
 		Base base{};
 		Specular specular{};
 		Transmission transmission{};
+		Sheen sheen{};
 	};
 }

@@ -533,6 +533,66 @@ extern "C" __device__ void __direct_callable__ComplexSurface_BxDF(const Material
 		const LocalTransform& local, const microsurface::Surface& surface,
 		SampledSpectrum& L, SampledWavelengths& wavelengths, SampledSpectrum& throughputWeight, float& bxdfPDF, glm::vec3& rD, PathStateBitfield& stateFlags, float& refractionScale)
 {
+	/*
+	   OpenPBR Surface Specification (https://academysoftwarefoundation.github.io/OpenPBR/):
+
+	   -------------------------------------------------
+	                         FUZZ                       
+	   -------------------------------------------------
+	                         COAT                       
+	   -------------------------------------------------
+	   METAL | TRANSLUCENT | SUBSURFACE | GLOSSY-DIFFUSE
+	   -------------------------------------------------
+	                       <--------------------------->
+						   Opaque
+						   Base
+	   <-----><---------------------------------------->
+	   Metal  Dielectric
+	   Base   Base
+
+                    ┌─────┐
+                   ┌┤ PBR ├─┐
+                   ││(MIX)│ │
+             1 - a │└─────┘ │ a
+                ┌──┘        └────┐
+            ┌───┴───┐        ┌───┴───┐
+            │Ambinet│       ┌┤Surface├─┐
+            │Medium │       ││(LAYER)│ │
+            └───────┘     1 │└───────┘ │ F
+                          ┌─┘          └──┐
+                    ┌─────┴─────┐       ┌─┴──┐
+                   ┌┤Coated Base├─┐     │FUZZ│
+                   ││  (LAYER)  │ │     └────┘
+                 1 │└───────────┘ │ C
+                 ┌─┘              └──┐
+            ┌────┴────┐            ┌─┴──┐
+          ┌─┤Base     ├─┐          │COAT│
+          │ │Substrate│ │          └────┘
+          │ │  (MIX)  │ │
+        M │ └─────────┘ │  1 - M
+       ┌──┘             └─────────┐
+    ┌──┴──┐                 ┌─────┴────┐
+    │Metal│               ┌─┤Dielectric│──┐
+    └─────┘               │ │Base      │  │
+                          │ │  (MIX)   │  │
+                       T  │ └──────────┘  │  1 - T
+                    ┌─────┘               └─────────┐
+              ┌─────┴─────┐                   ┌─────┴─────┐
+              │Translucent│                 ┌─│Opaque Base│──┐
+              │Base       │                 │ │   (MIX)   │  │
+              └───────────┘             S   │ └───────────┘  │ 1 - S
+                                     ┌──────┘                └──────┐
+                                 ┌───┴──────┐              ┌────────┴────────┐
+                                 │Subsurface│              │     (LAYER)     │
+                                 └──────────┘              │Diffuse     Gloss│
+                                                           └─────────────────┘
+	TODO:
+	* Subsurface scattering (Have to learn more about volumetrics before implementing)
+	* Coat (GLTF has different specification for coat so not as important)
+
+	*/
+
+	// Transform vectors into local space
 	glm::vec3 locWo{ -rD };
 	glm::vec3 locLi{ directLightData.lightDir };
 	local.toLocal(locWo, locLi);
@@ -543,66 +603,91 @@ extern "C" __device__ void __direct_callable__ComplexSurface_BxDF(const Material
 		return;
 	}
 
-	float roughness{ cuda::std::fmax(0.001f, surface.specular.roughness) };
-	float alpha{ utility::roughnessToAlpha(roughness) };
-	microfacet::Alpha alphaMS{ .alphaX = alpha, .alphaY = alpha };
-
-	if (static_cast<bool>(stateFlags & PathStateBitfield::REGULARIZED))
-		alphaMS.regularize();
 	glm::vec3 wo{ locWo };
 	microfacet::ContextOutgoing ctxo{ microfacet::createContextOutgoing(wo) };
 	glm::vec3 wm{};
 	glm::vec3 wi{};
 
-	float directionalAlbedoConductor{ tex2D<float>(parameters.LUTs.conductorAlbedo, LocalTransform::cosTheta(wo), roughness) };
+	// Initialize GGX roughness data and regularize if necessary
+	float roughness{ cuda::std::fmax(0.001f, surface.specular.roughness) };
+	float alpha{ utility::roughnessToAlpha(roughness) };
+	microfacet::Alpha alphaMS{ .alphaX = alpha, .alphaY = alpha };
+	if (static_cast<bool>(stateFlags & PathStateBitfield::REGULARIZED))
+		alphaMS.regularize();
+
+	// Initialize eta and f0
 	float eta{ wo.z > 0.0f ? surface.specular.ior / 1.0f : 1.0f / surface.specular.ior };
 	float f0Sr{ (1.0f - eta) / (1.0f + eta) };
 	float f0{ f0Sr * f0Sr };
+	//Sample LUTs
+	float absCosThetaO{ cuda::std::abs(LocalTransform::cosTheta(wo)) };
 	float energyCompensationTermDielectric{ 1.0f / tex3D<float>(eta > 1.0f ? parameters.LUTs.dielectricOuterAlbedo : parameters.LUTs.dielectricInnerAlbedo,
-			LocalTransform::cosTheta(wo), roughness, cuda::std::sqrt(cuda::std::abs(f0Sr))) };
+			absCosThetaO, roughness, cuda::std::sqrt(cuda::std::abs(f0Sr))) };
 	float energyPreservationTermDiffuse{ 1.0f - tex3D<float>(eta > 1.0f ? parameters.LUTs.reflectiveDielectricOuterAlbedo : parameters.LUTs.reflectiveDielectricInnerAlbedo,
-			LocalTransform::cosTheta(wo), roughness, cuda::std::sqrt(cuda::std::abs(f0Sr))) };
+			absCosThetaO, roughness, cuda::std::sqrt(cuda::std::abs(f0Sr))) };
+	float hemisphericalAlbedoConductor{ tex2D<float>(parameters.LUTs.conductorAlbedo, absCosThetaO, roughness) };
+	float hemisphericalAlbedoSheen{ 0.0f };
+	microflake::LTC::CoefficientsLTC sheenLTCCoefficients{};
+	if (surface.layers & microsurface::Layers::SHEEN)
+	{
+		microflake::LTC::getLUTData(parameters.LUTs.sheenLTC, absCosThetaO, surface.sheen.alpha, sheenLTCCoefficients, hemisphericalAlbedoSheen);
+		if (hemisphericalAlbedoSheen < 0.0001f)
+			hemisphericalAlbedoSheen = 0.0f;
+	}
 
+	// Calculate direct lighting
 	if (!directLightData.occluded && !static_cast<bool>(stateFlags & PathStateBitfield::CURRENT_HIT_SPECULAR))
 	{
+		// Initialize an incoming direction of a sample and related variables
 		wi = locLi;
 		microfacet::ContextIncident ctxi{ microfacet::createContextIncident(wi) };
-
 		const float cosThetaI{ LocalTransform::cosTheta(wi) };
 		const float cosThetaO{ LocalTransform::cosTheta(wo) };
-		float cosFactor{ cuda::std::fabs(cosThetaI) };
-
-		bool reflect{ cosThetaI * cosThetaO > 0.0f };
+		const float cosFactor{ cuda::std::fabs(cosThetaI) };
+		const bool reflect{ cosThetaI * cosThetaO > 0.0f };
 		float etaR{ 1.0f };
 		if (!reflect)
 			etaR = eta;
+
+		// Calculate a micronormal of a sample and related variables
 		wm = glm::normalize(wi * etaR + wo);
 		if (wm.z < 0.0f)
 			wm = -wm;
 		microfacet::ContextMicronormal ctxm{ microfacet::createContextMicronormal(wm) };
-
+		const float dotWmWo{ glm::dot(wm, wo) };
+		const float dotWmWi{ glm::dot(wm, wi) };
 		const float wowmAbsDot{ cuda::std::fabs(glm::dot(wo, wm)) };
 
-		float FDielectric{ microfacet::FSchlick(f0, wowmAbsDot) };
-		float Ds{ microfacet::D(ctxm, alphaMS) };
-		float Gs{ microfacet::G(ctxi, ctxo, alphaMS) };
+		// Microsfacet BxDF factors initialization
+		const float FDielectric{ microfacet::FSchlick(f0, wowmAbsDot) };
+		const float Ds{ microfacet::D(ctxm, alphaMS) };
+		const float Gs{ microfacet::G(ctxi, ctxo, alphaMS) };
 
-		float metalness{ surface.base.metalness };
-		float translucency{ surface.transmission.weight };
-		float cSpecWeight{ metalness };
-		float dSpecWeight{ (1.0f - metalness) * FDielectric };
-		float diffWeight{ (1.0f - metalness) * (1.0f - translucency) * (1.0f - FDielectric) };
-		float dTransWeight{ (1.0f - metalness) * translucency * (1.0f - FDielectric) };
+		// Initialize surface material weights
+		const float sheen{ hemisphericalAlbedoSheen };
+		const float base{ 1.0f - sheen };
+		const float metalness{ surface.base.metalness };
+		const float translucency{ surface.transmission.weight };
+		const float sheenWeight{ sheen };
+		const float cSpecWeight{ base * metalness };
+		const float dSpecWeight{ base * (1.0f - metalness) * FDielectric };
+		const float dTransWeight{ base * (1.0f - metalness) * translucency * (1.0f - FDielectric) };
+		const float diffuseWeight{ base * (1.0f - metalness) * (1.0f - translucency) * (1.0f - FDielectric) };
 
-		float lbxdfSpecPDF{ microfacet::VNDF::PDF<microfacet::VNDF::SPHERICAL_CAP>(wo, wowmAbsDot, ctxo, ctxm, alphaMS) / (4.0f * wowmAbsDot) };
-		float lbxdfDiffPDF{ diffuse::CosWeighted::PDF(LocalTransform::cosTheta(wi)) };
-		float dotWmWo{ glm::dot(wm, wo) };
-		float dotWmWi{ glm::dot(wm, wi) };
+		SampledSpectrum flSheen{ 0.0f };
+		float lbxdfSheenPDF{ 1.0f };
+		if (sheen != 0.0f)
+		{
+			float flSheenNoAbsorb{ 0.0f };
+			microflake::LTC::evaluate(wo, wi, sheenLTCCoefficients, flSheenNoAbsorb, lbxdfSheenPDF);
+			flSheen = color::RGBtoSpectrum(surface.sheen.color,
+					wavelengths, *parameters.spectralBasisR, *parameters.spectralBasisG, *parameters.spectralBasisB) * flSheenNoAbsorb;
+		}
 
 		if (reflect)
 		{
 			SampledSpectrum FConductor{ color::RGBtoSpectrum(microfacet::F82(surface.base.color, wowmAbsDot) *
-					(1.0f + microfacet::FAvgIntegralForF82(surface.base.color) * ((1.0f - directionalAlbedoConductor) / directionalAlbedoConductor)),
+					(1.0f + microfacet::FAvgIntegralForF82(surface.base.color) * ((1.0f - hemisphericalAlbedoConductor) / hemisphericalAlbedoConductor)),
 					wavelengths, *parameters.spectralBasisR, *parameters.spectralBasisG, *parameters.spectralBasisB) };
 
 			SampledSpectrum flConductor{ Ds * Gs * FConductor / cuda::std::fabs(4.0f * LocalTransform::cosTheta(wo) * LocalTransform::cosTheta(wi)) };
@@ -611,131 +696,175 @@ extern "C" __device__ void __direct_callable__ComplexSurface_BxDF(const Material
 			SampledSpectrum flDiffuse{ energyPreservationTermDiffuse *
 				color::RGBtoSpectrum(surface.base.color, wavelengths, *parameters.spectralBasisR, *parameters.spectralBasisG, *parameters.spectralBasisB) / glm::pi<float>() };
 
-
-			float bxdfPDF{ cSpecWeight * lbxdfSpecPDF + dSpecWeight * lbxdfSpecPDF + diffWeight * lbxdfDiffPDF };
-			float mis{ MIS::powerHeuristic(1, directLightData.lightSamplePDF, 1, bxdfPDF) };
+			const float lbxdfSpecPDF{ microfacet::VNDF::PDF<microfacet::VNDF::SPHERICAL_CAP>(wo, wowmAbsDot, ctxo, ctxm, alphaMS) / (4.0f * wowmAbsDot) };
+			const float lbxdfDiffPDF{ diffuse::CosWeighted::PDF(LocalTransform::cosTheta(wi)) };
+			const float bxdfPDF{
+				sheenWeight * lbxdfSheenPDF +
+				cSpecWeight * lbxdfSpecPDF +
+				dSpecWeight * lbxdfSpecPDF +
+				diffuseWeight * lbxdfDiffPDF };
+			const float mis{ MIS::powerHeuristic(1, directLightData.lightSamplePDF, 1, bxdfPDF) };
 			L += directLightData.spectrumSample * throughputWeight * cosFactor * mis * (
+					sheenWeight * flSheen
+					+
 					cSpecWeight * flConductor
 					+
 					dSpecWeight * flDielectric
 					+
-					diffWeight * flDiffuse
+					diffuseWeight * flDiffuse
 					) / directLightData.lightSamplePDF;
 		}
 		else if (surface.transmission.weight != 0.0f && !(dotWmWo * cosThetaO <= 0.0f || dotWmWi * cosThetaI <= 0.0f))
 		{
-			float t{ dotWmWi + dotWmWo / eta };
-			float denom{ t * t };
-			float dwmdwi{ cuda::std::fabs(dotWmWi) / denom };
-			float lbxdfTransPDF{ microfacet::VNDF::PDF<microfacet::VNDF::SPHERICAL_CAP>(wo, wowmAbsDot, ctxo, ctxm, alphaMS) * dwmdwi };
-			float bxdfPDF{ dTransWeight * lbxdfTransPDF };
-			float mis{ MIS::powerHeuristic(1, directLightData.lightSamplePDF, 1, bxdfPDF) };
-			SampledSpectrum flTransmission{ Ds * (1.0f - FDielectric) * Gs * energyCompensationTermDielectric
+			const float t{ dotWmWi + dotWmWo / eta };
+			const float denom{ t * t };
+			const float dwmdwi{ cuda::std::fabs(dotWmWi) / denom };
+			const float lbxdfTransPDF{ microfacet::VNDF::PDF<microfacet::VNDF::SPHERICAL_CAP>(wo, wowmAbsDot, ctxo, ctxm, alphaMS) * dwmdwi };
+			const float bxdfPDF{
+				sheenWeight * lbxdfSheenPDF +
+				dTransWeight * lbxdfTransPDF };
+			const float mis{ MIS::powerHeuristic(1, directLightData.lightSamplePDF, 1, bxdfPDF) };
+			SampledSpectrum flTransmission{ color::RGBtoSpectrum(surface.base.color, wavelengths, *parameters.spectralBasisR, *parameters.spectralBasisG, *parameters.spectralBasisB)
+				* Ds * (1.0f - FDielectric) * Gs * energyCompensationTermDielectric
 				* cuda::std::fabs(dotWmWo * dotWmWi / (cosThetaO * cosThetaI * denom)) };
 			flTransmission /= (eta * eta);
-			L += directLightData.spectrumSample * throughputWeight * flTransmission * cosFactor * mis / directLightData.lightSamplePDF;
+			L += directLightData.spectrumSample * throughputWeight * cosFactor * mis * (
+					sheenWeight * flSheen
+					+
+					dTransWeight * flTransmission
+					) / directLightData.lightSamplePDF;
 		}
 	}
 
-	glm::vec3 rand{ QRNG::Sobol::sample3D(qrngState, QRNG::DimensionOffset::SURFACE_BXDF_0) };
-	wm = microfacet::VNDF::sample<microfacet::VNDF::SPHERICAL_CAP>(wo, alphaMS, rand);
-	microfacet::ContextMicronormal ctxm{ microfacet::createContextMicronormal(wm) };
-	const float wowmAbsDot{ cuda::std::abs(glm::dot(wo, wm)) };
-
-	float Ds{ microfacet::D(ctxm, alphaMS) };
-	float FDielectric{ microfacet::FSchlick(f0, wowmAbsDot) };
-	float sin2ThetaI{ cuda::std::fmax(0.0f, 1.0f - wowmAbsDot * wowmAbsDot) };
-	float sin2ThetaT{ sin2ThetaI / (eta * eta) };
-	if (sin2ThetaT >= 1.0f)
-		FDielectric = 1.0f;
-
-	float conductorP{ surface.base.metalness };
-	float dielectricSpecP{ cuda::std::fmax(0.0f, FDielectric * (1.0f - conductorP)) };
-	float translucency{ surface.transmission.weight };
-	float transmissionP{ cuda::std::fmax(0.0f, (1.0f - FDielectric) * translucency * (1.0f - conductorP)) };
-	float diffuseP{ cuda::std::fmax(0.0f, (1.0f - FDielectric) * (1.0f - translucency) * (1.0f - conductorP)) };
-
-	if (rand.z < conductorP + dielectricSpecP)
+	// BxDF sampling and calculation
 	{
-		wi = glm::normalize(utility::reflect(wo, wm));
-		microfacet::ContextIncident ctxi{ microfacet::createContextIncident(wi) };
-		if (wo.z * wi.z <= 0.0f)
+		glm::vec3 rand{ QRNG::Sobol::sample3D(qrngState, QRNG::DimensionOffset::SURFACE_BXDF_0) };
+
+		const float sheen{ hemisphericalAlbedoSheen };
+		const float base{ 1.0f - sheen };
+		const float sheenP{ sheen };
+		const float baseP{ base };
+		const float baseLayerEnergyCorrection{ 1.0f - hemisphericalAlbedoSheen };
+
+		if (rand.z > baseP)
 		{
-			stateFlags = stateFlags | PathStateBitfield::PATH_TERMINATED;
-			return;
-		}
-		float Gs{ microfacet::G(ctxi, ctxo, alphaMS) };
-		float spec{ Ds * Gs / cuda::std::fabs(4.0f * LocalTransform::cosTheta(wo) * LocalTransform::cosTheta(wi)) };
-		SampledSpectrum f;
-		float pdfP;
-		if (rand.z < conductorP)
-		{
-			SampledSpectrum FConductor{ color::RGBtoSpectrum(microfacet::F82(surface.base.color, wowmAbsDot) *
-					(1.0f + microfacet::FAvgIntegralForF82(surface.base.color) * ((1.0f - directionalAlbedoConductor) / directionalAlbedoConductor)),
-					wavelengths, *parameters.spectralBasisR, *parameters.spectralBasisG, *parameters.spectralBasisB) };
-			f = spec * FConductor;
-			pdfP = conductorP;
+			SampledSpectrum f{};
+			float fNoAbsorb{ 0.0f };
+			float pdfP{};
+			wi = microflake::LTC::sample(wo, sheenLTCCoefficients, rand);
+			microflake::LTC::evaluate(wo, wi, sheenLTCCoefficients, fNoAbsorb, pdfP);
+			// TODO: Figure out why "sheen" factor is needed for energy conservation
+			f = color::RGBtoSpectrum(surface.sheen.color,
+					wavelengths, *parameters.spectralBasisR, *parameters.spectralBasisG, *parameters.spectralBasisB) * fNoAbsorb * sheen;
+			bxdfPDF = pdfP * sheenP;
+			throughputWeight *= f * cuda::std::abs(LocalTransform::cosTheta(wi)) / bxdfPDF;
 		}
 		else
 		{
-			f = spec * FDielectric * energyCompensationTermDielectric;
-			pdfP = dielectricSpecP;
-		}
-		float cosFactor{ cuda::std::fabs(LocalTransform::cosTheta(wi)) };
-		bxdfPDF = microfacet::VNDF::PDF<microfacet::VNDF::SPHERICAL_CAP>(wo, wowmAbsDot, ctxo, ctxm, alphaMS) * pdfP / (4.0f * wowmAbsDot);
-		throughputWeight *= f * cosFactor / bxdfPDF;
-	}
-	else
-	{
-		if (rand.z < conductorP + dielectricSpecP + transmissionP)
-		{
-			wi = utility::refract(wo, wm, eta);
-			refractionScale *= eta;
-			if (wo.z * wi.z >= 0.0f)
+			wm = microfacet::VNDF::sample<microfacet::VNDF::SPHERICAL_CAP>(wo, alphaMS, rand);
+			microfacet::ContextMicronormal ctxm{ microfacet::createContextMicronormal(wm) };
+			const float wowmAbsDot{ cuda::std::abs(glm::dot(wo, wm)) };
+
+			float Ds{ microfacet::D(ctxm, alphaMS) };
+			float FDielectric{ microfacet::FSchlick(f0, wowmAbsDot) };
+			float sin2ThetaI{ cuda::std::fmax(0.0f, 1.0f - wowmAbsDot * wowmAbsDot) };
+			float sin2ThetaT{ sin2ThetaI / (eta * eta) };
+			if (sin2ThetaT >= 1.0f)
+				FDielectric = 1.0f;
+
+			const float metalness{ surface.base.metalness };
+			const float translucency{ surface.transmission.weight };
+			const float conductorP{ base * metalness };
+			const float dielectricSpecP{ base * (1.0f - metalness) * FDielectric };
+			const float transmissionP{ base * translucency * (1.0f - metalness) * (1.0f - FDielectric) };
+			const float diffuseP{ base * (1.0f - translucency) * (1.0f - metalness) * (1.0f - FDielectric) };
+
+			if (rand.z < conductorP + dielectricSpecP)
 			{
-				stateFlags = stateFlags | PathStateBitfield::PATH_TERMINATED;
-				return;
+				wi = glm::normalize(utility::reflect(wo, wm));
+				microfacet::ContextIncident ctxi{ microfacet::createContextIncident(wi) };
+				if (wo.z * wi.z <= 0.0f)
+				{
+					stateFlags = stateFlags | PathStateBitfield::PATH_TERMINATED;
+					return;
+				}
+				float Gs{ microfacet::G(ctxi, ctxo, alphaMS) };
+				float spec{ Ds * Gs / cuda::std::fabs(4.0f * LocalTransform::cosTheta(wo) * LocalTransform::cosTheta(wi)) };
+				SampledSpectrum f;
+				float pdfP;
+				if (rand.z < conductorP)
+				{
+					SampledSpectrum FConductor{ color::RGBtoSpectrum(microfacet::F82(surface.base.color, wowmAbsDot) *
+							(1.0f + microfacet::FAvgIntegralForF82(surface.base.color) * ((1.0f - hemisphericalAlbedoConductor) / hemisphericalAlbedoConductor)),
+							wavelengths, *parameters.spectralBasisR, *parameters.spectralBasisG, *parameters.spectralBasisB) };
+					f = spec * FConductor * metalness;
+					pdfP = conductorP;
+				}
+				else
+				{
+					f = spec * FDielectric * energyCompensationTermDielectric * (1.0f - metalness);
+					pdfP = dielectricSpecP;
+				}
+				float cosFactor{ cuda::std::fabs(LocalTransform::cosTheta(wi)) };
+				bxdfPDF = microfacet::VNDF::PDF<microfacet::VNDF::SPHERICAL_CAP>(wo, wowmAbsDot, ctxo, ctxm, alphaMS) / (4.0f * wowmAbsDot) * pdfP;
+				throughputWeight *= f * cosFactor * baseLayerEnergyCorrection / bxdfPDF;
 			}
-			microfacet::ContextIncident ctxi{ microfacet::createContextIncident(wi) };
-			float Gs{ microfacet::G(ctxi, ctxo, alphaMS) };
-			const float cosThetaI{ LocalTransform::cosTheta(wi) };
-			const float cosThetaO{ LocalTransform::cosTheta(wo) };
-			float dotWmWo{ glm::dot(wm, wo) };
-			float dotWmWi{ glm::dot(wm, wi) };
-			float t{ dotWmWi + dotWmWo / eta };
-			float denom{ t * t };
-			float dwmdwi{ cuda::std::fabs(dotWmWi) / denom };
-			float f{ Ds * (1.0f - FDielectric) * Gs
-				* cuda::std::fabs(dotWmWo * dotWmWi / (cosThetaO * cosThetaI * denom)) };
-			f /= (eta * eta);
-			bxdfPDF = microfacet::VNDF::PDF<microfacet::VNDF::SPHERICAL_CAP>(wo, wowmAbsDot, ctxo, ctxm, alphaMS) * dwmdwi * transmissionP;
-			float cosFactor{ cuda::std::fabs(cosThetaI) };
-			throughputWeight *= color::RGBtoSpectrum(surface.base.color, wavelengths, *parameters.spectralBasisR, *parameters.spectralBasisG, *parameters.spectralBasisB)
-				* f * energyCompensationTermDielectric * cosFactor / bxdfPDF;
-			stateFlags |= PathStateBitfield::RAY_REFRACTED;
-		}
-		else
-		{
-			glm::vec2 randD{ QRNG::Sobol::sample2D(qrngState, QRNG::DimensionOffset::SURFACE_BXDF_1) };
-			wi = diffuse::CosWeighted::sample(randD);
-			if (wo.z * wi.z <= 0.0f)
+			else
 			{
-				stateFlags = stateFlags | PathStateBitfield::PATH_TERMINATED;
-				return;
+				if (rand.z < conductorP + dielectricSpecP + transmissionP)
+				{
+					wi = utility::refract(wo, wm, eta);
+					refractionScale *= eta;
+					if (wo.z * wi.z >= 0.0f)
+					{
+						stateFlags = stateFlags | PathStateBitfield::PATH_TERMINATED;
+						return;
+					}
+					microfacet::ContextIncident ctxi{ microfacet::createContextIncident(wi) };
+					float Gs{ microfacet::G(ctxi, ctxo, alphaMS) };
+					const float cosThetaI{ LocalTransform::cosTheta(wi) };
+					const float cosThetaO{ LocalTransform::cosTheta(wo) };
+					float dotWmWo{ glm::dot(wm, wo) };
+					float dotWmWi{ glm::dot(wm, wi) };
+					float t{ dotWmWi + dotWmWo / eta };
+					float denom{ t * t };
+					float dwmdwi{ cuda::std::fabs(dotWmWi) / denom };
+					float f{ Ds * (1.0f - FDielectric) * Gs * (1.0f - metalness) * translucency
+						* cuda::std::fabs(dotWmWo * dotWmWi / (cosThetaO * cosThetaI * denom)) };
+					f /= (eta * eta);
+					bxdfPDF = microfacet::VNDF::PDF<microfacet::VNDF::SPHERICAL_CAP>(wo, wowmAbsDot, ctxo, ctxm, alphaMS) * dwmdwi * transmissionP;
+					float cosFactor{ cuda::std::fabs(cosThetaI) };
+					throughputWeight *= color::RGBtoSpectrum(surface.base.color, wavelengths, *parameters.spectralBasisR, *parameters.spectralBasisG, *parameters.spectralBasisB)
+						* f * energyCompensationTermDielectric * cosFactor * baseLayerEnergyCorrection / bxdfPDF;
+					stateFlags |= PathStateBitfield::RAY_REFRACTED;
+				}
+				else
+				{
+					glm::vec2 randD{ QRNG::Sobol::sample2D(qrngState, QRNG::DimensionOffset::SURFACE_BXDF_1) };
+					wi = diffuse::CosWeighted::sample(randD);
+					if (wo.z * wi.z <= 0.0f)
+					{
+						stateFlags = stateFlags | PathStateBitfield::PATH_TERMINATED;
+						return;
+					}
+					float cosFactor{ cuda::std::fabs(LocalTransform::cosTheta(wi)) };
+					SampledSpectrum f{ color::RGBtoSpectrum(surface.base.color, wavelengths, *parameters.spectralBasisR, *parameters.spectralBasisG, *parameters.spectralBasisB)
+						/ glm::pi<float>() * (1.0f - metalness) * (1.0f - translucency) };
+					bxdfPDF = diffuse::CosWeighted::PDF(LocalTransform::cosTheta(wi)) * diffuseP;
+					throughputWeight *= f * energyPreservationTermDiffuse * cosFactor * baseLayerEnergyCorrection / bxdfPDF;
+				}
 			}
-			float cosFactor{ cuda::std::fabs(LocalTransform::cosTheta(wi)) };
-			SampledSpectrum f{ color::RGBtoSpectrum(surface.base.color, wavelengths, *parameters.spectralBasisR, *parameters.spectralBasisG, *parameters.spectralBasisB) / glm::pi<float>() };
-			bxdfPDF = diffuse::CosWeighted::PDF(LocalTransform::cosTheta(wi)) * diffuseP;
-			throughputWeight *= f * energyPreservationTermDiffuse * cosFactor / bxdfPDF;
 		}
 	}
 
+	// Check for invalid PDF
 	if (bxdfPDF <= 0.0f || isinf(bxdfPDF))
 	{
 		stateFlags = stateFlags | PathStateBitfield::PATH_TERMINATED;
 		return;
 	}
 
+	// Set new ray direction
 	glm::vec3 locWi{ wi };
 	local.fromLocal(locWi);
 	rD = glm::normalize(locWi);
@@ -1149,9 +1278,13 @@ extern "C" __global__ void __raygen__main()
 						if (bcFactor)
 							surface.base.color
 								*= glm::vec3{interaction.material->baseColorFactor[0], interaction.material->baseColorFactor[1], interaction.material->baseColorFactor[2]};
-						bool cutoff{ static_cast<bool>(interaction.material->factors & MaterialData::FactorTypeBitfield::CUTOFF) };
-						if (bcTexData.w < interaction.material->alphaCutoff && cutoff)
-							interaction.skipped = true;
+						const bool cutoff{ static_cast<bool>(interaction.material->factors & MaterialData::FactorTypeBitfield::CUTOFF) };
+						const bool blend{ static_cast<bool>(interaction.material->factors & MaterialData::FactorTypeBitfield::BLEND) };
+						if (cutoff)
+						{
+							if (bcTexData.w < interaction.material->alphaCutoff)
+								interaction.skipped = true;
+						}
 					}
 					else if (bcFactor)
 						surface.base.color
@@ -1181,13 +1314,47 @@ extern "C" __global__ void __raygen__main()
 					{
 						float2 uv{ interaction.material->trTexCoordSetIndex ? float2{texC2.x, texC2.y} : float2{texC1.x, texC1.y} };
 						float trTexData{ tex2D<float>(interaction.material->transmissionTexture, uv.x, uv.y) };
-						surface.transmission.weight = trTexData;
+						surface.transmission.weight = trTexData * (trFactor ? interaction.material->transmissionFactor : 1.0f);
 					}
 					else
 					{
 						surface.transmission.weight = trFactor ? interaction.material->transmissionFactor : surface.transmission.weight;
 					}
 					surface.specular.ior = interaction.material->ior;
+
+					if (interaction.material->sheenPresent)
+					{
+						surface.layers |= microsurface::Layers::SHEEN;
+						bool shcTexture{ static_cast<bool>(interaction.material->textures & MaterialData::TextureTypeBitfield::SHEEN_COLOR) };
+						bool shcFactor{ static_cast<bool>(interaction.material->factors & MaterialData::FactorTypeBitfield::SHEEN_COLOR) };
+						if (shcTexture)
+						{
+							float2 uv{ interaction.material->shcTexCoordSetIndex ? float2{texC2.x, texC2.y} : float2{texC1.x, texC1.y} };
+							float4 shcTexData{ tex2D<float4>(interaction.material->sheenColorTexture, uv.x, uv.y) };
+							surface.sheen.color.x = shcTexData.x * (shcFactor ? interaction.material->sheenColorFactor[0] : 1.0f);
+							surface.sheen.color.y = shcTexData.y * (shcFactor ? interaction.material->sheenColorFactor[1] : 1.0f);
+							surface.sheen.color.z = shcTexData.z * (shcFactor ? interaction.material->sheenColorFactor[2] : 1.0f);
+						}
+						else if (shcFactor)
+						{
+							surface.sheen.color.x = interaction.material->sheenColorFactor[0];
+							surface.sheen.color.y = interaction.material->sheenColorFactor[1];
+							surface.sheen.color.z = interaction.material->sheenColorFactor[2];
+						}
+						bool shrTexture{ static_cast<bool>(interaction.material->textures & MaterialData::TextureTypeBitfield::SHEEN_ROUGH) };
+						bool shrFactor{ static_cast<bool>(interaction.material->factors & MaterialData::FactorTypeBitfield::SHEEN_ROUGH) };
+						if (shrTexture)
+						{
+							float2 uv{ interaction.material->shrTexCoordSetIndex ? float2{texC2.x, texC2.y} : float2{texC1.x, texC1.y} };
+							float shrTexData{ tex2D<float4>(interaction.material->sheenRoughTexture, uv.x, uv.y).w };
+							float shRoughness{ shrTexData * (shrFactor ? interaction.material->sheenRoughnessFactor : 1.0f) };
+							surface.sheen.alpha = shRoughness * shRoughness;
+						}
+						else if (shrFactor)
+						{
+							surface.sheen.alpha = interaction.material->sheenRoughnessFactor;
+						}
+					}
 				}
 			}
 			else

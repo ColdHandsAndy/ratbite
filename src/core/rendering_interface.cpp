@@ -96,9 +96,14 @@ void RenderingInterface::fillModelMaterials(RenderingInterface::ModelResource& m
 				mat.baseColorFactor[2] = desc.baseColorFactor[2];
 				mat.baseColorFactor[3] = desc.baseColorFactor[3];
 			}
-			if (desc.alphaCutoffPresent)
+			if (desc.alphaInterpretation == SceneData::MaterialDescriptor::AlphaInterpretation::CUTOFF)
 			{
 				mat.factors |= MaterialData::FactorTypeBitfield::CUTOFF;
+				mat.alphaCutoff = desc.alphaCutoff;
+			}
+			else if (desc.alphaInterpretation == SceneData::MaterialDescriptor::AlphaInterpretation::BLEND)
+			{
+				mat.factors |= MaterialData::FactorTypeBitfield::BLEND;
 				mat.alphaCutoff = desc.alphaCutoff;
 			}
 			if (desc.metalRoughnessTextureIndex != -1)
@@ -133,6 +138,34 @@ void RenderingInterface::fillModelMaterials(RenderingInterface::ModelResource& m
 			{
 				mat.factors |= MaterialData::FactorTypeBitfield::TRANSMISSION;
 				mat.transmissionFactor = desc.transmitFactor;
+			}
+			if (desc.sheenPresent)
+			{
+				mat.sheenPresent = true;
+				if (desc.sheenColorFactorPresent)
+				{
+					mat.factors |= MaterialData::FactorTypeBitfield::SHEEN_COLOR;
+					mat.sheenColorFactor[0] = desc.sheenColorFactor[0];
+					mat.sheenColorFactor[1] = desc.sheenColorFactor[1];
+					mat.sheenColorFactor[2] = desc.sheenColorFactor[2];
+				}
+				if (desc.sheenColorTextureIndex != -1)
+				{
+					mat.textures |= MaterialData::TextureTypeBitfield::SHEEN_COLOR;
+					mat.sheenColorTexture = modelRes.textures[desc.sheenColorTextureIndex].getTextureObject();
+					mat.shcTexCoordSetIndex = desc.shcTexCoordIndex == 1;
+				}
+				if (desc.sheenRoughnessFactorPresent)
+				{
+					mat.factors |= MaterialData::FactorTypeBitfield::SHEEN_ROUGH;
+					mat.sheenRoughnessFactor = desc.sheenRoughnessFactor;
+				}
+				if (desc.sheenRoughTextureIndex != -1)
+				{
+					mat.textures |= MaterialData::TextureTypeBitfield::SHEEN_ROUGH;
+					mat.sheenRoughTexture = modelRes.textures[desc.sheenRoughTextureIndex].getTextureObject();
+					mat.shrTexCoordSetIndex = desc.shrTexCoordIndex == 1;
+				}
 			}
 			mat.ior = desc.ior;
 
@@ -552,7 +585,7 @@ void RenderingInterface::loadLookUpTables()
 	*lut = CudaCombinedTexture{lutWidth, lutHeight, lutDepth2D, TextureType::R32_FLOAT,
 			TextureAddress::CLAMP, TextureAddress::CLAMP, TextureAddress::CLAMP,
 			TextureFilter::LINEAR, false};
-	ifstr.open(getExeDir() / "bin/albedoConductorLUT.bin", std::ios_base::binary | std::ios_base::ate);
+	ifstr.open(getExeDir() / "bin" / "albedoConductorLUT.bin", std::ios_base::binary | std::ios_base::ate);
 	inputSize = static_cast<size_t>(ifstr.tellg());
 	input = new char[inputSize];
 	ifstr.seekg(0);
@@ -566,7 +599,7 @@ void RenderingInterface::loadLookUpTables()
 	*lut = CudaCombinedTexture{lutWidth, lutHeight, lutDepth3D, TextureType::R32_FLOAT,
 			TextureAddress::CLAMP, TextureAddress::CLAMP, TextureAddress::CLAMP,
 			TextureFilter::LINEAR, false};
-	ifstr.open(getExeDir() / "bin/albedoDielectricOuterLUT.bin", std::ios_base::binary | std::ios_base::ate);
+	ifstr.open(getExeDir() / "bin" / "albedoDielectricOuterLUT.bin", std::ios_base::binary | std::ios_base::ate);
 	inputSize = static_cast<size_t>(ifstr.tellg());
 	input = new char[inputSize];
 	ifstr.seekg(0);
@@ -580,7 +613,7 @@ void RenderingInterface::loadLookUpTables()
 	*lut = CudaCombinedTexture{lutWidth, lutHeight, lutDepth3D, TextureType::R32_FLOAT,
 			TextureAddress::CLAMP, TextureAddress::CLAMP, TextureAddress::CLAMP,
 			TextureFilter::LINEAR, false};
-	ifstr.open(getExeDir() / "bin/albedoDielectricInnerLUT.bin", std::ios_base::binary | std::ios_base::ate);
+	ifstr.open(getExeDir() / "bin" / "albedoDielectricInnerLUT.bin", std::ios_base::binary | std::ios_base::ate);
 	inputSize = static_cast<size_t>(ifstr.tellg());
 	input = new char[inputSize];
 	ifstr.seekg(0);
@@ -594,7 +627,7 @@ void RenderingInterface::loadLookUpTables()
 	*lut = CudaCombinedTexture{lutWidth, lutHeight, lutDepth3D, TextureType::R32_FLOAT,
 			TextureAddress::CLAMP, TextureAddress::CLAMP, TextureAddress::CLAMP,
 			TextureFilter::LINEAR, false};
-	ifstr.open(getExeDir() / "bin/albedoDielectricReflectiveOuterLUT.bin", std::ios_base::binary | std::ios_base::ate);
+	ifstr.open(getExeDir() / "bin" / "albedoDielectricReflectiveOuterLUT.bin", std::ios_base::binary | std::ios_base::ate);
 	inputSize = static_cast<size_t>(ifstr.tellg());
 	input = new char[inputSize];
 	ifstr.seekg(0);
@@ -608,7 +641,7 @@ void RenderingInterface::loadLookUpTables()
 	*lut = CudaCombinedTexture{lutWidth, lutHeight, lutDepth3D, TextureType::R32_FLOAT,
 			TextureAddress::CLAMP, TextureAddress::CLAMP, TextureAddress::CLAMP,
 			TextureFilter::LINEAR, false};
-	ifstr.open(getExeDir() / "bin/albedoDielectricReflectiveInnerLUT.bin", std::ios_base::binary | std::ios_base::ate);
+	ifstr.open(getExeDir() / "bin" / "albedoDielectricReflectiveInnerLUT.bin", std::ios_base::binary | std::ios_base::ate);
 	inputSize = static_cast<size_t>(ifstr.tellg());
 	input = new char[inputSize];
 	ifstr.seekg(0);
@@ -617,6 +650,20 @@ void RenderingInterface::loadLookUpTables()
 	lut->image.fill(input, 0, 0, 0, lutWidth, lutHeight, lutDepth3D, cudaMemcpyHostToDevice);
 	delete[] input;
 	m_launchParameters.LUTs.reflectiveDielectricInnerAlbedo = m_lookUpTables[LookUpTable::REFLECTIVE_DIELECTRIC_INNER_ALBEDO].texture.getTextureObject();
+
+	lut = &m_lookUpTables[LookUpTable::SHEEN_LTC];
+	*lut = CudaCombinedTexture{lutWidth, lutHeight, lutDepth2D, TextureType::R32G32B32A32_FLOAT,
+			TextureAddress::CLAMP, TextureAddress::CLAMP, TextureAddress::CLAMP,
+			TextureFilter::LINEAR, false};
+	ifstr.open(getExeDir() / "bin" / "sheenLUT.bin", std::ios_base::binary | std::ios_base::ate);
+	inputSize = static_cast<size_t>(ifstr.tellg());
+	input = new char[inputSize];
+	ifstr.seekg(0);
+	ifstr.read(input, inputSize);
+	ifstr.close();
+	lut->image.fill(input, 0, 0, 0, lutWidth, lutHeight, lutDepth2D, cudaMemcpyHostToDevice);
+	delete[] input;
+	m_launchParameters.LUTs.sheenLTC = m_lookUpTables[LookUpTable::SHEEN_LTC].texture.getTextureObject();
 }
 void RenderingInterface::prepareDataForRendering(const Camera& camera, const RenderContext& renderContext)
 {

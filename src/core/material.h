@@ -34,6 +34,8 @@ struct MaterialData
 		NORMAL        = 1 << 1,
 		MET_ROUGH     = 1 << 2,
 		TRANSMISSION  = 1 << 3,
+		SHEEN_COLOR   = 1 << 4,
+		SHEEN_ROUGH   = 1 << 5,
 
 		DESC
 	};
@@ -45,6 +47,9 @@ struct MaterialData
 		ROUGHNESS     = 1 << 2,
 		TRANSMISSION  = 1 << 3,
 		CUTOFF        = 1 << 4,
+		BLEND         = 1 << 5,
+		SHEEN_COLOR   = 1 << 6,
+		SHEEN_ROUGH   = 1 << 7,
 
 		DESC
 	};
@@ -52,6 +57,7 @@ struct MaterialData
 	uint32_t bxdfIndexSBT{};
 
 	bool doubleSided{};
+	bool sheenPresent{};
 
 	IndexType indexType{};
 	CUPTR(uint8_t) indices{};
@@ -77,16 +83,22 @@ struct MaterialData
 	bool mrTexCoordSetIndex{};
 	bool nmTexCoordSetIndex{};
 	bool trTexCoordSetIndex{};
+	bool shcTexCoordSetIndex{};
+	bool shrTexCoordSetIndex{};
 	cudaTextureObject_t baseColorTexture{};
 	cudaTextureObject_t normalTexture{};
 	cudaTextureObject_t pbrMetalRoughnessTexture{};
 	cudaTextureObject_t transmissionTexture{};
+	cudaTextureObject_t sheenColorTexture{};
+	cudaTextureObject_t sheenRoughTexture{};
 
 	FactorTypeBitfield factors{};
 	float baseColorFactor[4]{};
 	float metalnessFactor{};
 	float roughnessFactor{};
 	float transmissionFactor{};
+	float sheenColorFactor[3]{};
+	float sheenRoughnessFactor{};
 };
 ENABLE_ENUM_BITWISE_OPERATORS(MaterialData::AttributeTypeBitfield);
 ENABLE_ENUM_BITWISE_OPERATORS(MaterialData::TextureTypeBitfield);

@@ -19,6 +19,8 @@ namespace QRNG
 		LIGHT = 1,
 		SURFACE_BXDF_0 = 2,
 		SURFACE_BXDF_1 = 3,
+		SURFACE_BXDF_2 = 4,
+		SURFACE_BXDF_3 = 5,
 
 		ROULETTE = 8,
 		

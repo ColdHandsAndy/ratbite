@@ -35,13 +35,14 @@ struct SceneData
 		BxDF bxdf{};
 
 		bool doubleSided{ false };
+		bool sheenPresent{ false };
 
 		// Spectral Material
 		SpectralData::SpectralDataType baseIOR{};
 		SpectralData::SpectralDataType baseAC{};
 		SpectralData::SpectralDataType baseEmission{};
 		float roughness{};
-		// Triplet Material
+		// Complex Material
 		float ior{ 1.5f };
 		int baseColorTextureIndex{ -1 };
 		int bcTexCoordIndex{};
@@ -51,10 +52,20 @@ struct SceneData
 		int nmTexCoordIndex{};
 		int transmissionTextureIndex{ -1 };
 		int trTexCoordIndex{};
+		int sheenColorTextureIndex{ -1 };
+		int shcTexCoordIndex{};
+		int sheenRoughTextureIndex{ -1 };
+		int shrTexCoordIndex{};
 
 		bool bcFactorPresent{};
 		glm::vec4 baseColorFactor{};
-		bool alphaCutoffPresent{};
+		enum class AlphaInterpretation
+		{
+			NONE,
+			CUTOFF,
+			BLEND
+		};
+		AlphaInterpretation alphaInterpretation{};
 		float alphaCutoff{};
 		bool metFactorPresent{};
 		float metalnessFactor{};
@@ -62,9 +73,12 @@ struct SceneData
 		float roughnessFactor{};
 		bool transmitFactorPresent{};
 		float transmitFactor{};
+		bool sheenColorFactorPresent{};
+		float sheenColorFactor[3]{};
+		bool sheenRoughnessFactorPresent{};
+		float sheenRoughnessFactor{};
 	};
 
-	// TODO: Need to free index buffer before deleting a submesh
 	struct Submesh
 	{
 		IndexType indexType{};
