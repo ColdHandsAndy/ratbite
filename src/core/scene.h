@@ -15,7 +15,6 @@
 #include "../core/material.h"
 #include "../core/spectral.h"
 #include "../core/texture.h"
-#include "../core/light.h"
 #include "../core/util.h"
 
 struct SceneData
@@ -146,6 +145,21 @@ struct SceneData
 		int meshIndex{};
 		glm::mat4x3 transform{};
 	};
+	struct EmissiveMeshSubset
+	{
+		int instanceIndex{};
+		int submeshIndex{};
+		float transformFluxCorrection{};
+		struct TriangleData
+		{
+			glm::vec3 v0{};
+			glm::vec3 v1{};
+			glm::vec3 v2{};
+			uint32_t index{};
+			float flux{};
+		};
+		std::vector<TriangleData> triangles{};
+	};
 	struct Model
 	{
 		uint32_t id{};
@@ -154,6 +168,7 @@ struct SceneData
 
 		std::vector<Mesh> meshes{};
 		std::vector<Instance> instances{};
+		std::vector<EmissiveMeshSubset> instancedEmissiveMeshSubsets{};
 
 		glm::mat4x3 transform{};
 
@@ -183,7 +198,7 @@ struct SceneData
 		Model() = default;
 		Model(Model&& model)
 			: id{ model.id }, path{ std::move(model.path) }, name{ std::move(model.name) },
-			meshes{ std::move(model.meshes) }, instances{ std::move(model.instances) },
+			meshes{ std::move(model.meshes) }, instances{ std::move(model.instances) }, instancedEmissiveMeshSubsets{ std::move(model.instancedEmissiveMeshSubsets) },
 			transform{ model.transform },
 			triangleCount{ model.triangleCount },
 			imageData{ std::move(model.imageData) }, textureData{ std::move(model.textureData) },
@@ -198,6 +213,7 @@ struct SceneData
 
 			meshes = std::move(model.meshes);
 			instances = std::move(model.instances);
+			instancedEmissiveMeshSubsets = std::move(model.instancedEmissiveMeshSubsets);
 
 			transform = model.transform;
 
@@ -218,6 +234,7 @@ struct SceneData
 
 			meshes = model.meshes;
 			instances = model.instances;
+			instancedEmissiveMeshSubsets = model.instancedEmissiveMeshSubsets;
 
 			transform = model.transform;
 

@@ -4,6 +4,7 @@
 #include <stack>
 
 #include "../core/scene.h"
+#include "../core/light_tree_types.h"
 
 enum class CommandType : int
 {

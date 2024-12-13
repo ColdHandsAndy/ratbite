@@ -53,11 +53,11 @@ public:
 			glfwMakeContextCurrent(backupContext);
 		}
 	}
-	UI(UI&&) = default;
-	UI(const UI&) = default;
-	UI &operator=(UI&&) = default;
-	UI &operator=(const UI&) = default;
 	~UI() = default;
+	UI(UI&&) = delete;
+	UI& operator=(UI&&) = delete;
+	UI(const UI&) = delete;
+	UI& operator=(const UI&) = delete;
 
 	std::string getFileFromFileDialogWindow(GLFWwindow* window, const char* defaultPath, const char* fileFilters)
 	{

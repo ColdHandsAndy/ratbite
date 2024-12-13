@@ -19,7 +19,7 @@
 #    define CU_HOST
 #    define CU_DEVICE
 #    define CU_INLINE inline
-#	 define CU_CONSTANT
+#	 define CU_CONSTANT constexpr
 #endif
 
 #if defined(__CUDACC__)
@@ -56,7 +56,7 @@ namespace
 		constexpr bool enumBitwiseEnabledV = enumBitwiseEnabled<enumType>::value;
 
 	template <typename enumType>
-		CU_DEVICE CU_INLINE constexpr auto operator|(const enumType& lhs, const enumType& rhs)
+		CU_HOSTDEVICE CU_INLINE constexpr auto operator|(const enumType& lhs, const enumType& rhs)
 		-> typename enable_if_t<enumBitwiseEnabledV<enumType>, enumType>
 		{
 			return static_cast<enumType>(
@@ -64,14 +64,14 @@ namespace
 					static_cast<underlying_type_t<enumType>>(rhs));
 		}
 	template <typename enumType>
-		CU_DEVICE CU_INLINE constexpr auto operator|=(enumType& lhs, const enumType& rhs)
+		CU_HOSTDEVICE CU_INLINE constexpr auto operator|=(enumType& lhs, const enumType& rhs)
 		-> typename enable_if_t<enumBitwiseEnabledV<enumType>, void>
 		{
 			lhs = lhs | rhs;
 		}
 
 	template <typename enumType>
-		CU_DEVICE CU_INLINE constexpr auto operator&(const enumType& lhs, const enumType& rhs)
+		CU_HOSTDEVICE CU_INLINE constexpr auto operator&(const enumType& lhs, const enumType& rhs)
 		-> typename enable_if_t<enumBitwiseEnabledV<enumType>, enumType>
 		{
 			return static_cast<enumType>(
@@ -79,14 +79,14 @@ namespace
 					static_cast<underlying_type_t<enumType>>(rhs));
 		}
 	template <typename enumType>
-		CU_DEVICE CU_INLINE constexpr auto operator&=(enumType& lhs, const enumType& rhs)
+		CU_HOSTDEVICE CU_INLINE constexpr auto operator&=(enumType& lhs, const enumType& rhs)
 		-> typename enable_if_t<enumBitwiseEnabledV<enumType>, void>
 		{
 			lhs = lhs & rhs;
 		}
 
 	template <typename enumType>
-		CU_DEVICE CU_INLINE constexpr auto operator^(const enumType& lhs, const enumType& rhs)
+		CU_HOSTDEVICE CU_INLINE constexpr auto operator^(const enumType& lhs, const enumType& rhs)
 		-> typename enable_if_t<enumBitwiseEnabledV<enumType>, enumType>
 		{
 			return static_cast<enumType>(
@@ -94,14 +94,14 @@ namespace
 					static_cast<underlying_type_t<enumType>>(rhs));
 		}
 	template <typename enumType>
-		CU_DEVICE CU_INLINE constexpr auto operator^=(enumType& lhs, const enumType& rhs)
+		CU_HOSTDEVICE CU_INLINE constexpr auto operator^=(enumType& lhs, const enumType& rhs)
 		-> typename enable_if_t<enumBitwiseEnabledV<enumType>, void>
 		{
 			lhs = lhs ^ rhs;
 		}
 
 	template <typename enumType>
-		CU_DEVICE CU_INLINE constexpr auto operator~(const enumType& s)
+		CU_HOSTDEVICE CU_INLINE constexpr auto operator~(const enumType& s)
 		-> typename enable_if_t<enumBitwiseEnabledV<enumType>, enumType>
 		{
 			return static_cast<enumType>(~static_cast<underlying_type_t<enumType>>(s));

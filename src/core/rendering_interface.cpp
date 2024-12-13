@@ -26,7 +26,7 @@
 #include "../core/window.h"
 #include "../core/render_context.h"
 #include "../core/launch_parameters.h"
-#include "../core/light.h"
+#include "../core/light_tree_types.h"
 #include "../core/util.h"
 #include "../core/debug_macros.h"
 #include "../core/callbacks.h"
@@ -324,7 +324,7 @@ void RenderingInterface::uploadLightData(const SceneData& scene, const glm::vec3
 				.powerScale = dl.getPowerScale(),
 				.frame = dl.getFrame(),
 				.radius = dl.getRadius(),
-				.materialIndex = static_cast<uint16_t>(matIndex)};
+				.materialIndex = matIndex};
 		}
 		CUDA_CHECK(cudaMemcpy(reinterpret_cast<void*>(m_diskLights), diskLightData, scene.diskLights.size() * sizeof(DiskLightData), cudaMemcpyHostToDevice));
 		delete[] diskLightData;
@@ -349,7 +349,7 @@ void RenderingInterface::uploadLightData(const SceneData& scene, const glm::vec3
 				.powerScale = sl.getPowerScale(),
 				.frame = sl.getFrame(),
 				.radius = sl.getRadius(),
-				.materialIndex = static_cast<uint16_t>(matIndex)};
+				.materialIndex = matIndex};
 		}
 		CUDA_CHECK(cudaMemcpy(reinterpret_cast<void*>(m_sphereLights), sphereLightData, scene.sphereLights.size() * sizeof(SphereLightData), cudaMemcpyHostToDevice));
 		delete[] sphereLightData;
@@ -809,17 +809,17 @@ void RenderingInterface::buildGeometryAccelerationStructures(RenderingInterface:
 
 			gasBuildInputs[k] = OptixBuildInput{.type = OPTIX_BUILD_INPUT_TYPE_TRIANGLES,
 				.triangleArray = OptixBuildInputTriangleArray{
-					.vertexBuffers = &(vertexBuffers[k]),
-					.numVertices = static_cast<uint32_t>(submesh.vertices.size()),
-					.vertexFormat = OPTIX_VERTEX_FORMAT_FLOAT3,
-					.vertexStrideInBytes = sizeof(decltype(submesh.vertices)::value_type),
-					.indexBuffer = indexBuffers[k],
-					.numIndexTriplets = submesh.primitiveCount,
-					.indexFormat = indexFormat,
-					.indexStrideInBytes = indexStride,
-					.flags = &flags,
-					.numSbtRecords = 1,
-					.transformFormat = OPTIX_TRANSFORM_FORMAT_NONE}};
+				.vertexBuffers = &(vertexBuffers[k]),
+				.numVertices = static_cast<uint32_t>(submesh.vertices.size()),
+				.vertexFormat = OPTIX_VERTEX_FORMAT_FLOAT3,
+				.vertexStrideInBytes = sizeof(decltype(submesh.vertices)::value_type),
+				.indexBuffer = indexBuffers[k],
+				.numIndexTriplets = submesh.primitiveCount,
+				.indexFormat = indexFormat,
+				.indexStrideInBytes = indexStride,
+				.flags = &flags,
+				.numSbtRecords = 1,
+				.transformFormat = OPTIX_TRANSFORM_FORMAT_NONE}};
 		}
 
 		OptixAccelBuildOptions accelBuildOptions{

@@ -9,10 +9,9 @@
 
 #include "../core/util.h"
 #include "../core/material.h"
-#include "../core/light.h"
-#ifdef __CUDACC__
-#include "../device/spectral.h"
-#endif // __CUDACC__
+#include "../core/light_tree_types.h"
+
+class DenseSpectrum;
 
 struct LaunchParameters
 {

@@ -7,9 +7,10 @@
 #include <glm/gtc/quaternion.hpp>
 
 #include "../core/launch_parameters.h"
+#include "../core/math_util.h"
 #include "../core/util.h"
 #include "../core/material.h"
-#include "../core/light.h"
+#include "../core/light_tree_types.h"
 #include "../device/util.h"
 #include "../device/dir_gen.h"
 #include "../device/local_transform.h"
@@ -110,7 +111,7 @@ extern "C" __global__ void __closesthit__triangle()
 	bool flipNormals{ false };
 	float normalizeDiv{ (flipNormals ? -1.0f : 1.0f) * __frsqrt_rn(geometryNormal.x * geometryNormal.x + geometryNormal.y * geometryNormal.y + geometryNormal.z * geometryNormal.z) };
 	geometryNormal = {geometryNormal.x * normalizeDiv, geometryNormal.y * normalizeDiv, geometryNormal.z * normalizeDiv};
-	uint32_t encGeometryNormal{ utility::octohedral::encodeU32(glm::vec3{geometryNormal.x, geometryNormal.y, geometryNormal.z}) };
+	uint32_t encGeometryNormal{ Octohedral::encodeU32(glm::vec3{geometryNormal.x, geometryNormal.y, geometryNormal.z}) };
 
 	optixSetPayload_0(__float_as_uint(verticesObj[0].x * WFO[0] + verticesObj[0].y * WFO[1] + verticesObj[0].z * WFO[2]   + WFO[3]));
 	optixSetPayload_1(__float_as_uint(verticesObj[0].x * WFO[4] + verticesObj[0].y * WFO[5] + verticesObj[0].z * WFO[6]   + WFO[7]));
@@ -167,7 +168,7 @@ extern "C" __global__ void __intersection__disk()
 	bool intersect{ glm::dot(rhP, rhP) < dR * dR };
 	if (intersect)
 	{
-		uint32_t encGeometryNormal{ utility::octohedral::encodeU32(dN) };
+		uint32_t encGeometryNormal{ Octohedral::encodeU32(dN) };
 		glm::vec3 hP{ rhP + dC };
 		optixSetPayload_0(__float_as_uint(hP.x));
 		optixSetPayload_1(__float_as_uint(hP.y));
@@ -204,7 +205,7 @@ extern "C" __global__ void __closesthit__sphere()
 	if (d2 < sphere.w * sphere.w)
 		dN = -dN;
 
-	uint32_t encGeometryNormal{ utility::octohedral::encodeU32(dN) };
+	uint32_t encGeometryNormal{ Octohedral::encodeU32(dN) };
 	optixSetPayload_0(__float_as_uint(hP.x));
 	optixSetPayload_1(__float_as_uint(hP.y));
 	optixSetPayload_2(__float_as_uint(hP.z));
@@ -874,7 +875,7 @@ extern "C" __device__ void __direct_callable__ComplexSurface_BxDF(const Material
 CU_DEVICE CU_INLINE void unpackInteractionData(const LaunchParameters& params, uint32_t* pl,
 		Path& path, Interaction& interaction, glm::mat3& worldFromObjectNormal)
 {
-	interaction.geometryNormal = utility::octohedral::decodeU32(pl[3]);
+	interaction.geometryNormal = Octohedral::decodeU32(pl[3]);
 	uint32_t matIndex{ pl[7] & 0xFFFF };
 	interaction.material = params.materials + matIndex;
 	
@@ -1170,9 +1171,9 @@ extern "C" __global__ void __raygen__main()
 						{
 							attr = attribBuffer + interaction.material->normalOffset;
 
-							normals[0] = utility::octohedral::decode(*reinterpret_cast<glm::vec2*>(attr + attributesStride * indices[0]));
-							normals[1] = utility::octohedral::decode(*reinterpret_cast<glm::vec2*>(attr + attributesStride * indices[1]));
-							normals[2] = utility::octohedral::decode(*reinterpret_cast<glm::vec2*>(attr + attributesStride * indices[2]));
+							normals[0] = Octohedral::decode(*reinterpret_cast<glm::vec2*>(attr + attributesStride * indices[0]));
+							normals[1] = Octohedral::decode(*reinterpret_cast<glm::vec2*>(attr + attributesStride * indices[1]));
+							normals[2] = Octohedral::decode(*reinterpret_cast<glm::vec2*>(attr + attributesStride * indices[2]));
 							shadingNormal = glm::vec3{
 								baryWeights[0] * normals[0]
 								+

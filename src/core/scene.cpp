@@ -12,7 +12,8 @@
 
 namespace
 {
-	void processGLTFNode(const cgltf_data* modelData, const cgltf_node* node, size_t& triangleCount, std::vector<SceneData::Instance>& instances, cgltf_mesh* firstMesh, size_t meshCount, const glm::mat4& transform)
+	void processGLTFNode(const cgltf_data* modelData, const cgltf_node* node, const std::vector<SceneData::EmissiveMeshSubset>& emissiveMeshSubsets, const glm::mat4& transform,
+			size_t& triangleCount, std::vector<SceneData::Instance>& instances, std::vector<SceneData::EmissiveMeshSubset>& instancedEmissiveSubsets)
 	{
 		cgltf_float localMat[16]{};
 		cgltf_node_transform_local(node, localMat);
@@ -31,12 +32,22 @@ namespace
 		if (node->mesh != nullptr)
 		{
 			size_t index{ cgltf_mesh_index(modelData, node->mesh) };
+
 			instances.emplace_back(static_cast<int>(index),
 				glm::mat4x3{
 					glm::vec3{world[0][0], world[0][1], world[0][2]},
 					glm::vec3{world[1][0], world[1][1], world[1][2]},
 					glm::vec3{world[2][0], world[2][1], world[2][2]},
 					glm::vec3{world[3][0], world[3][1], world[3][2]}, });
+
+			if (emissiveMeshSubsets[index].triangles.size() != 0)
+			{
+				auto& instancedEmissiveSubset{ instancedEmissiveSubsets.emplace_back() };
+				instancedEmissiveSubset.instanceIndex = instances.size() - 1;
+				instancedEmissiveSubset.submeshIndex = emissiveMeshSubsets[index].submeshIndex;
+				instancedEmissiveSubset.triangles = emissiveMeshSubsets[index].triangles;
+				instancedEmissiveSubset.transformFluxCorrection = glm::abs(glm::determinant(glm::mat3{world}));
+			}
 
 			for (int i{ 0 }; i < node->mesh->primitives_count; ++i)
 				if (node->mesh->primitives[i].attributes != nullptr)
@@ -46,13 +57,16 @@ namespace
 		for (int i{ 0 }; i < node->children_count; ++i)
 		{
 			const cgltf_node* child{ node->children[i] };
-			processGLTFNode(modelData, child, triangleCount, instances, firstMesh, meshCount, world);
+			processGLTFNode(modelData, child, emissiveMeshSubsets, world,
+					triangleCount, instances, instancedEmissiveSubsets);
 		}
 	}
-	void processGLTFScene(const cgltf_data* modelData, const cgltf_scene* scene, size_t& triangleCount, std::vector<SceneData::Instance>& instances, cgltf_mesh* firstMesh, size_t meshCount)
+	void processGLTFSceneGraph(const cgltf_data* modelData, const std::vector<SceneData::EmissiveMeshSubset>& emissiveMeshSubsets,
+			size_t& triangleCount, std::vector<SceneData::Instance>& instances, std::vector<SceneData::EmissiveMeshSubset>& instancedEmissiveSubsets)
 	{
-		for (int i{ 0 }; i < scene->nodes_count; ++i)
-			processGLTFNode(modelData, scene->nodes[i], triangleCount, instances, firstMesh, meshCount, glm::identity<glm::mat4>());
+		for (int i{ 0 }; i < modelData->scene->nodes_count; ++i)
+			processGLTFNode(modelData, modelData->scene->nodes[i], emissiveMeshSubsets, glm::identity<glm::mat4>(),
+					triangleCount, instances, instancedEmissiveSubsets);
 	}
 
 	SceneData::Model loadGLTF(const std::filesystem::path& path, const glm::mat4& transform, uint32_t id)
@@ -70,7 +84,6 @@ namespace
 		cgltf_options options{};
 		cgltf_data* data{};
 		cgltf_result result{};
-		cgltf_mesh* firstMesh{};
 
 		result = cgltf_parse_file(&options, path.string().c_str(), &data);
 		R_ASSERT_LOG(result == cgltf_result_success, "Parsing GLTF file failed");
@@ -78,6 +91,7 @@ namespace
 
 		cgltf_load_buffers(&options, data, path.string().c_str());
 
+		// Load Image and Texture data
 		auto loadImage( [&](const char* uri, const cgltf_buffer_view* bufferView) -> int{
 				int index{};
 				if (uri)
@@ -167,9 +181,11 @@ namespace
 			textureData.emplace_back(static_cast<int>(cgltf_image_index(data, tex->image)), false, filter, addressX, addressY);
 		}
 
-		firstMesh = data->meshes;
-		size_t meshCount{ data->meshes_count };
-		for (int i{ 0 }; i < meshCount; ++i)
+		// Create emissive subsets for every mesh but only fill ones with emissive materials
+		std::vector<SceneData::EmissiveMeshSubset> emissiveSubsets(data->meshes_count);
+
+		// Process meshes and submeshes
+		for (int i{ 0 }; i < data->meshes_count; ++i)
 		{
 			SceneData::Mesh& sceneMesh{ model.meshes.emplace_back() };
 
@@ -177,6 +193,8 @@ namespace
 			for (int j{ 0 }; j < mesh.primitives_count; ++j)
 			{
 				SceneData::Submesh& sceneSubmesh{ sceneMesh.submeshes.emplace_back() };
+				bool emissiveFactorPresent{ false };
+				bool emissiveTexturePresent{ false };
 
 				const cgltf_primitive& primitive{ mesh.primitives[j] };
 				if (primitive.type != cgltf_primitive_type_triangles)
@@ -185,6 +203,7 @@ namespace
 					continue;
 				}
 
+				// Create material descriptor from material data
 				const cgltf_material* material{ primitive.material };
 				int matIndex{ static_cast<int>(materialDescriptors.size()) };
 				SceneData::MaterialDescriptor descriptor{};
@@ -258,8 +277,8 @@ namespace
 
 					if (material->has_sheen &&
 						!(material->sheen.sheen_color_factor[0] == 0.0f &&
-						material->sheen.sheen_color_factor[1] == 0.0f &&
-						material->sheen.sheen_color_factor[2] == 0.0f))
+						  material->sheen.sheen_color_factor[1] == 0.0f &&
+						  material->sheen.sheen_color_factor[2] == 0.0f))
 					{
 						descriptor.sheenPresent = true;
 						if (material->sheen.sheen_color_factor[0] != 1.0f ||
@@ -289,58 +308,82 @@ namespace
 							descriptor.shrTexCoordIndex = material->sheen.sheen_roughness_texture.texcoord;
 						}
 					}
+
+					if (!(material->emissive_factor[0] == 0.0f &&
+						  material->emissive_factor[1] == 0.0f &&
+						  material->emissive_factor[2] == 0.0f))
+					{
+						emissiveFactorPresent = true;
+
+						float emissiveFactor[3]{ material->emissive_factor[0], material->emissive_factor[1], material->emissive_factor[2] };
+						if (material->has_emissive_strength)
+						{
+							emissiveFactor[0] *= material->emissive_strength.emissive_strength;
+							emissiveFactor[1] *= material->emissive_strength.emissive_strength;
+							emissiveFactor[2] *= material->emissive_strength.emissive_strength;
+							// TODO: Add emissive factor to the descriptor.
+						}
+
+						if (material->emissive_texture.texture != nullptr)
+						{
+							emissiveTexturePresent = true;
+							// TODO: Add emissive texture to the descriptor.
+						}
+					}
 				}
 				materialDescriptors.push_back(descriptor);
 
-				size_t count{ primitive.indices->count };
-				size_t stride{ primitive.indices->stride };
-				size_t offset{ primitive.indices->offset + primitive.indices->buffer_view->offset };
 
-				R_ASSERT_LOG(primitive.attributes_count != 0, "No attributes in the mesh primitive");
-				size_t vertCount{ primitive.attributes[0].data->count };
-				switch (primitive.indices->component_type)
+				// Load indices for a submesh
 				{
-					case cgltf_component_type_r_8u:
-						{
-							sceneSubmesh = SceneData::Submesh::createSubmesh(primitive.indices->count, IndexType::UINT_16, vertCount, matIndex);
-							uint16_t* data{ reinterpret_cast<uint16_t*>(sceneSubmesh.indices) };
-							R_ASSERT_LOG(stride == primitive.indices->buffer_view->stride || primitive.indices->buffer_view->stride == 0, "Buffer stride is not equal to accessor stride");
-							for (int i{ 0 }; i < count; ++i)
-								data[i] = static_cast<uint16_t>(reinterpret_cast<uint8_t*>(primitive.indices->buffer_view->buffer->data)[offset + i * stride]);
-						}
-						break;
-					case cgltf_component_type_r_16u:
-						{
-							sceneSubmesh = SceneData::Submesh::createSubmesh(primitive.indices->count, IndexType::UINT_16, vertCount, matIndex);
-							uint16_t* data{ reinterpret_cast<uint16_t*>(sceneSubmesh.indices) };
-							R_ASSERT_LOG(stride == primitive.indices->buffer_view->stride || primitive.indices->buffer_view->stride == 0, "Buffer stride is not equal to accessor stride");
-							for (int i{ 0 }; i < count; ++i)
-								data[i] = *reinterpret_cast<uint16_t*>(reinterpret_cast<uint8_t*>(primitive.indices->buffer_view->buffer->data) + offset + i * stride);
-						}
-						break;
-					case cgltf_component_type_r_32u:
-						{
-							sceneSubmesh = SceneData::Submesh::createSubmesh(primitive.indices->count, IndexType::UINT_32, vertCount, matIndex);
-							uint32_t* data{ reinterpret_cast<uint32_t*>(sceneSubmesh.indices) };
-							R_ASSERT_LOG(stride == primitive.indices->buffer_view->stride || primitive.indices->buffer_view->stride == 0, "Buffer stride is not equal to accessor stride");
-							for (int i{ 0 }; i < count; ++i)
-								data[i] = *reinterpret_cast<uint32_t*>(reinterpret_cast<uint8_t*>(primitive.indices->buffer_view->buffer->data) + offset + i * stride);
-						}
-						break;
-					default:
-						R_LOG("Unsupported index type");
-						continue;
-						break;
+					R_ASSERT_LOG(primitive.attributes_count != 0, "No attributes in the mesh primitive");
+					size_t vertCount{ primitive.attributes[0].data->count };
+					size_t stride{ primitive.indices->stride };
+					size_t offset{ primitive.indices->offset + primitive.indices->buffer_view->offset };
+					switch (primitive.indices->component_type)
+					{
+						case cgltf_component_type_r_8u:
+							{
+								sceneSubmesh = SceneData::Submesh::createSubmesh(primitive.indices->count, IndexType::UINT_16, vertCount, matIndex);
+								uint16_t* data{ reinterpret_cast<uint16_t*>(sceneSubmesh.indices) };
+								R_ASSERT_LOG(stride == primitive.indices->buffer_view->stride || primitive.indices->buffer_view->stride == 0, "Buffer stride is not equal to accessor stride");
+								for (int k{ 0 }; k < primitive.indices->count; ++k)
+									data[k] = static_cast<uint16_t>(reinterpret_cast<uint8_t*>(primitive.indices->buffer_view->buffer->data)[offset + k * stride]);
+							}
+							break;
+						case cgltf_component_type_r_16u:
+							{
+								sceneSubmesh = SceneData::Submesh::createSubmesh(primitive.indices->count, IndexType::UINT_16, vertCount, matIndex);
+								uint16_t* data{ reinterpret_cast<uint16_t*>(sceneSubmesh.indices) };
+								R_ASSERT_LOG(stride == primitive.indices->buffer_view->stride || primitive.indices->buffer_view->stride == 0, "Buffer stride is not equal to accessor stride");
+								for (int k{ 0 }; k < primitive.indices->count; ++k)
+									data[k] = *reinterpret_cast<uint16_t*>(reinterpret_cast<uint8_t*>(primitive.indices->buffer_view->buffer->data) + offset + k * stride);
+							}
+							break;
+						case cgltf_component_type_r_32u:
+							{
+								sceneSubmesh = SceneData::Submesh::createSubmesh(primitive.indices->count, IndexType::UINT_32, vertCount, matIndex);
+								uint32_t* data{ reinterpret_cast<uint32_t*>(sceneSubmesh.indices) };
+								R_ASSERT_LOG(stride == primitive.indices->buffer_view->stride || primitive.indices->buffer_view->stride == 0, "Buffer stride is not equal to accessor stride");
+								for (int k{ 0 }; k < primitive.indices->count; ++k)
+									data[k] = *reinterpret_cast<uint32_t*>(reinterpret_cast<uint8_t*>(primitive.indices->buffer_view->buffer->data) + offset + k * stride);
+							}
+							break;
+						default:
+							R_LOG("Unsupported index type");
+							continue;
+							break;
+					}
 				}
 
-				count = vertCount;
+				// Load vertex attributes for a submesh
 				for (int k{ 0 }; k < primitive.attributes_count; ++k)
 				{
 					const cgltf_attribute& attribute{ primitive.attributes[k] };
 
-					stride = attribute.data->stride;
+					size_t stride{ attribute.data->stride };
 					R_ASSERT_LOG(stride == attribute.data->buffer_view->stride || attribute.data->buffer_view->stride == 0, "Buffer stride is not equal to accessor stride");
-					offset = attribute.data->buffer_view->offset + attribute.data->offset;
+					size_t offset{ attribute.data->buffer_view->offset + attribute.data->offset };
 
 					auto coordinateChange{ [](const glm::vec3& v)->glm::vec3 { return {-v.x, v.z, v.y}; } };
 					switch (attribute.type)
@@ -411,10 +454,75 @@ namespace
 							break;
 					}
 				}
+
+				// Cut emissive triangles from a submesh
+				// if (emissiveFactorPresent || emissiveTexturePresent)
+				if (emissiveFactorPresent && !emissiveTexturePresent) // Until emissive texture flux calculation is implemented
+				{
+					emissiveSubsets[i].submeshIndex = j;
+
+					uint32_t triangleCount{ static_cast<uint32_t>(primitive.indices->count / 3) };
+					size_t stride{ primitive.indices->stride };
+					size_t offset{ primitive.indices->offset + primitive.indices->buffer_view->offset };
+					emissiveSubsets[i].triangles.reserve(triangleCount);
+					for (uint32_t k{ 0 }; k < triangleCount; ++k)
+					{
+						uint32_t indices[3]{};
+						switch (primitive.indices->component_type)
+						{
+							case cgltf_component_type_r_8u:
+								{
+									indices[0] = *reinterpret_cast<uint8_t*>(reinterpret_cast<uint8_t*>(primitive.indices->buffer_view->buffer->data) + offset + (k * 3 + 0) * stride);
+									indices[1] = *reinterpret_cast<uint8_t*>(reinterpret_cast<uint8_t*>(primitive.indices->buffer_view->buffer->data) + offset + (k * 3 + 1) * stride);
+									indices[2] = *reinterpret_cast<uint8_t*>(reinterpret_cast<uint8_t*>(primitive.indices->buffer_view->buffer->data) + offset + (k * 3 + 2) * stride);
+								}
+								break;
+							case cgltf_component_type_r_16u:
+								{
+									indices[0] = *reinterpret_cast<uint16_t*>(reinterpret_cast<uint8_t*>(primitive.indices->buffer_view->buffer->data) + offset + (k * 3 + 0) * stride);
+									indices[1] = *reinterpret_cast<uint16_t*>(reinterpret_cast<uint8_t*>(primitive.indices->buffer_view->buffer->data) + offset + (k * 3 + 1) * stride);
+									indices[2] = *reinterpret_cast<uint16_t*>(reinterpret_cast<uint8_t*>(primitive.indices->buffer_view->buffer->data) + offset + (k * 3 + 2) * stride);
+								}
+								break;
+							case cgltf_component_type_r_32u:
+								{
+									indices[0] = *reinterpret_cast<uint32_t*>(reinterpret_cast<uint8_t*>(primitive.indices->buffer_view->buffer->data) + offset + (k * 3 + 0) * stride);
+									indices[1] = *reinterpret_cast<uint32_t*>(reinterpret_cast<uint8_t*>(primitive.indices->buffer_view->buffer->data) + offset + (k * 3 + 1) * stride);
+									indices[2] = *reinterpret_cast<uint32_t*>(reinterpret_cast<uint8_t*>(primitive.indices->buffer_view->buffer->data) + offset + (k * 3 + 2) * stride);
+								}
+								break;
+							default:
+								R_LOG("Unsupported index type");
+								continue;
+						}
+
+						float triangleFlux{ 0.0f };
+						glm::vec3 vertices[3]{
+							sceneSubmesh.vertices[indices[0]],
+							sceneSubmesh.vertices[indices[1]],
+							sceneSubmesh.vertices[indices[2]], };
+						// TODO: Texture flux calculation
+						triangleFlux = glm::length(glm::cross(vertices[1] - vertices[0], vertices[2] - vertices[0])) * 0.5f;
+						if (triangleFlux > 0.0f)
+						{
+							// Make emissive triangles degenerate since we need to create separate AC for them
+							sceneSubmesh.vertices[indices[0]] = glm::vec4{0.0f};
+							sceneSubmesh.vertices[indices[1]] = glm::vec4{0.0f};
+							sceneSubmesh.vertices[indices[2]] = glm::vec4{0.0f};
+
+							emissiveSubsets[i].triangles.push_back(SceneData::EmissiveMeshSubset::TriangleData{
+									.v0 = vertices[0],
+									.v1 = vertices[1],
+									.v2 = vertices[2],
+									.index = k,
+									.flux = triangleFlux });
+						}
+					}
+				}
 			}
 		}
 
-		processGLTFScene(data, data->scene, model.triangleCount, model.instances, firstMesh, meshCount);
+		processGLTFSceneGraph(data, emissiveSubsets, model.triangleCount, model.instances, model.instancedEmissiveMeshSubsets);
 
 		cgltf_free(data);
 
