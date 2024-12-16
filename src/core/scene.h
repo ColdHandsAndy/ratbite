@@ -76,6 +76,8 @@ struct SceneData
 		float sheenColorFactor[3]{};
 		bool sheenRoughnessFactorPresent{};
 		float sheenRoughnessFactor{};
+		bool emissiveFactorPresent{};
+		float emissiveFactor[3]{};
 	};
 
 	struct Submesh
@@ -155,6 +157,9 @@ struct SceneData
 			glm::vec3 v0{};
 			glm::vec3 v1{};
 			glm::vec3 v2{};
+			glm::vec3 v0WS{}; // Vertices transformed to world space
+			glm::vec3 v1WS{};
+			glm::vec3 v2WS{};
 			uint32_t index{};
 			float flux{};
 		};

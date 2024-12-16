@@ -36,6 +36,7 @@ struct MaterialData
 		TRANSMISSION  = 1 << 3,
 		SHEEN_COLOR   = 1 << 4,
 		SHEEN_ROUGH   = 1 << 5,
+		EMISSION      = 1 << 6,
 
 		DESC
 	};
@@ -50,6 +51,7 @@ struct MaterialData
 		BLEND         = 1 << 5,
 		SHEEN_COLOR   = 1 << 6,
 		SHEEN_ROUGH   = 1 << 7,
+		EMISSION      = 1 << 8,
 
 		DESC
 	};
@@ -99,6 +101,7 @@ struct MaterialData
 	float transmissionFactor{};
 	float sheenColorFactor[3]{};
 	float sheenRoughnessFactor{};
+	float emissiveFactor[3]{};
 };
 ENABLE_ENUM_BITWISE_OPERATORS(MaterialData::AttributeTypeBitfield);
 ENABLE_ENUM_BITWISE_OPERATORS(MaterialData::TextureTypeBitfield);

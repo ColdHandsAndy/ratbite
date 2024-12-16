@@ -37,7 +37,7 @@ struct SphereLightData
 	float radius{};
 	uint32_t materialIndex{};
 };
-struct EmissiveTriangleData
+struct EmissiveTriangleLightData
 {
 	float vertices[9]{};
 	uint32_t materialIndex{};
@@ -154,7 +154,7 @@ namespace LightTree
 		// 	coreData{ (1u << 31u) | ((lightCount & ((1u << KLightCountBits) - 1u)) << KLightOffsetBits) | (lightOffset & ((1u << KLightOffsetBits) - 1u)) }
 		// {}
 
-		bool isLeaf() const { return (coreData >> 31u) == 0u; }
+		bool isLeaf() const { return (coreData >> 31u) != 0u; }
 
 		void packAttributes(const NodeAttributes& attributes)
 		{

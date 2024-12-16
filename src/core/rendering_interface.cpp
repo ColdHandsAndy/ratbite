@@ -27,10 +27,12 @@
 #include "../core/render_context.h"
 #include "../core/launch_parameters.h"
 #include "../core/light_tree_types.h"
+#include "../core/light_tree.h"
 #include "../core/util.h"
 #include "../core/debug_macros.h"
 #include "../core/callbacks.h"
 #include "../kernels/optix_programs_desc.h"
+
 
 void RenderingInterface::createOptixContext()
 {
@@ -166,6 +168,13 @@ void RenderingInterface::fillModelMaterials(RenderingInterface::ModelResource& m
 					mat.sheenRoughTexture = modelRes.textures[desc.sheenRoughTextureIndex].getTextureObject();
 					mat.shrTexCoordSetIndex = desc.shrTexCoordIndex == 1;
 				}
+			}
+			if (desc.emissiveFactorPresent)
+			{
+				mat.factors |= MaterialData::FactorTypeBitfield::EMISSION;
+				mat.emissiveFactor[0] = desc.emissiveFactor[0];
+				mat.emissiveFactor[1] = desc.emissiveFactor[1];
+				mat.emissiveFactor[2] = desc.emissiveFactor[2];
 			}
 			mat.ior = desc.ior;
 
@@ -1673,6 +1682,55 @@ void RenderingInterface::processCommands(CommandBuffer& commands, RenderContext&
 					rebuildIAS = true;
 					updateSBTRecords = true;
 					restartRender = true;
+
+					//
+					uint32_t lightCount{ 0 };
+					for(auto& model : scene.models)
+						for(auto& subset : model.instancedEmissiveMeshSubsets)
+							lightCount += subset.triangles.size();
+					LightTree::Builder::SortData* sortData{ new LightTree::Builder::SortData[lightCount] };
+					uint32_t sdIndex{ 0 };
+					for (int i{ 0 }; i < scene.models.size(); ++i)
+					{
+						auto& model{ scene.models[i] };
+						for (int j{ 0 }; j < model.instancedEmissiveMeshSubsets.size(); ++j)
+						{
+							auto& subset{ model.instancedEmissiveMeshSubsets[j] };
+							for (int k{ 0 }; k < subset.triangles.size(); ++k)
+							{
+								auto& triangle{ subset.triangles[k] };
+								glm::vec3 normal{ glm::normalize(glm::cross(triangle.v1WS - triangle.v0WS, triangle.v2WS - triangle.v0WS)) };
+								sortData[sdIndex].bounds.min[0] = std::min(triangle.v0WS.x, std::min(triangle.v1WS.x, triangle.v2WS.x));
+								sortData[sdIndex].bounds.min[1] = std::min(triangle.v0WS.y, std::min(triangle.v1WS.y, triangle.v2WS.y));
+								sortData[sdIndex].bounds.min[2] = std::min(triangle.v0WS.z, std::min(triangle.v1WS.z, triangle.v2WS.z));
+								sortData[sdIndex].bounds.max[0] = std::max(triangle.v0WS.x, std::max(triangle.v1WS.x, triangle.v2WS.x));
+								sortData[sdIndex].bounds.max[1] = std::max(triangle.v0WS.y, std::max(triangle.v1WS.y, triangle.v2WS.y));
+								sortData[sdIndex].bounds.max[2] = std::max(triangle.v0WS.z, std::max(triangle.v1WS.z, triangle.v2WS.z));
+								for (int i{ 0 }; i < 3; ++i)
+								{
+									if (sortData[sdIndex].bounds.max[i] <= sortData[sdIndex].bounds.min[i])
+									{
+										sortData[sdIndex].bounds.min[i] = sortData[sdIndex].bounds.max[i] - std::numeric_limits<float>::epsilon();
+										sortData[sdIndex].bounds.max[i] = sortData[sdIndex].bounds.max[i] + std::numeric_limits<float>::epsilon();
+									}
+								}
+								sortData[sdIndex].coneDirection[0] = normal.x;
+								sortData[sdIndex].coneDirection[1] = normal.y;
+								sortData[sdIndex].coneDirection[2] = normal.z;
+								sortData[sdIndex].cosConeAngle = 1.0f;
+								sortData[sdIndex].flux = triangle.flux * subset.transformFluxCorrection;
+								sortData[sdIndex].lightDataRef.triangleRef.modelIndex = i;
+								sortData[sdIndex].lightDataRef.triangleRef.subsetIndex = j;
+								sortData[sdIndex].lightDataRef.triangleRef.triangleIndex = k;
+								++sdIndex;
+							}
+						}
+					}
+					LightTree::Builder builder{};
+					LightTree::Tree tree{ builder.build(scene, sortData, lightCount) };
+					delete[] sortData;
+					//
+
 					break;
 				}
 			case CommandType::CHANGE_MODEL_MATERIAL:

@@ -55,6 +55,7 @@ struct LaunchParameters
 		CUPTR(uint16_t) orderedCount{};
 		CUPTR(DiskLightData) disks{};
 		CUPTR(SphereLightData) spheres{};
+		CUPTR(EmissiveTriangleLightData) triangles{};
 	} lights{};
 
 	struct EnvironmentMap

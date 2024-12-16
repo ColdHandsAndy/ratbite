@@ -1,7 +1,6 @@
 #pragma once
 
 #include <cstdint>
-#include <cmath>
 
 #include "../core/light_tree_types.h"
 
@@ -12,8 +11,8 @@
 // "Hierarchical Light Sampling with Accurate Spherical Gaussian Lighting"
 // https://gpuopen.com/download/publications/Hierarchical_Light_Sampling_with_Accurate_Spherical_Gaussian_Lighting.pdf
 
-class SceneData;
 // TODO: Add other kinds of lights to the LightTree
+struct SceneData;
 namespace LightTree
 {
 	struct Tree
@@ -54,8 +53,7 @@ namespace LightTree
 	{
 		struct SortData
 		{
-			AABB::BBox bound{};
-			float center[3]{};
+			AABB::BBox bounds{};
 			float coneDirection[3]{};
 			float cosConeAngle{};
 			float flux{};
@@ -67,8 +65,8 @@ namespace LightTree
 					uint32_t modelIndex{};
 					uint32_t subsetIndex{};
 					uint32_t triangleIndex{};
-				} triangleRef;
-			} lightDataRef;
+				} triangleRef{};
+			} lightDataRef{};
 		};
 		Tree build(const SceneData& scene, SortData* lightsSortData, const int lightCount);
 		

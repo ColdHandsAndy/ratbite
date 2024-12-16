@@ -1,54 +1,47 @@
+#include "../core/light_tree.h"
+
+#include <cmath>
+#include <numbers>
 #include <algorithm>
 #include <glm/vec4.hpp>
 #include <glm/vec3.hpp>
 #include <glm/geometric.hpp>
 
-#include "../core/light_tree_types.h"
-#include "../core/light_tree.h"
 #include "../core/scene.h"
 #include "../core/debug_macros.h"
 
-namespace
+static LightTree::NodeAttributes generateLightNodeAttributes(const SceneData& scene, const LightTree::Builder::SortData& sortData)
 {
-	LightTree::NodeAttributes generateLightNodeAttributes(const SceneData& scene, const LightTree::Builder::SortData& lightsSortData)
-	{
-		LightTree::NodeAttributes resAttr{};
+	LightTree::NodeAttributes resAttr{};
 
-		uint32_t modelIdx{ lightsSortData.lightDataRef.triangleRef.modelIndex };
-		uint32_t subsetIdx{ lightsSortData.lightDataRef.triangleRef.subsetIndex };
-		uint32_t triangleIdx{ lightsSortData.lightDataRef.triangleRef.triangleIndex };
+	uint32_t modelIdx{ sortData.lightDataRef.triangleRef.modelIndex };
+	uint32_t subsetIdx{ sortData.lightDataRef.triangleRef.subsetIndex };
+	uint32_t triangleIdx{ sortData.lightDataRef.triangleRef.triangleIndex };
 
-		SceneData::EmissiveMeshSubset::TriangleData triangle{ scene.models[modelIdx].instancedEmissiveMeshSubsets[subsetIdx].triangles[triangleIdx] };
-		const SceneData::Instance& instance{ scene.models[modelIdx].instances[scene.models[modelIdx].instancedEmissiveMeshSubsets[subsetIdx].instanceIndex] };
-		triangle.v0 = instance.transform * glm::vec4{triangle.v0, 1.0f};
-		triangle.v1 = instance.transform * glm::vec4{triangle.v1, 1.0f};
-		triangle.v2 = instance.transform * glm::vec4{triangle.v2, 1.0f};
+	SceneData::EmissiveMeshSubset::TriangleData triangle{ scene.models[modelIdx].instancedEmissiveMeshSubsets[subsetIdx].triangles[triangleIdx] };
 
-		glm::vec3 e1{ triangle.v1 - triangle.v0 };
-		glm::vec3 e2{ triangle.v2 - triangle.v0 };
-		glm::vec3 normal{ glm::normalize(glm::cross(e1, e2)) };
-		glm::vec3 spatialMean{ (triangle.v0 + triangle.v1 + triangle.v2) / 3.0f };
-		resAttr.spatialMean[0] = spatialMean.x;
-		resAttr.spatialMean[1] = spatialMean.y;
-		resAttr.spatialMean[2] = spatialMean.z;
-		resAttr.spatialVariance =
-			((e1.x * e1.x + e1.y * e1.y + e1.z * e1.z) + (e2.x * e2.x + e2.y * e2.y + e2.z * e2.z) - glm::dot(e1, e2))
-			/ 18.0f;
-		resAttr.averageDirection[0] = normal.x;
-		resAttr.averageDirection[1] = normal.y;
-		resAttr.averageDirection[2] = normal.z;
-		resAttr.sharpness = (3.0f * 0.5f - 0.5f * 0.5f * 0.5f) / (1.0f - 0.5f * 0.5f);
-		resAttr.flux = lightsSortData.flux; // Using this value since it is already transform corrected
+	glm::vec3 e1{ triangle.v1WS - triangle.v0WS };
+	glm::vec3 e2{ triangle.v2WS - triangle.v0WS };
+	glm::vec3 normal{ glm::normalize(glm::cross(e1, e2)) };
+	glm::vec3 spatialMean{ (triangle.v0WS + triangle.v1WS + triangle.v2WS) / 3.0f };
+	resAttr.spatialMean[0] = spatialMean.x;
+	resAttr.spatialMean[1] = spatialMean.y;
+	resAttr.spatialMean[2] = spatialMean.z;
+	resAttr.spatialVariance =
+		((e1.x * e1.x + e1.y * e1.y + e1.z * e1.z) + (e2.x * e2.x + e2.y * e2.y + e2.z * e2.z) - glm::dot(e1, e2)) / 18.0f;
+	resAttr.averageDirection[0] = normal.x;
+	resAttr.averageDirection[1] = normal.y;
+	resAttr.averageDirection[2] = normal.z;
+	resAttr.sharpness = (3.0f * 0.5f - 0.5f * 0.5f * 0.5f) / (1.0f - 0.5f * 0.5f);
+	resAttr.flux = sortData.flux; // Using this value since it is already transform corrected
 
-		return resAttr;
-	}
+	return resAttr;
 }
 
 namespace LightTree
 {
 	Tree Builder::build(const SceneData& scene, SortData* lightsSortData, const int lightCount)
 	{
-		// TODO: (IMPORTANT) Ensure all light flux values are above the given threshold and were transform corrected
 		Tree tree{};
 
 		// Check if there are lights in the scene
@@ -83,21 +76,22 @@ namespace LightTree
 				printf("Tree node data was reallocated.\n");
 				PackedNode* newAlloc{ new PackedNode[tree.reservedNodeCount * 2] };
 				memcpy(newAlloc, tree.nodes, sizeof(PackedNode) * tree.reservedNodeCount);
+				delete[] tree.nodes;
 				tree.reservedNodeCount *= 2;
 				tree.nodes = newAlloc;
 			} };
 
 		float flux{ 0.0 };
-		AABB::BBox bound{ AABB::BBox::getDefault() };
+		AABB::BBox bounds{ AABB::BBox::getDefault() };
 
 		// Create BBox union for the entire range
 		for (uint32_t i{ range.begin }; i < range.end; ++i)
 		{
-			bound = AABB::createUnion(bound, sortData[i].bound);
+			bounds = AABB::createUnion(bounds, sortData[i].bounds);
 			flux += sortData[i].flux;
 		}
 
-		SplitResult split{ range.length() < KMaxLeafLightCount ? splitFunction(sortData, range, bound, flux) : SplitResult{} };
+		SplitResult split{ range.length() > KMaxLeafLightCount ? splitFunction(sortData, range, bounds, flux) : SplitResult{} };
 
 		if (split.isValid())
 		{
@@ -105,9 +99,9 @@ namespace LightTree
 			auto compFunc{ [dim = split.axis](const SortData& a, const SortData& b) -> bool
 				{
 					float aC[3]{};
-					a.bound.getCenter(aC[0], aC[1], aC[2]);
+					a.bounds.getCenter(aC[0], aC[1], aC[2]);
 					float bC[3]{};
-					b.bound.getCenter(bC[0], bC[1], bC[2]);
+					b.bounds.getCenter(bC[0], bC[1], bC[2]);
 					return aC[dim] < bC[dim];
 				} };
 			std::nth_element(sortData + range.begin, sortData + split.index, sortData + range.end, compFunc);
@@ -119,7 +113,7 @@ namespace LightTree
 			tree.nodeCount += 1;
 
 			// Build child branches and leafs
-			if (KMaxDepth)
+			if (depth == KMaxDepth)
 				R_ERR_LOG("Max light tree depth exceeded.");
 			uint32_t leftIndex{ buildNodeHierarchy(scene, bitmask | (0ull << depth), depth + 1, sortData, SortRange{range.begin, split.index}, tree) };
 			uint32_t rightIndex{ buildNodeHierarchy(scene, bitmask | (1ull << depth), depth + 1, sortData, SortRange{split.index, range.end}, tree) };
@@ -156,14 +150,229 @@ namespace LightTree
 			return nodeIndex;
 		}
 	}
-	Builder::SplitResult Builder::splitFunction(SortData* sortData, const SortRange& range, const AABB::BBox& bound, float flux)
+	Builder::SplitResult Builder::splitFunction(SortData* sortData, const SortRange& range, const AABB::BBox& bounds, float flux)
 	{
-		// Placeholder middle split ( TODO: - BAAAAAD. REPLACE IT IMEDIATELY)
+		constexpr float KCosAngleEntireCone{ -1.0f };
+		constexpr uint32_t KBinCount{ 16 };
+		constexpr uint32_t KCostsArraySize{ KBinCount - 1 };
+
+		// Compute the minimum cos cone angle that includes both given cones
+		const auto computeCosConeAngle{ [](const float* coneDirA, const float cosThetaA, const float* coneDirB, const float cosThetaB) {
+			float cosResult{ KCosAngleEntireCone };
+			if (cosThetaA != KCosAngleEntireCone && cosThetaB != KCosAngleEntireCone)
+			{
+				const float cosDiffTheta{ coneDirA[0] * coneDirB[0] + coneDirA[1] * coneDirB[1] + coneDirA[2] * coneDirB[2] };
+				const float sinDiffTheta{ std::sqrt(1.0f - cosDiffTheta * cosDiffTheta) };
+				const float sinThetaB{ std::sqrt(1.0f - cosThetaB * cosThetaB) };
+
+				// Rotate (cosDiffTheta, sinDiffTheta) counterclockwise by the other cone's spread angle.
+				float cosTotalTheta{ cosThetaB * cosDiffTheta - sinThetaB * sinDiffTheta };
+				float sinTotalTheta{ sinThetaB * cosDiffTheta + cosThetaB * sinDiffTheta };
+
+				// If the total angle is less than pi, store the new cone angle.
+				// Otherwise, the bounding cone will be deactivated because it would represent the whole sphere.
+				if (sinTotalTheta > 0.0f)
+					cosResult = std::min(cosThetaB, cosTotalTheta);
+			}
+			return cosResult;
+		} };
+		// Function evaluating SAOH metric for a node
+		const auto evalSAOH{ [](const AABB::BBox& bounds, const float flux, const float cosTheta) {
+			constexpr float pi{ std::numbers::pi_v<float> };
+			float aabbCost{ bounds.isValid() ? bounds.getSurfaceArea() : 0.0f };
+			float thetaO{ cosTheta != KCosAngleEntireCone ? std::acos(std::max(std::min(cosTheta, 1.0f), -1.0f)) : pi };
+			float thetaW{ std::min(thetaO + pi / 2.0f, pi) };
+			float sinThetaO{ std::sin(thetaO) };
+			float cosThetaO{ std::cos(thetaO) };
+			float orientationCost{ 2.0f * pi * (1.0f - cosThetaO) +
+				pi / 2.0f * (2.0f * thetaW * sinThetaO - std::cos(thetaO - 2.0f * thetaW) - 2.0f * thetaO * sinThetaO + cosThetaO) };
+			float cost{ flux * aabbCost * orientationCost };
+			R_ASSERT_LOG(cost >= 0.0f && !std::isnan(cost) && !std::isinf(cost), "Calculated SAOH cost is invalid.");
+			return cost;
+		} };
+
+		// Initialize split data and dimensions
+		float splitCost{ std::numeric_limits<float>::max() };
 		Builder::SplitResult split{};
-		float dims[3]{};
-		bound.getDimensions(dims[0], dims[1], dims[2]);
-		split.axis = (dims[2] > dims[0] && dims[2] > dims[1]) ? 2 : (dims[1] > dims[0] ? 1 : 0);
-		split.index = range.middle();
+		float dimensions[3]{};
+		bounds.getDimensions(dimensions[0], dimensions[1], dimensions[2]);
+		uint32_t largestDimension{ dimensions[0] > dimensions[1] && dimensions[0] > dimensions[2] ? 0u : (dimensions[1] > dimensions[2] ? 1u : 2u) };
+
+		// Bins approximate multiple lights which are close to each other and they are used for SAOH computation for a speedup
+		struct Bin
+		{
+			AABB::BBox bounds{};
+			uint32_t lCount{ 0 };
+			float flux{ 0.0f };
+			float coneDirection[3]{ 0.0f, 0.0f, 0.0f };
+			float cosConeAngle{ 1.0f };
+
+			Bin() = default;
+			Bin(const SortData& sd)
+				: bounds{ sd.bounds }, lCount{ 1 }, flux{ sd.flux },
+				coneDirection{ sd.coneDirection[0], sd.coneDirection[1], sd.coneDirection[2] }, cosConeAngle{ sd.cosConeAngle } {}
+			Bin& operator|= (const Bin& rhs)
+			{
+				bounds = AABB::createUnion(bounds, rhs.bounds);
+				lCount += rhs.lCount;
+				flux += rhs.flux;
+				coneDirection[0] += rhs.coneDirection[0];
+				coneDirection[1] += rhs.coneDirection[1];
+				coneDirection[2] += rhs.coneDirection[2];
+				return *this;
+			}
+		};
+
+		// Allocate bins and costs memory
+		Bin* bins{ new Bin[KBinCount] };
+		float* costs{ new float[KCostsArraySize] };
+
+		// Function that computes the best split along a given dimension
+		const auto binAlongDimension = [&bins, &costs,
+			  &range, &sortData, &bounds,
+			  &split, &splitCost, &dimensions, &largestDimension,
+			  &computeCosConeAngle, &evalSAOH](const uint32_t dimension)
+		{
+			// Bin ID is an index into equally partitioned space
+			auto getBinId = [&](const SortData& sd)
+			{
+				float bmin{ bounds.min[dimension] };
+				float bmax{ bounds.max[dimension] };
+				float w{ bmax - bmin };
+				R_ASSERT(w >= 0.0f);
+				float scale{ w > std::numeric_limits<float>::min() ? static_cast<float>(KBinCount) / w : 0.0f };
+				float c[3]{};
+				sd.bounds.getCenter(c[0], c[1], c[2]);
+				float p{ c[dimension] };
+				R_ASSERT(bmin <= p && p <= bmax);
+				return std::min(static_cast<uint32_t>((p - bmin) * scale), KBinCount - 1);
+			};
+
+			// Initialize bins
+			for (int i{ 0 }; i < KBinCount; ++i)
+				bins[i] = Bin{};
+			for (uint32_t i{ range.begin }; i < range.end; ++i)
+				bins[getBinId(sortData[i])] |= sortData[i];
+
+			// Compute bins cosConeAngles and coneDirections
+			for (int i{ 0 }; i < KBinCount; ++i)
+			{
+				Bin& bin{ bins[i] };
+				float coneDirL{ std::sqrt(
+						bin.coneDirection[0] * bin.coneDirection[0] +
+						bin.coneDirection[1] * bin.coneDirection[1] +
+						bin.coneDirection[2] * bin.coneDirection[2]) };
+				if (coneDirL < std::numeric_limits<float>::min())
+				{
+					bin.cosConeAngle = KCosAngleEntireCone;
+				}
+				else
+				{
+					bin.cosConeAngle = 1.0f;
+					bin.coneDirection[0] /= coneDirL;
+					bin.coneDirection[1] /= coneDirL;
+					bin.coneDirection[2] /= coneDirL;
+				}
+			}
+			for (uint32_t i{ range.begin }; i < range.end; ++i)
+			{
+				const SortData& sd{ sortData[i] };
+				Bin& bin{ bins[getBinId(sd)] };
+				bin.cosConeAngle = computeCosConeAngle(bin.coneDirection, bin.cosConeAngle, sd.coneDirection, sd.cosConeAngle);
+			}
+
+			// Sweeping over the bins to calculate costs
+			Bin total{};
+			for (int i{ 0 }; i < KCostsArraySize; ++i)
+			{
+				total |= bins[i];
+
+				float cosTheta{ KCosAngleEntireCone };
+				float coneDirL{ std::sqrt(
+						total.coneDirection[0] * total.coneDirection[0] +
+						total.coneDirection[1] * total.coneDirection[1] +
+						total.coneDirection[2] * total.coneDirection[2]) };
+				if (coneDirL > std::numeric_limits<float>::min())
+				{
+					cosTheta = 1.0f;
+					float coneDir[3]{
+						total.coneDirection[0] / coneDirL,
+						total.coneDirection[1] / coneDirL,
+						total.coneDirection[2] / coneDirL, };
+					for (int j{ 0 }; j <= i; ++j)
+						cosTheta = computeCosConeAngle(coneDir, cosTheta, bins[j].coneDirection, bins[j].cosConeAngle);
+				}
+
+				costs[i] = evalSAOH(total.bounds, total.flux, cosTheta);
+			}
+			total = Bin{};
+			for (int i{ KCostsArraySize }; i > 0; --i)
+			{
+				total |= bins[i];
+
+				float cosTheta{ KCosAngleEntireCone };
+				float coneDirL{ std::sqrt(
+						total.coneDirection[0] * total.coneDirection[0] +
+						total.coneDirection[1] * total.coneDirection[1] +
+						total.coneDirection[2] * total.coneDirection[2]) };
+				if (coneDirL > std::numeric_limits<float>::min())
+				{
+					cosTheta = 1.0f;
+					float coneDir[3]{
+						total.coneDirection[0] / coneDirL,
+						total.coneDirection[1] / coneDirL,
+						total.coneDirection[2] / coneDirL, };
+					for (int j = i; j <= KCostsArraySize; ++j)
+						cosTheta = computeCosConeAngle(coneDir, cosTheta, bins[j].coneDirection, bins[j].cosConeAngle);
+				}
+
+				costs[i - 1] += evalSAOH(total.bounds, total.flux, cosTheta);
+			}
+
+			// Get the best split
+			float axisSplitCost{ std::numeric_limits<float>::max() };
+			SplitResult axisSplit{ .axis = dimension, .index = 0 };
+			for (uint32_t i{ 0 }, lIdx{ range.begin }; i < KCostsArraySize; ++i)
+			{
+				lIdx += bins[i].lCount;
+				if (costs[i] < axisSplitCost)
+				{
+					axisSplitCost = costs[i];
+					axisSplit = { .axis = dimension, .index = lIdx };
+				}
+			}
+			R_ASSERT_LOG(range.begin <= axisSplit.index && axisSplit.index <= range.end, "Split index is outside the range");
+
+			// Correct split cost to avoid long and thin cuts
+			axisSplitCost *= dimensions[largestDimension] / dimensions[dimension];
+
+			// Return if all lights are on one side of the split
+			if (axisSplit.index == range.begin || axisSplit.index == range.end)
+				return;
+
+			// Choose the better split between current one and the one we just found
+			if (axisSplitCost < splitCost)
+			{
+				splitCost = axisSplitCost;
+				split = axisSplit;
+			}
+		};
+
+		// Bin along larges though there may be better splits along other dimensions ( TODO: Add an option to bin along all dimensions)
+		binAlongDimension(largestDimension);
+
+		if (!split.isValid())
+		{
+			if (range.length() <= KMaxLeafLightCount) // TODO: Add an option to choose max leaf light count
+				return SplitResult{};
+			else
+				return SplitResult{.axis = largestDimension, .index = range.middle()};
+		}
+
+		// TODO: Compare leaf cost and split cost then create a leaf if necessary
+
+		delete[] bins;
+		delete[] costs;
 		return split;
 	}
 

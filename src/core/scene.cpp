@@ -12,7 +12,9 @@
 
 namespace
 {
-	void processGLTFNode(const cgltf_data* modelData, const cgltf_node* node, const std::vector<SceneData::EmissiveMeshSubset>& emissiveMeshSubsets, const glm::mat4& transform,
+	void processGLTFNode(const cgltf_data* modelData, const cgltf_node* node,
+			const glm::mat4& worldFromModel, glm::mat4 modelFromLocal,
+			const std::vector<SceneData::EmissiveMeshSubset>& emissiveMeshSubsets,
 			size_t& triangleCount, std::vector<SceneData::Instance>& instances, std::vector<SceneData::EmissiveMeshSubset>& instancedEmissiveSubsets)
 	{
 		cgltf_float localMat[16]{};
@@ -27,7 +29,7 @@ namespace
 			glm::vec4{-c1[0], c1[2], c1[1], c1[3]},
 			glm::vec4{-c3[0], c3[2], c3[1], c3[3]},
 		};
-		glm::mat4 world{ transform * coordinateCorrectedLocalTransform };
+		modelFromLocal = modelFromLocal * coordinateCorrectedLocalTransform;
 
 		if (node->mesh != nullptr)
 		{
@@ -35,10 +37,10 @@ namespace
 
 			instances.emplace_back(static_cast<int>(index),
 				glm::mat4x3{
-					glm::vec3{world[0][0], world[0][1], world[0][2]},
-					glm::vec3{world[1][0], world[1][1], world[1][2]},
-					glm::vec3{world[2][0], world[2][1], world[2][2]},
-					glm::vec3{world[3][0], world[3][1], world[3][2]}, });
+					glm::vec3{modelFromLocal[0][0], modelFromLocal[0][1], modelFromLocal[0][2]},
+					glm::vec3{modelFromLocal[1][0], modelFromLocal[1][1], modelFromLocal[1][2]},
+					glm::vec3{modelFromLocal[2][0], modelFromLocal[2][1], modelFromLocal[2][2]},
+					glm::vec3{modelFromLocal[3][0], modelFromLocal[3][1], modelFromLocal[3][2]}, });
 
 			if (emissiveMeshSubsets[index].triangles.size() != 0)
 			{
@@ -46,7 +48,13 @@ namespace
 				instancedEmissiveSubset.instanceIndex = instances.size() - 1;
 				instancedEmissiveSubset.submeshIndex = emissiveMeshSubsets[index].submeshIndex;
 				instancedEmissiveSubset.triangles = emissiveMeshSubsets[index].triangles;
-				instancedEmissiveSubset.transformFluxCorrection = glm::abs(glm::determinant(glm::mat3{world}));
+				for (int i{ 0 }; i < instancedEmissiveSubset.triangles.size(); ++i)
+				{
+					instancedEmissiveSubset.triangles[i].v0WS = worldFromModel * modelFromLocal * glm::vec4{instancedEmissiveSubset.triangles[i].v0, 1.0f};
+					instancedEmissiveSubset.triangles[i].v1WS = worldFromModel * modelFromLocal * glm::vec4{instancedEmissiveSubset.triangles[i].v1, 1.0f};
+					instancedEmissiveSubset.triangles[i].v2WS = worldFromModel * modelFromLocal * glm::vec4{instancedEmissiveSubset.triangles[i].v2, 1.0f};
+				}
+				instancedEmissiveSubset.transformFluxCorrection = glm::abs(glm::determinant(glm::mat3{worldFromModel * modelFromLocal}));
 			}
 
 			for (int i{ 0 }; i < node->mesh->primitives_count; ++i)
@@ -57,15 +65,21 @@ namespace
 		for (int i{ 0 }; i < node->children_count; ++i)
 		{
 			const cgltf_node* child{ node->children[i] };
-			processGLTFNode(modelData, child, emissiveMeshSubsets, world,
+			processGLTFNode(modelData, child,
+					worldFromModel, modelFromLocal,
+					emissiveMeshSubsets,
 					triangleCount, instances, instancedEmissiveSubsets);
 		}
 	}
 	void processGLTFSceneGraph(const cgltf_data* modelData, const std::vector<SceneData::EmissiveMeshSubset>& emissiveMeshSubsets,
-			size_t& triangleCount, std::vector<SceneData::Instance>& instances, std::vector<SceneData::EmissiveMeshSubset>& instancedEmissiveSubsets)
+			const glm::mat4& worldFromModel,
+			size_t& triangleCount,
+			std::vector<SceneData::Instance>& instances, std::vector<SceneData::EmissiveMeshSubset>& instancedEmissiveSubsets)
 	{
 		for (int i{ 0 }; i < modelData->scene->nodes_count; ++i)
-			processGLTFNode(modelData, modelData->scene->nodes[i], emissiveMeshSubsets, glm::identity<glm::mat4>(),
+			processGLTFNode(modelData, modelData->scene->nodes[i],
+					worldFromModel, glm::identity<glm::mat4>(),
+					emissiveMeshSubsets,
 					triangleCount, instances, instancedEmissiveSubsets);
 	}
 
@@ -318,10 +332,9 @@ namespace
 						float emissiveFactor[3]{ material->emissive_factor[0], material->emissive_factor[1], material->emissive_factor[2] };
 						if (material->has_emissive_strength)
 						{
-							emissiveFactor[0] *= material->emissive_strength.emissive_strength;
-							emissiveFactor[1] *= material->emissive_strength.emissive_strength;
-							emissiveFactor[2] *= material->emissive_strength.emissive_strength;
-							// TODO: Add emissive factor to the descriptor.
+							descriptor.emissiveFactor[0] = emissiveFactor[0] * material->emissive_strength.emissive_strength;
+							descriptor.emissiveFactor[1] = emissiveFactor[1] * material->emissive_strength.emissive_strength;
+							descriptor.emissiveFactor[2] = emissiveFactor[2] * material->emissive_strength.emissive_strength;
 						}
 
 						if (material->emissive_texture.texture != nullptr)
@@ -522,7 +535,7 @@ namespace
 			}
 		}
 
-		processGLTFSceneGraph(data, emissiveSubsets, model.triangleCount, model.instances, model.instancedEmissiveMeshSubsets);
+		processGLTFSceneGraph(data, emissiveSubsets, model.transform, model.triangleCount, model.instances, model.instancedEmissiveMeshSubsets);
 
 		cgltf_free(data);
 

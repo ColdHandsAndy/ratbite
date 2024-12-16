@@ -1,6 +1,5 @@
 #pragma once
 
-#include <cuda/std/cmath>
 #include <glm/vec2.hpp>
 #include <glm/vec3.hpp>
 #include <glm/geometric.hpp>
@@ -40,6 +39,16 @@ namespace AABB
 			getDimensions(x, y, z);
 			return x * y * z;
 		}
+		CU_HOSTDEVICE CU_INLINE float getSurfaceArea() const
+		{
+			float x{}, y{}, z{};
+			getDimensions(x, y, z);
+			return x * y * 2.0f + x * z * 2.0f + y * z * 2.0f;
+		}
+		CU_HOSTDEVICE CU_INLINE bool isValid() const
+		{
+			return min[0] <= max[0] && min[1] <= max[1] && min[2] <= max[2];
+		}
 	};
 	// Centered AABB
 	struct CBox
@@ -75,6 +84,12 @@ namespace AABB
 			float x{}, y{}, z{};
 			getDimensions(x, y, z);
 			return x * y * z;
+		}
+		CU_HOSTDEVICE CU_INLINE float getSurfaceArea() const
+		{
+			float x{}, y{}, z{};
+			getDimensions(x, y, z);
+			return x * y * 2.0f + x * z * 2.0f + y * z * 2.0f;
 		}
 	};
 

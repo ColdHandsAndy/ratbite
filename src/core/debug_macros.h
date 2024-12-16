@@ -8,35 +8,36 @@
 #include <cuda_runtime.h>
 #include <optix.h>
 
+#define R_ASSERT(cond)				if (!static_cast<bool>(cond)) \
+{ \
+	std::cerr << std::format("Assertion failed.\n\tFile: {}\n\tLine: {}\n", __FILE__, __LINE__); \
+	std::abort(); \
+}
+#define R_ASSERT_LOG(cond, msg)		if (!static_cast<bool>(cond)) \
+{ \
+	std::cerr << std::format("Assertion failed.\n\tFile: {}\n\tLine: {}\n\tMessage: {}\n", __FILE__, __LINE__, msg); \
+	std::abort(); \
+}
+#define R_LOG(msg)					std::cerr << std::format("Log message.\n\tFile: {}\n\tLine: {}\n\tMessage: {}\n", __FILE__, __LINE__, msg);
+#define R_LOG_COND(cond, msg)		if (!static_cast<bool>(cond)) \
+{ \
+	std::cerr << std::format("Log message.\n\tFile: {}\n\tLine: {}\n\tMessage: {}\n", __FILE__, __LINE__, msg); \
+}
+#define R_ERR()						{\
+	std::cerr << std::format("Error.\n\tFile: {}\n\tLine: {}\n", __FILE__, __LINE__); \
+	std::abort();\
+}
+#define R_ERR_LOG(msg)				{\
+	std::cerr << std::format("Error.\n\tFile: {}\n\tLine: {}\n\tMessage: {}\n", __FILE__, __LINE__, msg); \
+	std::abort();\
+}
+
+
 #define CUDA_CHECK(call)			checkCUDA(call, #call, __FILE__, __LINE__)
 #define CUDA_SYNC_DEVICE()			cudaSyncCheck(__FILE__, __LINE__)
 #define CUDA_SYNC_STREAM(stream)	static_assert(std::is_same<std::decay_t<decltype(stream)>, cudaStream_t>::value, "Stream should be of type (cudaStream_t)"); cudaSyncStream(__FILE__, __LINE__, stream);
 #define OPTIX_CHECK(call)			checkOptix(call, #call, __FILE__, __LINE__)
 #define OPTIX_CHECK_LOG(call)		{ char OPTIX_LOG[2048]{}; size_t OPTIX_LOG_SIZE{}; checkOptixLog(call, OPTIX_LOG, OPTIX_LOG_SIZE, #call, __FILE__, __LINE__); }
-
-#define R_ASSERT(cond)				if (!static_cast<bool>(cond)) \
-									{ \
-										std::cerr << std::format("Assertion failed.\n\tFile: {}\n\tLine: {}\n", __FILE__, __LINE__); \
-										std::abort(); \
-									}
-#define R_ASSERT_LOG(cond, msg)		if (!static_cast<bool>(cond)) \
-									{ \
-										std::cerr << std::format("Assertion failed.\n\tFile: {}\n\tLine: {}\n\tMessage: {}\n", __FILE__, __LINE__, msg); \
-										std::abort(); \
-									}
-#define R_LOG(msg)					std::cerr << std::format("Log message.\n\tFile: {}\n\tLine: {}\n\tMessage: {}\n", __FILE__, __LINE__, msg);
-#define R_LOG_COND(cond, msg)		if (!static_cast<bool>(cond)) \
-									{ \
-										std::cerr << std::format("Log message.\n\tFile: {}\n\tLine: {}\n\tMessage: {}\n", __FILE__, __LINE__, msg); \
-									}
-#define R_ERR()						{\
-										std::cerr << std::format("Error.\n\tFile: {}\n\tLine: {}\n", __FILE__, __LINE__); \
-										std::abort();\
-									}
-#define R_ERR_LOG(msg)				{\
-										std::cerr << std::format("Error.\n\tFile: {}\n\tLine: {}\n\tMessage: {}\n", __FILE__, __LINE__, msg); \
-										std::abort();\
-									}
 
 inline void checkCUDA(cudaError_t error, const char* call, const char* file, uint32_t line)
 {
