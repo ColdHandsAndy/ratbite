@@ -527,7 +527,7 @@ namespace
 									.v0 = vertices[0],
 									.v1 = vertices[1],
 									.v2 = vertices[2],
-									.index = k,
+									.primIndex = k,
 									.flux = triangleFlux });
 						}
 					}

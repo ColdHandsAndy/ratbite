@@ -14,6 +14,7 @@
 #include "../core/launch_parameters.h"
 #include "../core/texture.h"
 #include "../core/command.h"
+#include "../core/light_tree.h"
 
 class RenderingInterface
 {
@@ -23,11 +24,6 @@ private:
 
 	OptixModule m_ptModule{};
 	OptixModule m_builtInSphereModule{};
-
-	OptixTraversableHandle m_customPrimHandle{};
-	CUdeviceptr m_customPrimBuffer{};
-	CUdeviceptr m_spherePrimitiveHandle{};
-	CUdeviceptr m_spherePrimBuffer{};
 
 	enum LookUpTable
 	{
@@ -105,6 +101,7 @@ private:
 		std::vector<CUdeviceptr> attributeBuffers{};
 		std::vector<CudaImage> images{};
 		std::vector<CudaTexture> textures{};
+		std::vector<uint32_t> meshMaterialIndexOffsets{};
 		std::vector<uint32_t> materialIndices{};
 	};
 	std::map<uint32_t, ModelResource> m_modelResources{};
@@ -114,6 +111,13 @@ private:
 		uint32_t materialIndex{};
 	};
 	std::map<uint32_t, LightResource> m_lightResources{};
+
+	OptixTraversableHandle m_emissiveTriangleSetPrimHandle{};
+	CUdeviceptr m_emissiveTriangleSetPrimBuffer{};
+	OptixTraversableHandle m_customPrimHandle{};
+	CUdeviceptr m_customPrimBuffer{};
+	CUdeviceptr m_spherePrimitiveHandle{};
+	CUdeviceptr m_spherePrimBuffer{};
 
 	LaunchParameters m_launchParameters{};
 

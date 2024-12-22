@@ -20,18 +20,26 @@ namespace LightTree
 		PackedNode* nodes{};
 		int nodeCount{};
 		int reservedNodeCount{};
-		enum BitmaskSet
-		{
-			TRIANGLE_SET,
-			// DISK_SET,
-			// SPHERE_SET,
-
-			ALL_SETS
-		};
-		uint64_t* bitmaskSets[BitmaskSet::ALL_SETS]{};
+		LightPointer* lightPointers{};
+		int lightCount{};
+		uint32_t lightCounts[static_cast<int>(LightType::ALL)]{};
+		uint64_t* bitmaskSets[static_cast<int>(LightType::ALL)]{};
 
 		void clear()
 		{
+			if (nodes != nullptr)
+			{
+				delete[] nodes;
+				nodes = nullptr;
+				reservedNodeCount = 0;
+				nodeCount = 0;
+			}
+			if (lightPointers != nullptr)
+			{
+				delete[] lightPointers;
+				lightPointers = nullptr;
+				lightCount = 0;
+			}
 			for (int i{ 0 }; i < ARRAYSIZE(bitmaskSets); ++i)
 			{
 				if (bitmaskSets[i] != nullptr)
@@ -39,13 +47,6 @@ namespace LightTree
 					delete[] bitmaskSets[i];
 					bitmaskSets[i] = nullptr;
 				}
-			}
-			if (nodes != nullptr)
-			{
-				delete[] nodes;
-				nodes = nullptr;
-				reservedNodeCount = 0;
-				nodeCount = 0;
 			}
 		}
 	};
@@ -57,7 +58,8 @@ namespace LightTree
 			float coneDirection[3]{};
 			float cosConeAngle{};
 			float flux{};
-			// LightType lightType{};
+			LightType lightType{};
+			uint32_t lightIndex{};
 			union
 			{
 				struct
@@ -68,7 +70,7 @@ namespace LightTree
 				} triangleRef{};
 			} lightDataRef{};
 		};
-		Tree build(const SceneData& scene, SortData* lightsSortData, const int lightCount);
+		Tree build(const SceneData& scene, const float* cameraPosition, SortData* lightsSortData, const int lightCount, const int triangleLightCount);
 		
 	private:
 		struct SortRange
@@ -97,7 +99,7 @@ namespace LightTree
 
 			bool isValid() const { return axis != UINT32_MAX && index != UINT32_MAX; }
 		};
-		uint32_t buildNodeHierarchy(const SceneData& scene, uint64_t bitmask, uint32_t depth, SortData* sortData, const SortRange& range, Tree& tree);
+		uint32_t buildNodeHierarchy(const SceneData& scene, const float* cameraPosition, uint64_t bitmask, uint32_t depth, SortData* sortData, const SortRange& range, Tree& tree);
 		SplitResult splitFunction(SortData* sortData, const SortRange& range, const AABB::BBox& bound, float flux);
 		NodeAttributes fillBranchNodeAttributes(uint32_t nodeIndex, Tree& tree);
 	};

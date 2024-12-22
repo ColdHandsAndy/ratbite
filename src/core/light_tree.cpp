@@ -10,7 +10,7 @@
 #include "../core/scene.h"
 #include "../core/debug_macros.h"
 
-static LightTree::NodeAttributes generateLightNodeAttributes(const SceneData& scene, const LightTree::Builder::SortData& sortData)
+static LightTree::NodeAttributes generateLightNodeAttributes(const SceneData& scene, const float* cameraPosition, const LightTree::Builder::SortData& sortData)
 {
 	LightTree::NodeAttributes resAttr{};
 
@@ -24,6 +24,10 @@ static LightTree::NodeAttributes generateLightNodeAttributes(const SceneData& sc
 	glm::vec3 e2{ triangle.v2WS - triangle.v0WS };
 	glm::vec3 normal{ glm::normalize(glm::cross(e1, e2)) };
 	glm::vec3 spatialMean{ (triangle.v0WS + triangle.v1WS + triangle.v2WS) / 3.0f };
+	// Translate spatial means to world camera space
+	spatialMean.x = spatialMean.x - cameraPosition[0];
+	spatialMean.y = spatialMean.y - cameraPosition[1];
+	spatialMean.z = spatialMean.z - cameraPosition[2];
 	resAttr.spatialMean[0] = spatialMean.x;
 	resAttr.spatialMean[1] = spatialMean.y;
 	resAttr.spatialMean[2] = spatialMean.z;
@@ -40,7 +44,7 @@ static LightTree::NodeAttributes generateLightNodeAttributes(const SceneData& sc
 
 namespace LightTree
 {
-	Tree Builder::build(const SceneData& scene, SortData* lightsSortData, const int lightCount)
+	Tree Builder::build(const SceneData& scene, const float* cameraPosition, SortData* lightsSortData, const int lightCount, const int triangleLightCount)
 	{
 		Tree tree{};
 
@@ -55,21 +59,25 @@ namespace LightTree
 		tree.reservedNodeCount = lightCount * 2;
 		tree.nodes = new PackedNode[tree.reservedNodeCount];
 		tree.nodeCount = 0;
-		tree.bitmaskSets[Tree::TRIANGLE_SET] = new uint64_t[lightCount];
-		memset(tree.bitmaskSets[Tree::TRIANGLE_SET], 0xFF, lightCount * sizeof(uint64_t));
+		tree.lightPointers = new LightPointer[lightCount];
+		tree.lightCount = lightCount;
+		R_ASSERT_LOG(lightCount == triangleLightCount, "Only triangle lights work now");
+		tree.lightCounts[KTriangleLightsArrayIndex] = triangleLightCount;
+		tree.bitmaskSets[KTriangleLightsArrayIndex] = new uint64_t[triangleLightCount];
+		memset(tree.bitmaskSets[KTriangleLightsArrayIndex], 0xFF, triangleLightCount * sizeof(uint64_t));
 
 		// Build the Tree
-		buildNodeHierarchy(scene, 0, 0, lightsSortData, SortRange{0, static_cast<uint32_t>(lightCount)}, tree);
+		buildNodeHierarchy(scene, cameraPosition, 0, 0, lightsSortData, SortRange{0, static_cast<uint32_t>(lightCount)}, tree);
 		R_ASSERT_LOG(tree.nodeCount != 0, "No nodes produced by light tree construction");
-		for (int i{ 0 }; i < lightCount; ++i)
-			R_ASSERT_LOG(tree.bitmaskSets[Tree::TRIANGLE_SET][i] != UINT64_MAX, "Invalid light tree bitmask generated.");
+		for (int i{ 0 }; i < triangleLightCount; ++i)
+			R_ASSERT_LOG(tree.bitmaskSets[KTriangleLightsArrayIndex][i] != UINT64_MAX, "Invalid light tree bitmask generated.");
 
 		// Fill the branch node spatial and directional data
 		fillBranchNodeAttributes(0, tree);
 
 		return tree;
 	}
-	uint32_t Builder::buildNodeHierarchy(const SceneData& scene, uint64_t bitmask, uint32_t depth, SortData* sortData, const SortRange& range, Tree& tree)
+	uint32_t Builder::buildNodeHierarchy(const SceneData& scene, const float* cameraPosition, uint64_t bitmask, uint32_t depth, SortData* sortData, const SortRange& range, Tree& tree)
 	{
 		auto reallocateTreeNodes{ [&tree]()
 			{
@@ -115,8 +123,8 @@ namespace LightTree
 			// Build child branches and leafs
 			if (depth == KMaxDepth)
 				R_ERR_LOG("Max light tree depth exceeded.");
-			uint32_t leftIndex{ buildNodeHierarchy(scene, bitmask | (0ull << depth), depth + 1, sortData, SortRange{range.begin, split.index}, tree) };
-			uint32_t rightIndex{ buildNodeHierarchy(scene, bitmask | (1ull << depth), depth + 1, sortData, SortRange{split.index, range.end}, tree) };
+			uint32_t leftIndex{ buildNodeHierarchy(scene, cameraPosition, bitmask | (0ull << depth), depth + 1, sortData, SortRange{range.begin, split.index}, tree) };
+			uint32_t rightIndex{ buildNodeHierarchy(scene, cameraPosition, bitmask | (1ull << depth), depth + 1, sortData, SortRange{split.index, range.end}, tree) };
 
 			// Fill the node info
 			PackedNode branch{};
@@ -133,10 +141,10 @@ namespace LightTree
 				reallocateTreeNodes();
 			tree.nodeCount += 1;
 
-			NodeAttributes nodeAttributes{ generateLightNodeAttributes(scene, sortData[range.begin]) };
+			NodeAttributes nodeAttributes{ generateLightNodeAttributes(scene, cameraPosition, sortData[range.begin]) };
 			// Get every light and compute their combined node attributes
 			for (uint32_t i{ range.begin + 1 }; i < range.end; ++i)
-				nodeAttributes = NodeAttributes::add(nodeAttributes, generateLightNodeAttributes(scene, sortData[i]));
+				nodeAttributes = NodeAttributes::add(nodeAttributes, generateLightNodeAttributes(scene, cameraPosition, sortData[i]));
 
 			PackedNode leaf{ nodeAttributes, range.begin, range.length() };
 			tree.nodes[nodeIndex] = leaf;
@@ -144,7 +152,8 @@ namespace LightTree
 			// Fill bitmasks for the leaf node's lights
 			for (uint32_t i{ range.begin }; i < range.end; ++i)
 			{
-				tree.bitmaskSets[Tree::TRIANGLE_SET][i] = bitmask;
+				tree.lightPointers[i].pack(sortData[i].lightType, sortData[i].lightIndex);
+				tree.bitmaskSets[KTriangleLightsArrayIndex][sortData[i].lightIndex] = bitmask;
 			}
 
 			return nodeIndex;

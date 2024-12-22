@@ -67,11 +67,13 @@ void RenderingInterface::fillModelMaterials(RenderingInterface::ModelResource& m
 	model.clearImageData();
 
 	// Uploading spectra and converting "MaterialDescriptor" to "MaterialData". Uploading vertex attributes
-	int cur{ 0 };
+	uint32_t currentMaterialIndex{ 0 };
 	for(auto& mesh : model.meshes)
+	{
+		modelRes.meshMaterialIndexOffsets.push_back(currentMaterialIndex);
 		for(auto& submesh : mesh.submeshes)
 		{
-			const SceneData::MaterialDescriptor desc{ model.materialDescriptors[cur++] };
+			const SceneData::MaterialDescriptor& desc{ model.materialDescriptors[currentMaterialIndex++] };
 			MaterialData mat{};
 
 			mat.bxdfIndexSBT = bxdfTypeToIndex(desc.bxdf);
@@ -294,6 +296,7 @@ void RenderingInterface::fillModelMaterials(RenderingInterface::ModelResource& m
 
 			modelRes.materialIndices.push_back(addMaterial(mat));
 		}
+	}
 	model.clearVertexData();
 }
 uint32_t RenderingInterface::fillLightMaterial(const SceneData::MaterialDescriptor& desc)
@@ -533,13 +536,15 @@ void RenderingInterface::createConstantSBTRecords()
 void RenderingInterface::updateHitgroupSBTRecords(const SceneData& scene)
 {
 	uint32_t hitgroupCount{ 0 };
-	//Fill hitgroup records for lights (light data)               | Trace stride, trace offset and instance offset affects these
-	OptixRecordHitgroup lightHitgroupRecords[KSampleableLightCount]{};
+	//Fill hitgroup records for lights               | Trace stride, trace offset and instance offset affects these
+	OptixRecordHitgroup lightHitgroupRecords[KLightTypeCount]{};
 	hitgroupCount += ARRAYSIZE(lightHitgroupRecords);
-	OPTIX_CHECK(optixSbtRecordPackHeader(m_ptProgramGroups[RenderingInterface::SPHERE], lightHitgroupRecords[0].header));
-	OPTIX_CHECK(optixSbtRecordPackHeader(m_ptProgramGroups[RenderingInterface::DISK], lightHitgroupRecords[1].header));
+	OPTIX_CHECK(optixSbtRecordPackHeader(m_ptProgramGroups[RenderingInterface::SPHERE], lightHitgroupRecords[KSphereLightsArrayIndex].header));
+	OPTIX_CHECK(optixSbtRecordPackHeader(m_ptProgramGroups[RenderingInterface::DISK], lightHitgroupRecords[KDiskLightsArrayIndex].header));
+	OPTIX_CHECK(optixSbtRecordPackHeader(m_ptProgramGroups[RenderingInterface::TRIANGLE], lightHitgroupRecords[KTriangleLightsArrayIndex].header));
+	lightHitgroupRecords[KTriangleLightsArrayIndex].data = std::numeric_limits<uint32_t>::max();
 
-	//Fill hitgroup records for ordinary geometry (material data) | Trace stride, trace offset and instance offset affects these
+	//Fill hitgroup records for ordinary geometry   | Trace stride, trace offset and instance offset affects these
 	std::vector<OptixRecordHitgroup> matHitgroupRecords{};
 	for (auto& model : scene.models)
 	{
@@ -567,7 +572,8 @@ void RenderingInterface::updateHitgroupSBTRecords(const SceneData& scene)
 	if (m_sbt.hitgroupRecordBase != CUdeviceptr{})
 		CUDA_CHECK(cudaFree(reinterpret_cast<void*>(m_sbt.hitgroupRecordBase)));
 	CUDA_CHECK(cudaMalloc(reinterpret_cast<void**>(&m_sbt.hitgroupRecordBase), m_sbt.hitgroupRecordStrideInBytes * m_sbt.hitgroupRecordCount));
-	CUDA_CHECK(cudaMemcpyAsync(reinterpret_cast<void*>(m_sbt.hitgroupRecordBase), hitgroups, m_sbt.hitgroupRecordStrideInBytes * m_sbt.hitgroupRecordCount, cudaMemcpyHostToDevice, m_streams[1]));
+	CUDA_CHECK(cudaMemcpy(reinterpret_cast<void*>(m_sbt.hitgroupRecordBase), hitgroups, m_sbt.hitgroupRecordStrideInBytes * m_sbt.hitgroupRecordCount, cudaMemcpyHostToDevice));
+	delete[] hitgroups;
 }
 void RenderingInterface::fillSpectralCurvesData()
 {
@@ -868,16 +874,13 @@ void RenderingInterface::buildGeometryAccelerationStructures(RenderingInterface:
 }
 void RenderingInterface::buildLightAccelerationStructure(const SceneData& scene, LightType type)
 {
-	CUdeviceptr aabbBuffer{};
-	CUdeviceptr spherePosBuffer{};
-	CUdeviceptr sphereRadiusBuffer{};
-	CUdeviceptr tempBuffer{};
-
-
 	if (type == LightType::DISK)
 	{
 		if (m_customPrimBuffer != CUdeviceptr{})
 			CUDA_CHECK(cudaFree(reinterpret_cast<void*>(m_customPrimBuffer)));
+
+		CUdeviceptr aabbBuffer{};
+		CUdeviceptr tempBuffer{};
 
 		OptixBuildInput customPrimBuildInputs[1]{};
 		constexpr uint32_t diskLightSBTRecordCount{ 1 };
@@ -940,6 +943,10 @@ void RenderingInterface::buildLightAccelerationStructure(const SceneData& scene,
 		if (m_spherePrimBuffer != CUdeviceptr{})
 			CUDA_CHECK(cudaFree(reinterpret_cast<void*>(m_spherePrimBuffer)));
 
+		CUdeviceptr spherePosBuffer{};
+		CUdeviceptr sphereRadiusBuffer{};
+		CUdeviceptr tempBuffer{};
+
 		OptixBuildInput spherePrimitiveBuildInput[1]{};
 
 		size_t sphereCount{ scene.sphereLights.size() };
@@ -967,7 +974,7 @@ void RenderingInterface::buildLightAccelerationStructure(const SceneData& scene,
 				.operation = OPTIX_BUILD_OPERATION_BUILD };
 
 		spherePrimitiveBuildInput[0].type = OPTIX_BUILD_INPUT_TYPE_SPHERES;
-		spherePrimitiveBuildInput[0].sphereArray.numSbtRecords = 1;
+		spherePrimitiveBuildInput[0].sphereArray.numSbtRecords = sphereLightSBTRecordCount;
 		spherePrimitiveBuildInput[0].sphereArray.flags = sphereGeometryFlags;
 		if (sphereCount != 0)
 		{
@@ -1005,6 +1012,99 @@ void RenderingInterface::buildLightAccelerationStructure(const SceneData& scene,
 		CUDA_CHECK(cudaFree(reinterpret_cast<void*>(spherePosBuffer)));
 		CUDA_CHECK(cudaFree(reinterpret_cast<void*>(sphereRadiusBuffer)));
 	}
+	else if (type == LightType::TRIANGLE)
+	{
+		if (m_emissiveTriangleSetPrimBuffer != CUdeviceptr{})
+			CUDA_CHECK(cudaFree(reinterpret_cast<void*>(m_emissiveTriangleSetPrimBuffer)));
+
+		constexpr uint32_t emissiveTriangleLightSBTRecordCount{ 1 };
+		OptixTraversableHandle gasHandle{};
+		CUdeviceptr gasBuffer{};
+		CUdeviceptr tempBuffer{};
+
+		int buildInputCount{ 0 };
+		for (int i{ 0 }; i < scene.models.size(); ++i)
+		{
+			const auto& model{ scene.models[i] };
+			for (int j{ 0 }; j < model.instancedEmissiveMeshSubsets.size(); ++j)
+			{
+				const auto& subset{ model.instancedEmissiveMeshSubsets[j] };
+				buildInputCount += subset.triangles.size();
+			}
+		}
+
+		std::vector<OptixBuildInput> gasBuildInputs(buildInputCount);
+		std::vector<CUdeviceptr> vertexBuffers(buildInputCount);
+
+		int curBuildInput{ 0 };
+		uint32_t triCount{ 0 };
+		for (int i{ 0 }; i < scene.models.size(); ++i)
+		{
+			const auto& model{ scene.models[i] };
+			for (int j{ 0 }; j < model.instancedEmissiveMeshSubsets.size(); ++j)
+			{
+				const auto& subset{ model.instancedEmissiveMeshSubsets[j] };
+				CUDA_CHECK(cudaMalloc(reinterpret_cast<void**>(&(vertexBuffers[curBuildInput])), sizeof(decltype(subset.triangles)::value_type) * subset.triangles.size()));
+				CUDA_CHECK(cudaMemcpy(
+							reinterpret_cast<void*>(vertexBuffers[curBuildInput]), subset.triangles.data(),
+							sizeof(decltype(subset.triangles)::value_type) * subset.triangles.size(),
+							cudaMemcpyDefault));
+
+				OptixIndicesFormat indexFormat{ OPTIX_INDICES_FORMAT_NONE };
+				uint32_t indexStride{ 0 };
+				uint32_t flags{ OPTIX_GEOMETRY_FLAG_DISABLE_ANYHIT | OPTIX_GEOMETRY_FLAG_DISABLE_TRIANGLE_FACE_CULLING };
+
+				gasBuildInputs[curBuildInput] = OptixBuildInput{.type = OPTIX_BUILD_INPUT_TYPE_TRIANGLES,
+					.triangleArray = OptixBuildInputTriangleArray{
+						.vertexBuffers = &(vertexBuffers[curBuildInput]),
+						.numVertices = static_cast<uint32_t>(subset.triangles.size()),
+						.vertexFormat = OPTIX_VERTEX_FORMAT_FLOAT3,
+						.vertexStrideInBytes = sizeof(decltype(subset.triangles)::value_type),
+						.numIndexTriplets = 0,
+						.indexFormat = indexFormat,
+						.indexStrideInBytes = indexStride,
+						.flags = &flags,
+						.numSbtRecords = emissiveTriangleLightSBTRecordCount,
+						.primitiveIndexOffset = triCount,
+						.transformFormat = OPTIX_TRANSFORM_FORMAT_NONE}};
+
+				triCount += subset.triangles.size();
+				curBuildInput += 1;
+			}
+		}
+
+		OptixAccelBuildOptions accelBuildOptions{
+			.buildFlags = OPTIX_BUILD_FLAG_ALLOW_RANDOM_VERTEX_ACCESS | OPTIX_BUILD_FLAG_PREFER_FAST_TRACE | OPTIX_BUILD_FLAG_ALLOW_COMPACTION,
+				.operation = OPTIX_BUILD_OPERATION_BUILD };
+		OptixAccelBufferSizes computedBufferSizes{};
+		OPTIX_CHECK(optixAccelComputeMemoryUsage(m_context, &accelBuildOptions, gasBuildInputs.data(), gasBuildInputs.size(), &computedBufferSizes));
+		size_t compactedSizeOffset{ ALIGNED_SIZE(computedBufferSizes.tempSizeInBytes, 8ull) };
+		CUDA_CHECK(cudaMalloc(reinterpret_cast<void**>(&tempBuffer), compactedSizeOffset + sizeof(size_t)));
+		CUDA_CHECK(cudaMalloc(reinterpret_cast<void**>(&gasBuffer), computedBufferSizes.outputSizeInBytes));
+		OptixAccelEmitDesc emittedProperty{};
+		emittedProperty.type = OPTIX_PROPERTY_TYPE_COMPACTED_SIZE;
+		emittedProperty.result = reinterpret_cast<CUdeviceptr>(reinterpret_cast<uint8_t*>(tempBuffer) + compactedSizeOffset);
+		OPTIX_CHECK(optixAccelBuild(m_context, 0, &accelBuildOptions,
+					gasBuildInputs.data(), gasBuildInputs.size(),
+					tempBuffer, computedBufferSizes.tempSizeInBytes,
+					gasBuffer, computedBufferSizes.outputSizeInBytes, &gasHandle, &emittedProperty, 1));
+		size_t compactedGasSize{};
+		CUDA_CHECK(cudaMemcpy(&compactedGasSize, reinterpret_cast<void*>(emittedProperty.result), sizeof(size_t), cudaMemcpyDeviceToHost));
+		if (compactedGasSize < computedBufferSizes.outputSizeInBytes)
+		{
+			CUdeviceptr noncompactedGasBuffer{ gasBuffer };
+			CUDA_CHECK(cudaMalloc(reinterpret_cast<void**>(&gasBuffer), compactedGasSize));
+			OPTIX_CHECK(optixAccelCompact(m_context, 0, gasHandle, gasBuffer, compactedGasSize, &gasHandle));
+			CUDA_CHECK(cudaFree(reinterpret_cast<void*>(noncompactedGasBuffer)));
+		}
+		CUDA_CHECK(cudaFree(reinterpret_cast<void*>(tempBuffer)));
+
+		for(auto buf : vertexBuffers)
+			CUDA_CHECK(cudaFree(reinterpret_cast<void*>(buf)));
+
+		m_emissiveTriangleSetPrimHandle = gasHandle;
+		m_emissiveTriangleSetPrimBuffer = gasBuffer;
+	}
 }
 void RenderingInterface::updateInstanceAccelerationStructure(const SceneData& scene, const Camera& camera)
 {
@@ -1015,7 +1115,7 @@ void RenderingInterface::updateInstanceAccelerationStructure(const SceneData& sc
 
 	CUdeviceptr tempBuffer{};
 
-	uint32_t instanceCount{ 2 }; // Non-triangle primitives instances
+	uint32_t instanceCount{ 3 }; // Emissive geometry primitives
 	for(auto& model : scene.models)
 		instanceCount += model.instances.size();
 
@@ -1023,42 +1123,62 @@ void RenderingInterface::updateInstanceAccelerationStructure(const SceneData& sc
 	CUdeviceptr instanceBuffer{};
 	CUDA_CHECK(cudaHostAlloc(&instances, sizeof(OptixInstance) * instanceCount, cudaHostAllocMapped));
 	CUDA_CHECK(cudaHostGetDevicePointer(reinterpret_cast<void**>(&instanceBuffer), instances, 0));
-	instances[0].instanceId = 0;
-	instances[0].sbtOffset = 0;
-	instances[0].traversableHandle = m_spherePrimitiveHandle;
-	instances[0].visibilityMask = 0xFF;
-	instances[0].flags = OPTIX_INSTANCE_FLAG_NONE;
-	instances[0].transform[0]  = 1.0f;
-	instances[0].transform[1]  = 0.0f;
-	instances[0].transform[2]  = 0.0f;
-	instances[0].transform[3]  = -cameraPosition.x;
-	instances[0].transform[4]  = 0.0f;
-	instances[0].transform[5]  = 1.0f;
-	instances[0].transform[6]  = 0.0f;
-	instances[0].transform[7]  = -cameraPosition.y;
-	instances[0].transform[8]  = 0.0f;
-	instances[0].transform[9]  = 0.0f;
-	instances[0].transform[10] = 1.0f;
-	instances[0].transform[11] = -cameraPosition.z;
-	instances[1].instanceId = 1;
-	instances[1].sbtOffset = m_spherePrimitiveSBTRecordCount;
-	instances[1].traversableHandle = m_customPrimHandle;
-	instances[1].visibilityMask = 0xFF;
-	instances[1].flags = OPTIX_INSTANCE_FLAG_NONE;
-	instances[1].transform[0]  = 1.0f;
-	instances[1].transform[1]  = 0.0f;
-	instances[1].transform[2]  = 0.0f;
-	instances[1].transform[3]  = -cameraPosition.x;
-	instances[1].transform[4]  = 0.0f;
-	instances[1].transform[5]  = 1.0f;
-	instances[1].transform[6]  = 0.0f;
-	instances[1].transform[7]  = -cameraPosition.y;
-	instances[1].transform[8]  = 0.0f;
-	instances[1].transform[9]  = 0.0f;
-	instances[1].transform[10] = 1.0f;
-	instances[1].transform[11] = -cameraPosition.z;
-	int inst{ 2 };
-	int sbtOffset{ m_spherePrimitiveSBTRecordCount + m_customPrimitiveSBTRecordCount };
+	int inst{ 0 };
+	instances[inst].instanceId = inst;
+	instances[inst].sbtOffset = KTriangleLightsArrayIndex;
+	instances[inst].traversableHandle = m_emissiveTriangleSetPrimHandle;
+	instances[inst].visibilityMask = 0xFF;
+	instances[inst].flags = OPTIX_INSTANCE_FLAG_NONE;
+	instances[inst].transform[0]  = 1.0f;
+	instances[inst].transform[1]  = 0.0f;
+	instances[inst].transform[2]  = 0.0f;
+	instances[inst].transform[3]  = -cameraPosition.x;
+	instances[inst].transform[4]  = 0.0f;
+	instances[inst].transform[5]  = 1.0f;
+	instances[inst].transform[6]  = 0.0f;
+	instances[inst].transform[7]  = -cameraPosition.y;
+	instances[inst].transform[8]  = 0.0f;
+	instances[inst].transform[9]  = 0.0f;
+	instances[inst].transform[10] = 1.0f;
+	instances[inst].transform[11] = -cameraPosition.z;
+	++inst;
+	instances[inst].instanceId = inst;
+	instances[inst].sbtOffset = KDiskLightsArrayIndex;
+	instances[inst].traversableHandle = m_customPrimHandle;
+	instances[inst].visibilityMask = 0xFF;
+	instances[inst].flags = OPTIX_INSTANCE_FLAG_NONE;
+	instances[inst].transform[0]  = 1.0f;
+	instances[inst].transform[1]  = 0.0f;
+	instances[inst].transform[2]  = 0.0f;
+	instances[inst].transform[3]  = -cameraPosition.x;
+	instances[inst].transform[4]  = 0.0f;
+	instances[inst].transform[5]  = 1.0f;
+	instances[inst].transform[6]  = 0.0f;
+	instances[inst].transform[7]  = -cameraPosition.y;
+	instances[inst].transform[8]  = 0.0f;
+	instances[inst].transform[9]  = 0.0f;
+	instances[inst].transform[10] = 1.0f;
+	instances[inst].transform[11] = -cameraPosition.z;
+	++inst;
+	instances[inst].instanceId = inst;
+	instances[inst].sbtOffset = KSphereLightsArrayIndex;
+	instances[inst].traversableHandle = m_spherePrimitiveHandle;
+	instances[inst].visibilityMask = 0xFF;
+	instances[inst].flags = OPTIX_INSTANCE_FLAG_NONE;
+	instances[inst].transform[0]  = 1.0f;
+	instances[inst].transform[1]  = 0.0f;
+	instances[inst].transform[2]  = 0.0f;
+	instances[inst].transform[3]  = -cameraPosition.x;
+	instances[inst].transform[4]  = 0.0f;
+	instances[inst].transform[5]  = 1.0f;
+	instances[inst].transform[6]  = 0.0f;
+	instances[inst].transform[7]  = -cameraPosition.y;
+	instances[inst].transform[8]  = 0.0f;
+	instances[inst].transform[9]  = 0.0f;
+	instances[inst].transform[10] = 1.0f;
+	instances[inst].transform[11] = -cameraPosition.z;
+	++inst;
+	int sbtOffset{ inst }; // SBT offset is "inst" because each previous instance has only one hit record
 	for(auto& model : scene.models)
 	{
 		const RenderingInterface::ModelResource& modelRes{ m_modelResources[model.id] };
@@ -1106,6 +1226,33 @@ void RenderingInterface::updateInstanceAccelerationStructure(const SceneData& sc
 				iasBuildInputs, ARRAYSIZE(iasBuildInputs), 
 				tempBuffer, computedBufferSizes.tempSizeInBytes, m_iasBuffer,
 				computedBufferSizes.outputSizeInBytes, &m_iasHandle, nullptr, 0));
+	// TODO: Use IAS compaction
+	//
+	// OptixAccelBuildOptions accelBuildOptions{
+	// 	.buildFlags = OPTIX_BUILD_FLAG_ALLOW_RANDOM_VERTEX_ACCESS | OPTIX_BUILD_FLAG_PREFER_FAST_TRACE | OPTIX_BUILD_FLAG_ALLOW_COMPACTION,
+	// 	.operation = OPTIX_BUILD_OPERATION_BUILD };
+	// OptixAccelBufferSizes computedBufferSizes{};
+	// OPTIX_CHECK(optixAccelComputeMemoryUsage(m_context, &accelBuildOptions, iasBuildInputs, ARRAYSIZE(iasBuildInputs), &computedBufferSizes));
+	// size_t compactedSizeOffset{ ALIGNED_SIZE(computedBufferSizes.tempSizeInBytes, 8ull) };
+	// CUDA_CHECK(cudaMalloc(reinterpret_cast<void**>(&tempBuffer), compactedSizeOffset + sizeof(size_t)));
+	// CUDA_CHECK(cudaMalloc(reinterpret_cast<void**>(&m_iasBuffer), computedBufferSizes.outputSizeInBytes));
+	// OptixAccelEmitDesc emittedProperty{};
+	// emittedProperty.type = OPTIX_PROPERTY_TYPE_COMPACTED_SIZE;
+	// emittedProperty.result = reinterpret_cast<CUdeviceptr>(reinterpret_cast<uint8_t*>(tempBuffer) + compactedSizeOffset);
+	// OPTIX_CHECK(optixAccelBuild(m_context, 0, &accelBuildOptions,
+	// 			iasBuildInputs, ARRAYSIZE(iasBuildInputs),
+	// 			tempBuffer, computedBufferSizes.tempSizeInBytes,
+	// 			m_iasBuffer, computedBufferSizes.outputSizeInBytes, &m_iasHandle, &emittedProperty, 1));
+	// size_t compactedIASSize{};
+	// CUDA_CHECK(cudaMemcpy(&compactedIASSize, reinterpret_cast<void*>(emittedProperty.result), sizeof(size_t), cudaMemcpyDeviceToHost));
+	// if (compactedIASSize < computedBufferSizes.outputSizeInBytes)
+	// {
+	// 	CUdeviceptr noncompactedIASBuffer{ m_iasBuffer };
+	// 	CUDA_CHECK(cudaMalloc(reinterpret_cast<void**>(&m_iasBuffer), compactedIASSize));
+	// 	OPTIX_CHECK(optixAccelCompact(m_context, 0, m_iasHandle, m_iasBuffer, compactedIASSize, &m_iasHandle));
+	// 	CUDA_CHECK(cudaFree(reinterpret_cast<void*>(noncompactedIASBuffer)));
+	// }
+	//
 
 	CUDA_CHECK(cudaFreeHost(reinterpret_cast<void*>(instances)));
 	CUDA_CHECK(cudaFree(reinterpret_cast<void*>(tempBuffer)));
@@ -1685,50 +1832,101 @@ void RenderingInterface::processCommands(CommandBuffer& commands, RenderContext&
 
 					//
 					uint32_t lightCount{ 0 };
+					uint32_t triangleLightCount{ 0 };
 					for(auto& model : scene.models)
 						for(auto& subset : model.instancedEmissiveMeshSubsets)
-							lightCount += subset.triangles.size();
-					LightTree::Builder::SortData* sortData{ new LightTree::Builder::SortData[lightCount] };
-					uint32_t sdIndex{ 0 };
-					for (int i{ 0 }; i < scene.models.size(); ++i)
+							triangleLightCount += subset.triangles.size();
+					lightCount += triangleLightCount;
+					if (lightCount != 0)
 					{
-						auto& model{ scene.models[i] };
-						for (int j{ 0 }; j < model.instancedEmissiveMeshSubsets.size(); ++j)
+						LightTree::Builder::SortData* sortData{ new LightTree::Builder::SortData[lightCount] };
+						CUDA_CHECK(cudaMallocManaged(reinterpret_cast<void**>(&m_launchParameters.lightTree.triangles), sizeof(EmissiveTriangleLightData) * triangleLightCount));
+
+						uint32_t curTrIndex{ 0 };
+						for (int i{ 0 }; i < scene.models.size(); ++i)
 						{
-							auto& subset{ model.instancedEmissiveMeshSubsets[j] };
-							for (int k{ 0 }; k < subset.triangles.size(); ++k)
+							auto& model{ scene.models[i] };
+							for (int j{ 0 }; j < model.instancedEmissiveMeshSubsets.size(); ++j)
 							{
-								auto& triangle{ subset.triangles[k] };
-								glm::vec3 normal{ glm::normalize(glm::cross(triangle.v1WS - triangle.v0WS, triangle.v2WS - triangle.v0WS)) };
-								sortData[sdIndex].bounds.min[0] = std::min(triangle.v0WS.x, std::min(triangle.v1WS.x, triangle.v2WS.x));
-								sortData[sdIndex].bounds.min[1] = std::min(triangle.v0WS.y, std::min(triangle.v1WS.y, triangle.v2WS.y));
-								sortData[sdIndex].bounds.min[2] = std::min(triangle.v0WS.z, std::min(triangle.v1WS.z, triangle.v2WS.z));
-								sortData[sdIndex].bounds.max[0] = std::max(triangle.v0WS.x, std::max(triangle.v1WS.x, triangle.v2WS.x));
-								sortData[sdIndex].bounds.max[1] = std::max(triangle.v0WS.y, std::max(triangle.v1WS.y, triangle.v2WS.y));
-								sortData[sdIndex].bounds.max[2] = std::max(triangle.v0WS.z, std::max(triangle.v1WS.z, triangle.v2WS.z));
-								for (int i{ 0 }; i < 3; ++i)
+								auto& subset{ model.instancedEmissiveMeshSubsets[j] };
+								for (int k{ 0 }; k < subset.triangles.size(); ++k)
 								{
-									if (sortData[sdIndex].bounds.max[i] <= sortData[sdIndex].bounds.min[i])
+									auto& triangle{ subset.triangles[k] };
+									// Emissive triangles data should be in world camera space
+									glm::vec3 triCamWVerts[3]{
+										{ static_cast<float>(triangle.v0WS.x - camera.getPosition().x),
+										static_cast<float>(triangle.v0WS.y - camera.getPosition().y),
+										static_cast<float>(triangle.v0WS.z - camera.getPosition().z), },
+										{ static_cast<float>(triangle.v1WS.x - camera.getPosition().x),
+										static_cast<float>(triangle.v1WS.y - camera.getPosition().y),
+										static_cast<float>(triangle.v1WS.z - camera.getPosition().z), },
+										{ static_cast<float>(triangle.v2WS.x - camera.getPosition().x),
+										static_cast<float>(triangle.v2WS.y - camera.getPosition().y),
+										static_cast<float>(triangle.v2WS.z - camera.getPosition().z), }, };
+									// Fill triangle data used for sampling
+									EmissiveTriangleLightData* ld{ reinterpret_cast<EmissiveTriangleLightData*>(m_launchParameters.lightTree.triangles) + curTrIndex };
+									ld->vertices[0] = triCamWVerts[0].x;
+									ld->vertices[1] = triCamWVerts[0].y;
+									ld->vertices[2] = triCamWVerts[0].z;
+									ld->vertices[3] = triCamWVerts[1].x;
+									ld->vertices[4] = triCamWVerts[1].y;
+									ld->vertices[5] = triCamWVerts[1].z;
+									ld->vertices[6] = triCamWVerts[2].x;
+									ld->vertices[7] = triCamWVerts[2].y;
+									ld->vertices[8] = triCamWVerts[2].z;
+									ld->primitiveDataIndex = triangle.primIndex;
+									const auto& triModelResource{ m_modelResources[model.id] };
+									const uint32_t submeshTotalIndex{ triModelResource.meshMaterialIndexOffsets[model.instances[subset.instanceIndex].meshIndex] + subset.submeshIndex };
+									ld->materialIndex = triModelResource.materialIndices[submeshTotalIndex];
+									// Fill sort data for tree building
+									sortData[curTrIndex].lightType = LightType::TRIANGLE;
+									sortData[curTrIndex].lightIndex = curTrIndex;
+									glm::vec3 normal{ glm::normalize(glm::cross(triCamWVerts[1] - triCamWVerts[0], triCamWVerts[2] - triCamWVerts[0])) };
+									sortData[curTrIndex].bounds.min[0] = std::min(triCamWVerts[0].x, std::min(triCamWVerts[1].x, triCamWVerts[2].x));
+									sortData[curTrIndex].bounds.min[1] = std::min(triCamWVerts[0].y, std::min(triCamWVerts[1].y, triCamWVerts[2].y));
+									sortData[curTrIndex].bounds.min[2] = std::min(triCamWVerts[0].z, std::min(triCamWVerts[1].z, triCamWVerts[2].z));
+									sortData[curTrIndex].bounds.max[0] = std::max(triCamWVerts[0].x, std::max(triCamWVerts[1].x, triCamWVerts[2].x));
+									sortData[curTrIndex].bounds.max[1] = std::max(triCamWVerts[0].y, std::max(triCamWVerts[1].y, triCamWVerts[2].y));
+									sortData[curTrIndex].bounds.max[2] = std::max(triCamWVerts[0].z, std::max(triCamWVerts[1].z, triCamWVerts[2].z));
+									for (int i{ 0 }; i < 3; ++i)
 									{
-										sortData[sdIndex].bounds.min[i] = sortData[sdIndex].bounds.max[i] - std::numeric_limits<float>::epsilon();
-										sortData[sdIndex].bounds.max[i] = sortData[sdIndex].bounds.max[i] + std::numeric_limits<float>::epsilon();
+										if (sortData[curTrIndex].bounds.max[i] <= sortData[curTrIndex].bounds.min[i])
+										{
+											sortData[curTrIndex].bounds.min[i] = sortData[curTrIndex].bounds.max[i] - std::numeric_limits<float>::epsilon();
+											sortData[curTrIndex].bounds.max[i] = sortData[curTrIndex].bounds.max[i] + std::numeric_limits<float>::epsilon();
+										}
 									}
+									sortData[curTrIndex].coneDirection[0] = normal.x;
+									sortData[curTrIndex].coneDirection[1] = normal.y;
+									sortData[curTrIndex].coneDirection[2] = normal.z;
+									sortData[curTrIndex].cosConeAngle = 1.0f;
+									sortData[curTrIndex].flux = triangle.flux * subset.transformFluxCorrection;
+									sortData[curTrIndex].lightDataRef.triangleRef.modelIndex = i;
+									sortData[curTrIndex].lightDataRef.triangleRef.subsetIndex = j;
+									sortData[curTrIndex].lightDataRef.triangleRef.triangleIndex = k;
+									++curTrIndex;
 								}
-								sortData[sdIndex].coneDirection[0] = normal.x;
-								sortData[sdIndex].coneDirection[1] = normal.y;
-								sortData[sdIndex].coneDirection[2] = normal.z;
-								sortData[sdIndex].cosConeAngle = 1.0f;
-								sortData[sdIndex].flux = triangle.flux * subset.transformFluxCorrection;
-								sortData[sdIndex].lightDataRef.triangleRef.modelIndex = i;
-								sortData[sdIndex].lightDataRef.triangleRef.subsetIndex = j;
-								sortData[sdIndex].lightDataRef.triangleRef.triangleIndex = k;
-								++sdIndex;
 							}
 						}
+
+						float cameraPosition[3]{ static_cast<float>(camera.getPosition().x), static_cast<float>(camera.getPosition().y), static_cast<float>(camera.getPosition().z) };
+						LightTree::Builder builder{};
+						LightTree::Tree tree{ builder.build(scene, cameraPosition, sortData, lightCount, triangleLightCount) };
+						delete[] sortData;
+
+						CUDA_CHECK(cudaMalloc(reinterpret_cast<void**>(&m_launchParameters.lightTree.nodes), sizeof(LightTree::PackedNode) * tree.nodeCount));
+						CUDA_CHECK(cudaMemcpy(reinterpret_cast<void*>(m_launchParameters.lightTree.nodes),
+									tree.nodes,
+									sizeof(LightTree::PackedNode) * tree.nodeCount, cudaMemcpyDefault));
+						CUDA_CHECK(cudaMalloc(reinterpret_cast<void**>(&m_launchParameters.lightTree.lightPointers), sizeof(LightTree::LightPointer) * tree.lightCount));
+						CUDA_CHECK(cudaMemcpy(reinterpret_cast<void*>(m_launchParameters.lightTree.lightPointers),
+									tree.lightPointers,
+									sizeof(LightTree::LightPointer) * tree.lightCount, cudaMemcpyDefault));
+						CUDA_CHECK(cudaMalloc(reinterpret_cast<void**>(&m_launchParameters.lightTree.bitmasks[KTriangleLightsArrayIndex]), sizeof(uint64_t) * triangleLightCount));
+						CUDA_CHECK(cudaMemcpy(reinterpret_cast<void*>(m_launchParameters.lightTree.bitmasks[KTriangleLightsArrayIndex]),
+									tree.bitmaskSets[KTriangleLightsArrayIndex],
+									sizeof(uint64_t) * triangleLightCount, cudaMemcpyDefault));
 					}
-					LightTree::Builder builder{};
-					LightTree::Tree tree{ builder.build(scene, sortData, lightCount) };
-					delete[] sortData;
 					//
 
 					break;
@@ -1880,8 +2078,22 @@ void RenderingInterface::cleanup()
 	if (m_launchParameters.envMap.conditionalCDFIndices != CUdeviceptr{})
 		CUDA_CHECK(cudaFree(reinterpret_cast<void*>(m_launchParameters.envMap.conditionalCDFIndices)));
 
-	if (m_launchParameters.lights.orderedCount != CUdeviceptr{})
-		CUDA_CHECK(cudaFree(reinterpret_cast<void*>(m_launchParameters.lights.orderedCount)));
+	if (m_launchParameters.lightTree.nodes != CUdeviceptr{})
+		CUDA_CHECK(cudaFree(reinterpret_cast<void*>(m_launchParameters.lightTree.nodes)));
+	if (m_launchParameters.lightTree.lightPointers != CUdeviceptr{})
+		CUDA_CHECK(cudaFree(reinterpret_cast<void*>(m_launchParameters.lightTree.lightPointers)));
+	if (m_launchParameters.lightTree.triangles != CUdeviceptr{})
+		CUDA_CHECK(cudaFree(reinterpret_cast<void*>(m_launchParameters.lightTree.triangles)));
+	if (m_launchParameters.lightTree.disks != CUdeviceptr{})
+		CUDA_CHECK(cudaFree(reinterpret_cast<void*>(m_launchParameters.lightTree.disks)));
+	if (m_launchParameters.lightTree.spheres != CUdeviceptr{})
+		CUDA_CHECK(cudaFree(reinterpret_cast<void*>(m_launchParameters.lightTree.spheres)));
+	for (int i{ 0 }; i < ARRAYSIZE(m_launchParameters.lightTree.bitmasks); ++i)
+	{
+		if (m_launchParameters.lightTree.bitmasks[i] != CUdeviceptr{})
+			CUDA_CHECK(cudaFree(reinterpret_cast<void*>(m_launchParameters.lightTree.bitmasks[i])));
+	}
+
 	if (m_materialData != CUdeviceptr{})
 		CUDA_CHECK(cudaFree(reinterpret_cast<void*>(m_materialData)));
 	if (m_spectralData != CUdeviceptr{})

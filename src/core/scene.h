@@ -160,7 +160,7 @@ struct SceneData
 			glm::vec3 v0WS{}; // Vertices transformed to world space
 			glm::vec3 v1WS{};
 			glm::vec3 v2WS{};
-			uint32_t index{};
+			uint32_t primIndex{};
 			float flux{};
 		};
 		std::vector<TriangleData> triangles{};

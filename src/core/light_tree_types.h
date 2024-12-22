@@ -9,18 +9,28 @@
 
 enum class LightType
 {
-	NONE,
 	TRIANGLE,
 	DISK,
 	SPHERE,
-	SKY,
 
-	DESC,
+	SKY,
+	NONE,
+
+	ALL,
 };
-CU_CONSTANT uint32_t KSampleableLightCount{ 2 };
-CU_CONSTANT LightType KOrderedTypes[]{ LightType::SPHERE, LightType::DISK };
-CU_CONSTANT uint32_t KSphereLightIndex{ 0 };
-CU_CONSTANT uint32_t KDiskLightIndex{ 1 };
+// LightType enums we can have multiple of are also used as indices into arrays therefore static asserts
+CU_CONSTANT uint32_t KTriangleLightsArrayIndex{ static_cast<uint32_t>(LightType::TRIANGLE) };
+CU_CONSTANT uint32_t KDiskLightsArrayIndex{ static_cast<uint32_t>(LightType::DISK) };
+CU_CONSTANT uint32_t KSphereLightsArrayIndex{ static_cast<uint32_t>(LightType::SPHERE) };
+CU_CONSTANT uint32_t KLightTypeCount{ 3 };
+static_assert(static_cast<int>(LightType::TRIANGLE) == 0);
+static_assert(static_cast<int>(LightType::DISK) == 1);
+static_assert(static_cast<int>(LightType::SPHERE) == 2);
+
+// CU_CONSTANT uint32_t KSampleableLightCount{ 2 };
+// CU_CONSTANT LightType KOrderedTypes[]{ LightType::SPHERE, LightType::DISK };
+// CU_CONSTANT uint32_t KSphereLightIndex{ 0 };
+// CU_CONSTANT uint32_t KDiskLightIndex{ 1 };
 struct DiskLightData
 {
 	glm::vec3 position{};
@@ -201,4 +211,21 @@ namespace LightTree
 
 		return res;
 	}
+
+	struct LightPointer
+	{
+		uint32_t lptr{};
+
+		constexpr static inline uint32_t KLightIndexBits{ 30u };
+		constexpr static inline uint32_t KLightTypeBits{ 32u - KLightIndexBits };
+		void pack(LightType type, uint32_t index)
+		{
+			lptr = (static_cast<uint32_t>(type) << KLightIndexBits) | (index & ((1u << KLightIndexBits) - 1u));
+		}
+		void unpack(LightType& type, uint32_t& index) const
+		{
+			type = static_cast<LightType>(lptr >> KLightIndexBits);
+			index = lptr & ((1u << KLightIndexBits) - 1u);
+		}
+	};
 }

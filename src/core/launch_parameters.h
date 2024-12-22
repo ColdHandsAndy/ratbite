@@ -49,14 +49,15 @@ struct LaunchParameters
 		float focusDistance{};
 	} cameraState{};
 
-	struct Lights
+	struct LightTree
 	{
-		float lightCount{};
-		CUPTR(uint16_t) orderedCount{};
+		CUPTR(LightTree::Node) nodes{};
+		CUPTR(LightTree::LightPointer) lightPointers{};
 		CUPTR(DiskLightData) disks{};
 		CUPTR(SphereLightData) spheres{};
 		CUPTR(EmissiveTriangleLightData) triangles{};
-	} lights{};
+		CUPTR(uint64_t) bitmasks[KLightTypeCount]{};
+	} lightTree{};
 
 	struct EnvironmentMap
 	{
