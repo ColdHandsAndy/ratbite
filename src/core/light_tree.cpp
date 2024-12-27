@@ -9,9 +9,12 @@
 
 #include "../core/scene.h"
 #include "../core/debug_macros.h"
+#include "../core/math_util.h"
 
 static LightTree::NodeAttributes generateLightNodeAttributes(const SceneData& scene, const float* cameraPosition, const LightTree::Builder::SortData& sortData)
 {
+	namespace SG = SphericalGaussian;
+
 	LightTree::NodeAttributes resAttr{};
 
 	uint32_t modelIdx{ sortData.lightDataRef.triangleRef.modelIndex };
@@ -36,7 +39,7 @@ static LightTree::NodeAttributes generateLightNodeAttributes(const SceneData& sc
 	resAttr.averageDirection[0] = normal.x;
 	resAttr.averageDirection[1] = normal.y;
 	resAttr.averageDirection[2] = normal.z;
-	resAttr.sharpness = (3.0f * 0.5f - 0.5f * 0.5f * 0.5f) / (1.0f - 0.5f * 0.5f);
+	resAttr.sharpness = SG::VMFAxisLengthToSharpness(0.5f);
 	resAttr.flux = sortData.flux; // Using this value since it is already transform corrected
 
 	return resAttr;
@@ -388,8 +391,9 @@ namespace LightTree
 	NodeAttributes Builder::fillBranchNodeAttributes(uint32_t nodeIndex, Tree& tree)
 	{
 		const PackedNode& packedNode{ tree.nodes[nodeIndex] };
-		const UnpackedNode unpackedNode{ unpackNode(packedNode) };
-		if (packedNode.isLeaf())
+		bool isLeaf{};
+		const UnpackedNode unpackedNode{ unpackNode(packedNode, isLeaf) };
+		if (isLeaf)
 		{
 			// TODO: Cache average direction for leaf nodes so no precision is lost on decoding
 			NodeAttributes attribs{ unpackedNode.attributes };

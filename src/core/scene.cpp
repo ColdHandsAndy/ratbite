@@ -328,13 +328,20 @@ namespace
 						  material->emissive_factor[2] == 0.0f))
 					{
 						emissiveFactorPresent = true;
+						descriptor.emissiveFactorPresent = true;
 
-						float emissiveFactor[3]{ material->emissive_factor[0], material->emissive_factor[1], material->emissive_factor[2] };
+						const float* emissiveFactor{ material->emissive_factor };
 						if (material->has_emissive_strength)
 						{
 							descriptor.emissiveFactor[0] = emissiveFactor[0] * material->emissive_strength.emissive_strength;
 							descriptor.emissiveFactor[1] = emissiveFactor[1] * material->emissive_strength.emissive_strength;
 							descriptor.emissiveFactor[2] = emissiveFactor[2] * material->emissive_strength.emissive_strength;
+						}
+						else
+						{
+							descriptor.emissiveFactor[0] = emissiveFactor[0];
+							descriptor.emissiveFactor[1] = emissiveFactor[1];
+							descriptor.emissiveFactor[2] = emissiveFactor[2];
 						}
 
 						if (material->emissive_texture.texture != nullptr)
@@ -519,9 +526,7 @@ namespace
 						if (triangleFlux > 0.0f)
 						{
 							// Make emissive triangles degenerate since we need to create separate AC for them
-							sceneSubmesh.vertices[indices[0]] = glm::vec4{0.0f};
-							sceneSubmesh.vertices[indices[1]] = glm::vec4{0.0f};
-							sceneSubmesh.vertices[indices[2]] = glm::vec4{0.0f};
+							sceneSubmesh.discardedPrimitives.push_back(k);
 
 							emissiveSubsets[i].triangles.push_back(SceneData::EmissiveMeshSubset::TriangleData{
 									.v0 = vertices[0],

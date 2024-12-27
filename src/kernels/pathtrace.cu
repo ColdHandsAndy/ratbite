@@ -48,6 +48,7 @@ struct Path
 	SampledWavelengths wavelengths{};
 	SampledSpectrum L{};
 	SampledSpectrum throughput{};
+	glm::vec3 lastShadingNormal{};
 	float refractionScale{};
 	float bxdfPDF{};
 	PathStateBitfield stateFlags{};
@@ -57,7 +58,7 @@ struct Interaction
 {
 	glm::vec3 hitPos{};
 	LightType lightType{};
-	uint16_t lightIndex{};
+	uint32_t lightIndex{};
 	MaterialData* material{};
 	glm::vec3 geometryNormal{};
 	bool hitFromInside{};
@@ -70,7 +71,6 @@ struct Interaction
 			glm::vec3 vertices[3]{};
 			glm::vec3 hitPosInterp{};
 			glm::vec2 barycentrics{};
-			glm::vec3 shadingNormal{};
 		} triangle;
 	} primitive;
 };
@@ -113,6 +113,16 @@ extern "C" __global__ void __closesthit__triangle()
 	geometryNormal = {geometryNormal.x * normalizeDiv, geometryNormal.y * normalizeDiv, geometryNormal.z * normalizeDiv};
 	uint32_t encGeometryNormal{ Octohedral::encodeU32(glm::vec3{geometryNormal.x, geometryNormal.y, geometryNormal.z}) };
 
+	LightTree::LightPointer lightPointer{};
+	lightPointer.pack(LightType::NONE, 0);
+	if (materialIndex == 0xFFFFFFFF)
+	{
+		lightPointer.pack(LightType::TRIANGLE, primitiveIndex);
+
+		primitiveIndex = parameters.lightTree.triangles[primitiveIndex].primitiveDataIndex;
+		materialIndex = parameters.lightTree.triangles[primitiveIndex].materialIndex;
+	}
+
 	optixSetPayload_0(__float_as_uint(verticesObj[0].x * WFO[0] + verticesObj[0].y * WFO[1] + verticesObj[0].z * WFO[2]   + WFO[3]));
 	optixSetPayload_1(__float_as_uint(verticesObj[0].x * WFO[4] + verticesObj[0].y * WFO[5] + verticesObj[0].z * WFO[6]   + WFO[7]));
 	optixSetPayload_2(__float_as_uint(verticesObj[0].x * WFO[8] + verticesObj[0].y * WFO[9] + verticesObj[0].z * WFO[10]  + WFO[11]));
@@ -120,25 +130,23 @@ extern "C" __global__ void __closesthit__triangle()
 	optixSetPayload_4(primitiveIndex);
 	optixSetPayload_5(__float_as_uint(barycentrics.x));
 	optixSetPayload_6(__float_as_uint(barycentrics.y));
-	optixSetPayload_7(
-			(static_cast<uint32_t>(LightType::NONE) << 24) |
-			(static_cast<uint32_t>(PathStateBitfield::TRIANGULAR_GEOMETRY) << 16) |
-			(materialIndex & 0xFFFF));
-	optixSetPayload_8(__float_as_uint(OFW[0]));
-	optixSetPayload_9(__float_as_uint(OFW[4]));
-	optixSetPayload_10(__float_as_uint(OFW[8]));
-	optixSetPayload_11(__float_as_uint(OFW[1]));
-	optixSetPayload_12(__float_as_uint(OFW[5]));
-	optixSetPayload_13(__float_as_uint(OFW[9]));
-	optixSetPayload_14(__float_as_uint(OFW[2]));
-	optixSetPayload_15(__float_as_uint(OFW[6]));
-	optixSetPayload_16(__float_as_uint(OFW[10]));
-	optixSetPayload_17(__float_as_uint(verticesObj[1].x * WFO[0] + verticesObj[1].y * WFO[1] + verticesObj[1].z * WFO[2]   + WFO[3]));
-	optixSetPayload_18(__float_as_uint(verticesObj[1].x * WFO[4] + verticesObj[1].y * WFO[5] + verticesObj[1].z * WFO[6]   + WFO[7]));
-	optixSetPayload_19(__float_as_uint(verticesObj[1].x * WFO[8] + verticesObj[1].y * WFO[9] + verticesObj[1].z * WFO[10]  + WFO[11]));
-	optixSetPayload_20(__float_as_uint(verticesObj[2].x * WFO[0] + verticesObj[2].y * WFO[1] + verticesObj[2].z * WFO[2]   + WFO[3]));
-	optixSetPayload_21(__float_as_uint(verticesObj[2].x * WFO[4] + verticesObj[2].y * WFO[5] + verticesObj[2].z * WFO[6]   + WFO[7]));
-	optixSetPayload_22(__float_as_uint(verticesObj[2].x * WFO[8] + verticesObj[2].y * WFO[9] + verticesObj[2].z * WFO[10]  + WFO[11]));
+	optixSetPayload_7(materialIndex);
+	optixSetPayload_8(lightPointer.lptr);
+	optixSetPayload_9(__float_as_uint(OFW[0]));
+	optixSetPayload_10(__float_as_uint(OFW[4]));
+	optixSetPayload_11(__float_as_uint(OFW[8]));
+	optixSetPayload_12(__float_as_uint(OFW[1]));
+	optixSetPayload_13(__float_as_uint(OFW[5]));
+	optixSetPayload_14(__float_as_uint(OFW[9]));
+	optixSetPayload_15(__float_as_uint(OFW[2]));
+	optixSetPayload_16(__float_as_uint(OFW[6]));
+	optixSetPayload_17(__float_as_uint(OFW[10]));
+	optixSetPayload_18(__float_as_uint(verticesObj[1].x * WFO[0] + verticesObj[1].y * WFO[1] + verticesObj[1].z * WFO[2]   + WFO[3]));
+	optixSetPayload_19(__float_as_uint(verticesObj[1].x * WFO[4] + verticesObj[1].y * WFO[5] + verticesObj[1].z * WFO[6]   + WFO[7]));
+	optixSetPayload_20(__float_as_uint(verticesObj[1].x * WFO[8] + verticesObj[1].y * WFO[9] + verticesObj[1].z * WFO[10]  + WFO[11]));
+	optixSetPayload_21(__float_as_uint(verticesObj[2].x * WFO[0] + verticesObj[2].y * WFO[1] + verticesObj[2].z * WFO[2]   + WFO[3]));
+	optixSetPayload_22(__float_as_uint(verticesObj[2].x * WFO[4] + verticesObj[2].y * WFO[5] + verticesObj[2].z * WFO[6]   + WFO[7]));
+	optixSetPayload_23(__float_as_uint(verticesObj[2].x * WFO[8] + verticesObj[2].y * WFO[9] + verticesObj[2].z * WFO[10]  + WFO[11]));
 }
 extern "C" __global__ void __intersection__disk()
 {
@@ -151,7 +159,7 @@ extern "C" __global__ void __intersection__disk()
 
 	uint32_t lightIndex{ optixGetPrimitiveIndex() };
 
-	const DiskLightData& dl{ parameters.lights.disks[lightIndex] };
+	const DiskLightData& dl{ parameters.lightTree.disks[lightIndex] };
 
 	glm::mat3 matFrame{ glm::mat3_cast(dl.frame) };
 	glm::vec3 dC{ dl.position };
@@ -165,6 +173,9 @@ extern "C" __global__ void __intersection__disk()
 	float t{ -glm::dot(dN, o) / glm::dot(rD, dN) };
 	glm::vec3 rhP{ o + rD * t };
 
+	LightTree::LightPointer lightPointer{};
+	lightPointer.pack(LightType::DISK, lightIndex);
+
 	bool intersect{ glm::dot(rhP, rhP) < dR * dR };
 	if (intersect)
 	{
@@ -174,8 +185,8 @@ extern "C" __global__ void __intersection__disk()
 		optixSetPayload_1(__float_as_uint(hP.y));
 		optixSetPayload_2(__float_as_uint(hP.z));
 		optixSetPayload_3(encGeometryNormal);
-		optixSetPayload_4(lightIndex);
-		optixSetPayload_7((static_cast<uint32_t>(LightType::DISK) << 24) | (dl.materialIndex & 0xFFFF));
+		optixSetPayload_7(dl.materialIndex);
+		optixSetPayload_8(lightPointer.lptr);
 		optixReportIntersection(t, 0);
 	}
 }
@@ -190,7 +201,7 @@ extern "C" __global__ void __closesthit__sphere()
 	const uint32_t primID{ optixGetPrimitiveIndex() };
 
 	uint32_t lightIndex{ primID };
-	const SphereLightData& sl{ parameters.lights.spheres[lightIndex] };
+	const SphereLightData& sl{ parameters.lightTree.spheres[lightIndex] };
 	glm::vec4 sphere{ sl.position, sl.radius };
 
 	float3 rOT{ optixGetWorldRayOrigin() };
@@ -205,19 +216,24 @@ extern "C" __global__ void __closesthit__sphere()
 	if (d2 < sphere.w * sphere.w)
 		dN = -dN;
 
+	LightTree::LightPointer lightPointer{};
+	lightPointer.pack(LightType::SPHERE, lightIndex);
+
 	uint32_t encGeometryNormal{ Octohedral::encodeU32(dN) };
 	optixSetPayload_0(__float_as_uint(hP.x));
 	optixSetPayload_1(__float_as_uint(hP.y));
 	optixSetPayload_2(__float_as_uint(hP.z));
 	optixSetPayload_3(encGeometryNormal);
-	optixSetPayload_4(lightIndex);
-	optixSetPayload_7((static_cast<uint32_t>(LightType::SPHERE) << 24) | (sl.materialIndex & 0xFFFF));
+	optixSetPayload_7(sl.materialIndex);
+	optixSetPayload_8(lightPointer.lptr);
 }
 
 extern "C" __global__ void __miss__miss()
 {
 	optixSetPayloadTypes(OPTIX_PAYLOAD_TYPE_ID_0); 
-	optixSetPayload_7(static_cast<uint32_t>(LightType::SKY) << 24);
+	LightTree::LightPointer lightPointer{};
+	lightPointer.pack(LightType::SKY, 0);
+	optixSetPayload_8(lightPointer.lptr);
 }
 
 extern "C" __device__ void __direct_callable__PureDielectricBxDF(const MaterialData& materialData, const DirectLightSampleData& directLightData, const QRNG::State& qrngState,
@@ -876,13 +892,16 @@ CU_DEVICE CU_INLINE void unpackInteractionData(const LaunchParameters& params, u
 		Path& path, Interaction& interaction, glm::mat3& worldFromObjectNormal)
 {
 	interaction.geometryNormal = Octohedral::decodeU32(pl[3]);
-	uint32_t matIndex{ pl[7] & 0xFFFF };
+	uint32_t matIndex{ pl[7] };
 	interaction.material = params.materials + matIndex;
 	
-	path.stateFlags |= static_cast<PathStateBitfield>((pl[7] >> 16) & 0xFF);
-	interaction.lightType = static_cast<LightType>(pl[7] >> 24);
-	if (static_cast<bool>(path.stateFlags & PathStateBitfield::TRIANGULAR_GEOMETRY))
+	LightTree::LightPointer lightPointer{ .lptr = pl[8] };
+	lightPointer.unpack(interaction.lightType, interaction.lightIndex);
+
+	bool triangularGeometry{ interaction.lightType == LightType::TRIANGLE || interaction.lightType == LightType::NONE };
+	if (triangularGeometry)
 	{
+		path.stateFlags |= PathStateBitfield::TRIANGULAR_GEOMETRY;
 		interaction.primitive.triangle.index = pl[4];
 		glm::vec2& barycentrics{ interaction.primitive.triangle.barycentrics };
 		barycentrics = { __uint_as_float(pl[5]), __uint_as_float(pl[6]) };
@@ -890,8 +909,8 @@ CU_DEVICE CU_INLINE void unpackInteractionData(const LaunchParameters& params, u
 		glm::vec3& vert1{ interaction.primitive.triangle.vertices[1] };
 		glm::vec3& vert2{ interaction.primitive.triangle.vertices[2] };
 		vert0 = glm::vec3{ __uint_as_float(pl[0]), __uint_as_float(pl[1]), __uint_as_float(pl[2]) };
-		vert1 = glm::vec3{ __uint_as_float(pl[17]), __uint_as_float(pl[18]), __uint_as_float(pl[19]) };
-		vert2 = glm::vec3{ __uint_as_float(pl[20]), __uint_as_float(pl[21]), __uint_as_float(pl[22]) };
+		vert1 = glm::vec3{ __uint_as_float(pl[18]), __uint_as_float(pl[19]), __uint_as_float(pl[20]) };
+		vert2 = glm::vec3{ __uint_as_float(pl[21]), __uint_as_float(pl[22]), __uint_as_float(pl[23]) };
 		glm::vec3& hitPos{ interaction.hitPos };
 		hitPos.x = vert0.x * (1.0f - barycentrics.x - barycentrics.y) + vert1.x * barycentrics.x + vert2.x * barycentrics.y;
 		hitPos.y = vert0.y * (1.0f - barycentrics.x - barycentrics.y) + vert1.y * barycentrics.x + vert2.y * barycentrics.y;
@@ -900,21 +919,20 @@ CU_DEVICE CU_INLINE void unpackInteractionData(const LaunchParameters& params, u
 	else
 	{
 		interaction.hitPos = glm::vec3{ __uint_as_float(pl[0]), __uint_as_float(pl[1]), __uint_as_float(pl[2]) };
-		interaction.lightIndex = pl[4];
 	}
 
 	interaction.primitive.triangle.hitPosInterp = interaction.hitPos;
 	interaction.hitFromInside = -glm::dot(interaction.geometryNormal, path.ray.d) < 0.0f;
 
-	worldFromObjectNormal[0][0] = __uint_as_float(pl[8]);
-	worldFromObjectNormal[1][0] = __uint_as_float(pl[9]);
-	worldFromObjectNormal[2][0] = __uint_as_float(pl[10]);
-	worldFromObjectNormal[0][1] = __uint_as_float(pl[11]);
-	worldFromObjectNormal[1][1] = __uint_as_float(pl[12]);
-	worldFromObjectNormal[2][1] = __uint_as_float(pl[13]);
-	worldFromObjectNormal[0][2] = __uint_as_float(pl[14]);
-	worldFromObjectNormal[1][2] = __uint_as_float(pl[15]);
-	worldFromObjectNormal[2][2] = __uint_as_float(pl[16]);
+	worldFromObjectNormal[0][0] = __uint_as_float(pl[9]);
+	worldFromObjectNormal[1][0] = __uint_as_float(pl[10]);
+	worldFromObjectNormal[2][0] = __uint_as_float(pl[11]);
+	worldFromObjectNormal[0][1] = __uint_as_float(pl[12]);
+	worldFromObjectNormal[1][1] = __uint_as_float(pl[13]);
+	worldFromObjectNormal[2][1] = __uint_as_float(pl[14]);
+	worldFromObjectNormal[0][2] = __uint_as_float(pl[15]);
+	worldFromObjectNormal[1][2] = __uint_as_float(pl[16]);
+	worldFromObjectNormal[2][2] = __uint_as_float(pl[17]);
 }
 CU_DEVICE CU_INLINE void updateStateFlags(PathStateBitfield& stateFlags)
 {
@@ -934,6 +952,143 @@ CU_DEVICE CU_INLINE void updateStateFlags(PathStateBitfield& stateFlags)
 		includeFlags |= PathStateBitfield::REFRACTION_HAPPENED;
 
 	stateFlags = (stateFlags & (~excludeFlags)) | includeFlags;
+}
+
+CU_DEVICE CU_INLINE float evaluateNodeImportance(const LightTree::UnpackedNode& node, const glm::vec3& position, const glm::vec3& normal)
+{
+	namespace SG = SphericalGaussian;
+
+	// Create Spherical Gaussian Light Lobe
+	const glm::vec3 spatialMean{
+		node.attributes.spatialMean[0],
+		node.attributes.spatialMean[1],
+		node.attributes.spatialMean[2], };
+	const glm::vec3 averageDirection{
+		node.attributes.averageDirection[0],
+		node.attributes.averageDirection[1],
+		node.attributes.averageDirection[2], };
+	glm::vec3 lightDir{ spatialMean - position };
+	const float squaredDistance{ glm::dot(lightDir, lightDir) };
+	lightDir *= rsqrt(squaredDistance);
+	const float lightVariance{ cuda::std::fmax(node.attributes.spatialVariance, (0x1.0p-31f) * squaredDistance) };
+	const float lightSharpness{ squaredDistance / lightVariance };
+	const SG::Lobe lightLobe{ SG::Product(averageDirection, node.attributes.sharpness, lightDir, lightSharpness) };
+
+	// Calculate importance (estimate for diffuse distribution only because we evaluate the entire BxDF when light sampling and it is cheaper)
+	const float amplitude{ cuda::std::exp(lightLobe.logAmplitude) };
+	const float cosine{ glm::clamp(glm::dot(lightLobe.axis, normal), -1.0f, 1.0f) };
+	const float importance{ amplitude * SG::ClampedCosineProductIntegralOverPi2024(cosine, lightLobe.sharpness) };
+
+	return importance;
+}
+CU_DEVICE CU_INLINE float traverseLightTree(const LaunchParameters::LightTree& tree, const LightType type, const uint32_t index,
+		const glm::vec3& position, const glm::vec3& normal)
+{
+	float PDF{};
+	float envMapImportance{ tree.envMap.enabled ? LightTree::KEnvironmentMapImportance : 0.0f };
+	if (type == LightType::SKY)
+	{
+		PDF = envMapImportance;
+		return PDF;
+	}
+	else
+		PDF = 1.0f - envMapImportance;
+
+	// Get bitmask of the given light
+	uint64_t bitmask{ tree.bitmasks[static_cast<int>(type)][index] };
+
+	// Initialize the first node
+	uint32_t currentNodeIndex{ 0 };
+	bool isLeaf{};
+	LightTree::UnpackedNode current{ LightTree::unpackNode(tree.nodes[currentNodeIndex], isLeaf) };
+	for (int depth{ 0 }; depth < sizeof(uint64_t) * 8; ++depth)
+	{
+		// Break if current node is a leaf node
+		if (isLeaf)
+			break;
+
+		// Access child nodes
+		bool leftIsLeaf{};
+		LightTree::UnpackedNode leftNode{ LightTree::unpackNode(tree.nodes[currentNodeIndex + 1], leftIsLeaf) };
+		float leftImportance{ evaluateNodeImportance(leftNode, position, normal) };
+		bool rightIsLeaf{};
+		LightTree::UnpackedNode rightNode{ LightTree::unpackNode(tree.nodes[current.core.branch.rightChildIndex], rightIsLeaf) };
+		float rightImportance{ evaluateNodeImportance(rightNode, position, normal) };
+		
+		// Compute PDF of the bitmask path
+		bool rightChosen{ static_cast<bool>(bitmask & (1ull << depth)) };
+		currentNodeIndex = rightChosen ? current.core.branch.rightChildIndex : currentNodeIndex + 1;
+		current = rightChosen ? rightNode : leftNode;
+		isLeaf = rightChosen ? rightIsLeaf : leftIsLeaf;
+		PDF *= rightChosen ?
+			rightImportance / (leftImportance + rightImportance)
+			:
+			leftImportance / (leftImportance + rightImportance);
+	}
+	PDF *= 1.0f / current.core.leaf.lightCount;
+
+	return PDF;
+}
+CU_DEVICE CU_INLINE void sampleLightTree(const LaunchParameters::LightTree& tree, float rand, const glm::vec3& position, const glm::vec3& normal,
+		LightType& type, uint32_t& index, float& PDF)
+{
+	// Helper function to normalize "rand" after choosing a node
+	auto normRand{ [](float rand, float sepVal, bool rightChosen) -> float
+		{
+			float res{};
+			if (rightChosen)
+				res = (rand - sepVal) / (1.0f - sepVal);
+			else
+				res = rand / sepVal;
+			return glm::clamp(res, 0.0f, 1.0f);
+		} };
+
+	// Choose between environment map and light tree sampling
+	float envMapImportance{ tree.envMap.enabled ? LightTree::KEnvironmentMapImportance : 0.0f };
+	if (rand < envMapImportance)
+	{
+		type = LightType::SKY;
+		index = 0;
+		PDF = envMapImportance;
+		return;
+	}
+	rand = normRand(rand, envMapImportance, true);
+	PDF = 1.0f - envMapImportance;
+
+	// Traversal and importance evaluation
+	uint32_t currentNodeIndex{ 0 };
+	bool isLeaf{};
+	LightTree::UnpackedNode current{ LightTree::unpackNode(tree.nodes[currentNodeIndex], isLeaf) };
+	while (!isLeaf)
+	{
+		bool leftIsLeaf{};
+		LightTree::UnpackedNode left{ LightTree::unpackNode(tree.nodes[currentNodeIndex + 1], leftIsLeaf) };
+		bool rightIsLeaf{};
+		LightTree::UnpackedNode right{ LightTree::unpackNode(tree.nodes[current.core.branch.rightChildIndex], rightIsLeaf) };
+		float leftImportance{ evaluateNodeImportance(left, position, normal) };
+		float rightImportance{ evaluateNodeImportance(right, position, normal) };
+		float importanceSepVal{ leftImportance / (leftImportance + rightImportance) };
+		bool rightChosen{ rand > importanceSepVal };
+		currentNodeIndex = rightChosen ? current.core.branch.rightChildIndex : currentNodeIndex + 1;
+		current = rightChosen ? right : left;
+		isLeaf = rightChosen ? rightIsLeaf : leftIsLeaf;
+		PDF *= rightChosen ? 1.0f - importanceSepVal : importanceSepVal;
+		rand = normRand(rand, importanceSepVal, rightChosen);
+	};
+
+	// Extracting a light pointer from the leaf
+	uint32_t indexIntoLeafLights{ static_cast<uint32_t>(current.core.leaf.lightCount * rand) };
+	uint32_t offsetPlusIndex{ current.core.leaf.lightOffset +
+		(indexIntoLeafLights == current.core.leaf.lightCount ? current.core.leaf.lightCount - 1 : indexIntoLeafLights) };
+	PDF *= 1.0f / current.core.leaf.lightCount;
+
+	// Unpacking the light pointer
+	tree.lightPointers[offsetPlusIndex].unpack(type, index);
+
+	if (isnan(PDF) || isinf(PDF) || PDF == 0.0f)
+		type = LightType::NONE;
+
+	return;
 }
 
 extern "C" __global__ void __raygen__main()
@@ -983,7 +1138,7 @@ extern "C" __global__ void __raygen__main()
 		// Trace loop (Processing the path and gathering transfered radiance)
 		do
 		{
-			uint32_t pl[23];
+			uint32_t pl[24];
 			optixTrace(OPTIX_PAYLOAD_TYPE_ID_0, //Payload type
 					   parameters.traversable, //Traversable handle
 					   { path.ray.o.x, path.ray.o.y, path.ray.o.z }, //Ray origin
@@ -999,7 +1154,7 @@ extern "C" __global__ void __raygen__main()
 					   pl[0], pl[1], pl[2],
 					   pl[3], pl[4], pl[5], pl[6], pl[7],
 					   pl[8], pl[9], pl[10], pl[11], pl[12], pl[13], pl[14], pl[15], pl[16],
-					   pl[17], pl[18], pl[19], pl[20], pl[21], pl[22]);
+					   pl[17], pl[18], pl[19], pl[20], pl[21], pl[22], pl[23]);
 
 			// Unpack path interaction data
 			Interaction interaction{};
@@ -1010,31 +1165,55 @@ extern "C" __global__ void __raygen__main()
 			// Hit emission estimation
 			if (interaction.lightType != LightType::NONE)
 			{
-				glm::vec3 toHit{ interaction.hitPos - path.ray.o };
-				float sqrdDistToLight{ toHit.x * toHit.x + toHit.y * toHit.y + toHit.z * toHit.z };
-
-				float lightStructurePDF{ 1.0f / (parameters.lights.lightCount + (parameters.envMap.enabled ? 1.0f : 0.0f)) };
+				const bool prevNEEHappened{ path.depth != 0 && !static_cast<bool>(path.stateFlags & PathStateBitfield::PREVIOUS_HIT_SPECULAR) };
+				float lightTreePDF{ prevNEEHappened ?
+					traverseLightTree(parameters.lightTree, interaction.lightType, interaction.lightIndex, path.ray.o, path.lastShadingNormal)
+					:
+					1.0f };
 				float lightPDF{};
 				SampledSpectrum Le{};
 				bool noEmission{ false };
 
+				glm::vec3 toHit{ interaction.hitPos - path.ray.o };
+				float sqrdDistToLight{ toHit.x * toHit.x + toHit.y * toHit.y + toHit.z * toHit.z };
 				switch (interaction.lightType)
 				{
+					case LightType::TRIANGLE:
+						{
+							const EmissiveTriangleLightData& tri{ parameters.lightTree.triangles[interaction.lightIndex] };
+							glm::vec3 a{ tri.vertices[0], tri.vertices[1], tri.vertices[2] };
+							glm::vec3 b{ tri.vertices[3], tri.vertices[4], tri.vertices[5] };
+							glm::vec3 c{ tri.vertices[6], tri.vertices[7], tri.vertices[8] };
+							glm::vec3 n{ glm::cross(b - a, c - a) };
+							float nL{ glm::length(n) };
+							n /= nL;
+							float area{ nL / 2.0f };
+							float lCos{ -glm::dot(path.ray.d, n) };
+							noEmission = lCos <= 0.0f;
+							float surfacePDF{ 1.0f / area };
+							lightPDF = surfacePDF * sqrdDistToLight / lCos;
+							const MaterialData& material{ parameters.materials[tri.materialIndex] };
+							Le = color::RGBtoSpectrum(
+								glm::vec3{material.emissiveFactor[0], material.emissiveFactor[1], material.emissiveFactor[2]},
+								path.wavelengths, *parameters.spectralBasisR, *parameters.spectralBasisG, *parameters.spectralBasisB) * 0.01f;
+						}
+						break;
 					case LightType::DISK:
 						{
-							const DiskLightData& disk{ parameters.lights.disks[interaction.lightIndex] };
+							const DiskLightData& disk{ parameters.lightTree.disks[interaction.lightIndex] };
 							glm::vec3 norm{ glm::mat3_cast(disk.frame)[2] };
 							float lCos{ -glm::dot(path.ray.d, norm) };
+							noEmission = lCos <= 0.0f;
 							float surfacePDF{ 1.0f / (glm::pi<float>() * disk.radius * disk.radius) };
 							lightPDF = surfacePDF * sqrdDistToLight / lCos;
-							float lightPowerScale{ disk.powerScale * (lCos > 0.0f ? 1.0f : 0.0f) };
+							float lightPowerScale{ disk.powerScale };
 							uint32_t emissionSpectrumDataIndex{ parameters.materials[disk.materialIndex].emissionSpectrumDataIndex };
 							Le = parameters.spectra[emissionSpectrumDataIndex].sample(path.wavelengths) * lightPowerScale;
 						}
 						break;
 					case LightType::SPHERE:
 						{
-							const SphereLightData& sphere{ parameters.lights.spheres[interaction.lightIndex] };
+							const SphereLightData& sphere{ parameters.lightTree.spheres[interaction.lightIndex] };
 							lightPDF = sampling::sphere::pdfUniformSolidAngle(path.ray.o, sphere.position, sphere.radius);
 							float lightPowerScale{ sphere.powerScale };
 							uint32_t emissionSpectrumDataIndex{ parameters.materials[sphere.materialIndex].emissionSpectrumDataIndex };
@@ -1043,17 +1222,18 @@ extern "C" __global__ void __raygen__main()
 						break;
 					case LightType::SKY:
 						{
-							if (parameters.envMap.enabled)
+							const LaunchParameters::LightTree::EnvironmentMap& envMap{ parameters.lightTree.envMap };
+							if (envMap.enabled)
 							{
 								float phi{ cuda::std::atan2(path.ray.d.y, path.ray.d.x) };
 								float theta{ cuda::std::acos(path.ray.d.z) };
-								float4 skyMap{ tex2D<float4>(parameters.envMap.environmentTexture,
+								float4 skyMap{ tex2D<float4>(envMap.environmentTexture,
 										0.5f - phi / (2.0f * glm::pi<float>()), theta / glm::pi<float>()) };
 								glm::vec3 skyColor{ skyMap.x, skyMap.y, skyMap.z };
 								float surfacePDF{ 1.0f / (4.0f * glm::pi<float>()) };
 								lightPDF = surfacePDF * ((skyColor.x + skyColor.y + skyColor.z) / 3.0f)
 									* cuda::std::sin(theta) // Applying Cartesian to spherical Jacobian
-									/ parameters.envMap.integral;
+									/ envMap.integral;
 								Le = color::RGBtoSpectrum(skyColor, path.wavelengths, *parameters.spectralBasisR, *parameters.spectralBasisG, *parameters.spectralBasisB) * 0.01f;
 								path.stateFlags |= PathStateBitfield::FINISHED;
 							}
@@ -1070,13 +1250,13 @@ extern "C" __global__ void __raygen__main()
 
 				if (!noEmission)
 				{
-					lightPDF *= lightStructurePDF;
+					lightPDF *= lightTreePDF;
 
 					float emissionWeight{};
-					if (path.depth == 0 || static_cast<bool>(path.stateFlags & PathStateBitfield::PREVIOUS_HIT_SPECULAR))
-						emissionWeight = 1.0f;
-					else
+					if (prevNEEHappened)
 						emissionWeight = MIS::powerHeuristic(1, path.bxdfPDF, 1, lightPDF);
+					else
+						emissionWeight = 1.0f;
 
 					path.L += path.throughput * Le * emissionWeight;
 				}
@@ -1267,7 +1447,7 @@ extern "C" __global__ void __raygen__main()
 					shadingBitangent *= (flipTangent ? -1.0f : 1.0f);
 					frame = glm::mat3{shadingTangent, shadingBitangent, n};
 					localTransform = LocalTransform{frame};
-					interaction.primitive.triangle.shadingNormal = n;
+					path.lastShadingNormal = n;
 
 					bool bcTexture{ static_cast<bool>(interaction.material->textures & MaterialData::TextureTypeBitfield::BASE_COLOR) };
 					bool bcFactor{ static_cast<bool>(interaction.material->factors & MaterialData::FactorTypeBitfield::BASE_COLOR) };
@@ -1307,7 +1487,7 @@ extern "C" __global__ void __raygen__main()
 						surface.specular.roughness = roughFactor ? interaction.material->roughnessFactor : surface.specular.roughness;
 					}
 					if (surface.specular.roughness < 0.001f)
-						path.stateFlags |= PathStateBitfield::CURRENT_HIT_SPECULAR;
+						path.stateFlags |= PathStateBitfield::CURRENT_HIT_SPECULAR; // TODO: Remove here and only activate in BxDF when perfect specular path is chosen
 
 					bool trTexture{ static_cast<bool>(interaction.material->textures & MaterialData::TextureTypeBitfield::TRANSMISSION) };
 					bool trFactor{ static_cast<bool>(interaction.material->factors & MaterialData::FactorTypeBitfield::TRANSMISSION) };
@@ -1361,14 +1541,17 @@ extern "C" __global__ void __raygen__main()
 			else
 			{
 				localTransform = LocalTransform{interaction.geometryNormal};
+				path.lastShadingNormal = interaction.geometryNormal;
 			}
 
 			// Light sampling and BxDF evaluation
 			if (!interaction.skipped)
 			{
+				bool envMapIsPresent{ parameters.lightTree.envMap.enabled };
+				bool lightTreeIsPresent{ parameters.lightTree.nodes != nullptr };
 				// Next event estimation data
 				DirectLightSampleData directLightData{};
-				if ((parameters.lights.lightCount == 0.0f && !parameters.envMap.enabled) || static_cast<bool>(path.stateFlags & PathStateBitfield::CURRENT_HIT_SPECULAR))
+				if (!envMapIsPresent && !lightTreeIsPresent)
 				{
 					directLightData.occluded = true;
 				}
@@ -1376,43 +1559,66 @@ extern "C" __global__ void __raygen__main()
 				{
 					glm::vec3 rand{ QRNG::Sobol::sample3D(qrngState, QRNG::DimensionOffset::LIGHT) };
 
-					// Sample light structure
+					const bool triangularGeometry{ static_cast<bool>(path.stateFlags & PathStateBitfield::TRIANGULAR_GEOMETRY) };
+					const bool surfaceCanTransmit{ surface.transmission.weight != 0.0f };
+					const glm::vec3& gn{ interaction.geometryNormal };
+					const glm::vec3& sn{ path.lastShadingNormal };
+
+					// Sample light tree
 					LightType type{};
-					uint16_t index{};
-					float lightStructurePDF{ 1.0f / (parameters.lights.lightCount + (parameters.envMap.enabled ? 1.0f : 0.0f)) };
-					uint16_t sampledLightIndex{ static_cast<uint16_t>((parameters.lights.lightCount + (parameters.envMap.enabled ? 1.0f : 0.0f) - 0.0001f) * rand.z) };
-					if (sampledLightIndex != static_cast<uint16_t>(parameters.lights.lightCount + 0.001f))
-					{
-						uint32_t lightC{ 0 };
-						for (int i{ 0 }; i < KSampleableLightCount; ++i)
-						{
-							lightC += parameters.lights.orderedCount[i];
-							if (sampledLightIndex < lightC)
-							{
-								type = KOrderedTypes[i];
-								index = sampledLightIndex - (lightC - parameters.lights.orderedCount[i]);
-								break;
-							}
-						}
-					}
-					else
-					{
-						type = LightType::SKY;
-					}
+					uint32_t index{};
+					float lightTreePDF{};
+					sampleLightTree(parameters.lightTree, rand.z,
+							interaction.hitPos, sn,
+							type, index, lightTreePDF);
 
 					// Take the light sample
 					glm::vec3 lightRayOrigin{};
 					float dToL{};
 					float lightPDF{};
-					const bool triangularGeometry{ static_cast<bool>(path.stateFlags & PathStateBitfield::TRIANGULAR_GEOMETRY) };
-					const bool surfaceCanTransmit{ surface.transmission.weight != 0.0f };
-					const glm::vec3& gn{ interaction.geometryNormal };
-					const glm::vec3& sn{ triangularGeometry ? interaction.primitive.triangle.shadingNormal : gn };
 					switch (type)
 					{
+						case LightType::TRIANGLE:
+							{
+								const EmissiveTriangleLightData& tri{ parameters.lightTree.triangles[index] };
+								glm::vec3 a{ tri.vertices[0], tri.vertices[1], tri.vertices[2] };
+								glm::vec3 b{ tri.vertices[3], tri.vertices[4], tri.vertices[5] };
+								glm::vec3 c{ tri.vertices[6], tri.vertices[7], tri.vertices[8] };
+								glm::vec3 n{ glm::cross(b - a, c - a) };
+								float nL{ glm::length(n) };
+								n /= nL;
+								float area{ nL / 2.0f };
+
+								glm::vec3 lSmplPos{ sampling::triangle::sampleUniform(glm::vec2{rand.x, rand.y}, a, b, c) };
+
+								const glm::vec3 sr{ lSmplPos - interaction.hitPos };
+								const bool inSample{ glm::dot(sn, sr) < 0.0f };
+								if ((inSample && !surfaceCanTransmit) || (inSample && (glm::dot(gn, sr) > 0.0f)))
+									directLightData.occluded = true;
+								lightRayOrigin = utility::offsetPoint(
+									inSample || !triangularGeometry ? interaction.hitPos : interaction.primitive.triangle.hitPosInterp,
+									inSample ? -gn : gn);
+
+								glm::vec3 rToLight{ lSmplPos - lightRayOrigin };
+								float sqrdToLight{ rToLight.x * rToLight.x + rToLight.y * rToLight.y + rToLight.z * rToLight.z };
+								dToL = cuda::std::sqrtf(sqrdToLight);
+								directLightData.lightDir = rToLight / dToL;
+								float lCos{ -glm::dot(n, directLightData.lightDir) };
+
+								directLightData.occluded = lCos <= 0.0f;
+
+								float surfacePDF{ 1.0f / area };
+								lightPDF = surfacePDF * sqrdToLight / lCos;
+
+								const MaterialData& material{ parameters.materials[tri.materialIndex] };
+								directLightData.spectrumSample = color::RGBtoSpectrum(
+									glm::vec3{material.emissiveFactor[0], material.emissiveFactor[1], material.emissiveFactor[2]},
+									path.wavelengths, *parameters.spectralBasisR, *parameters.spectralBasisG, *parameters.spectralBasisB) * 0.01f;
+							}
+							break;
 						case LightType::DISK:
 							{
-								const DiskLightData& disk{ parameters.lights.disks[index] };
+								const DiskLightData& disk{ parameters.lightTree.disks[index] };
 								directLightData.spectrumSample
 									= parameters.spectra[parameters.materials[disk.materialIndex].emissionSpectrumDataIndex].sample(path.wavelengths) * disk.powerScale;
 								glm::mat3 matframe{ glm::mat3_cast(disk.frame) };
@@ -1440,7 +1646,7 @@ extern "C" __global__ void __raygen__main()
 							break;
 						case LightType::SPHERE:
 							{
-								const SphereLightData& sphere{ parameters.lights.spheres[index] };
+								const SphereLightData& sphere{ parameters.lightTree.spheres[index] };
 								directLightData.spectrumSample = parameters.spectra[parameters.materials[sphere.materialIndex].emissionSpectrumDataIndex].sample(path.wavelengths) * sphere.powerScale;
 								glm::vec3 lSmplPos{ sampling::sphere::sampleUniformWorldSolidAngle(glm::vec2{rand.x, rand.y}, interaction.hitPos, sphere.position, sphere.radius, lightPDF) };
 
@@ -1463,23 +1669,24 @@ extern "C" __global__ void __raygen__main()
 						case LightType::SKY:
 							{
 								// Importance sampling environment map with interpolated inverted CDF indices
+								const LaunchParameters::LightTree::EnvironmentMap& envMap{ parameters.lightTree.envMap };
 								glm::vec2 fullC{
-									cuda::std::fmin(rand.x * (parameters.envMap.width - 1.0f), parameters.envMap.width - 1.0001f),
-									cuda::std::fmin(rand.y * (parameters.envMap.height - 1.0f), parameters.envMap.height - 1.0001f) };
+									cuda::std::fmin(rand.x * (envMap.width - 1.0f), envMap.width - 1.0001f),
+									cuda::std::fmin(rand.y * (envMap.height - 1.0f), envMap.height - 1.0001f) };
 								glm::vec2 floorC{ glm::floor(fullC) };
 								glm::vec2 fractC{ fullC - floorC };
 								glm::uvec2 floorCI{ floorC };
 
 								glm::vec2 cdfIndicesM{
-									parameters.envMap.marginalCDFIndices[floorCI.y],
-									parameters.envMap.marginalCDFIndices[floorCI.y + 1] };
+									envMap.marginalCDFIndices[floorCI.y],
+									envMap.marginalCDFIndices[floorCI.y + 1] };
 								glm::vec2 cdfIndicesC{
-									parameters.envMap.conditionalCDFIndices[static_cast<uint32_t>(cdfIndicesM.x * parameters.envMap.width) + floorCI.x],
-									parameters.envMap.conditionalCDFIndices[static_cast<uint32_t>(cdfIndicesM.x * parameters.envMap.width) + floorCI.x + 1] };
+									envMap.conditionalCDFIndices[static_cast<uint32_t>(cdfIndicesM.x * envMap.width) + floorCI.x],
+									envMap.conditionalCDFIndices[static_cast<uint32_t>(cdfIndicesM.x * envMap.width) + floorCI.x + 1] };
 
 								glm::vec2 impSample{
-									glm::mix(cdfIndicesC.x, cdfIndicesC.y, fractC.x) * (1.0f / parameters.envMap.width),
-										glm::mix(cdfIndicesM.x, cdfIndicesM.y, fractC.y) * (1.0f / parameters.envMap.height) };
+									glm::mix(cdfIndicesC.x, cdfIndicesC.y, fractC.x) * (1.0f / envMap.width),
+										glm::mix(cdfIndicesM.x, cdfIndicesM.y, fractC.y) * (1.0f / envMap.height) };
 
 								float phi{ 2.0f * glm::pi<float>() * impSample.x };
 								float theta{ glm::pi<float>() * impSample.y };
@@ -1489,13 +1696,13 @@ extern "C" __global__ void __raygen__main()
 									cuda::std::cos(theta), };
 								if (glm::dot(sn, directLightData.lightDir) <= 0.0f)
 									directLightData.occluded = true;
-								float4 rgbSample{ tex2D<float4>(parameters.envMap.environmentTexture, impSample.x, impSample.y) };
+								float4 rgbSample{ tex2D<float4>(envMap.environmentTexture, impSample.x, impSample.y) };
 								directLightData.spectrumSample = color::RGBtoSpectrum(glm::vec3{rgbSample.x, rgbSample.y, rgbSample.z},
 										path.wavelengths, *parameters.spectralBasisR, *parameters.spectralBasisG, *parameters.spectralBasisB) * 0.01f;
 								float surfacePDF{ 1.0f / (4.0f * glm::pi<float>()) };
 								lightPDF = surfacePDF * ((rgbSample.x + rgbSample.y + rgbSample.z) / 3.0f)
 									* cuda::std::sin(theta) // Applying Cartesian to spherical Jacobian
-									/ parameters.envMap.integral;
+									/ envMap.integral;
 								dToL = FLT_MAX;
 								lightRayOrigin = utility::offsetPoint(
 										!triangularGeometry ? interaction.hitPos : interaction.primitive.triangle.hitPosInterp,
@@ -1503,9 +1710,12 @@ extern "C" __global__ void __raygen__main()
 							}
 							break;
 						default:
+							{
+								directLightData.occluded = true;
+							}
 							break;
 					}
-					directLightData.lightSamplePDF = lightPDF * lightStructurePDF;
+					directLightData.lightSamplePDF = lightPDF * lightTreePDF;
 
 					const glm::vec3& rO{ lightRayOrigin };
 					const glm::vec3& lD{ directLightData.lightDir };

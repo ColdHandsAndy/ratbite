@@ -8,7 +8,7 @@ namespace Program
     static constexpr unsigned int maxDCDepth{ 1 };
     static constexpr unsigned int maxCCDepth{ 0 };
 
-    static constexpr unsigned int payloadValueCount{ 23 };
+    static constexpr unsigned int payloadValueCount{ 24 };
     static constexpr unsigned int payloadSemantics[payloadValueCount]
     {
         // Hit position (Triangle vertex A)
@@ -37,12 +37,12 @@ namespace Program
         OPTIX_PAYLOAD_SEMANTICS_AH_NONE           |
         OPTIX_PAYLOAD_SEMANTICS_IS_WRITE,
 
-		// Primitive (Light) index
+		// Primitive index
         OPTIX_PAYLOAD_SEMANTICS_TRACE_CALLER_READ |
         OPTIX_PAYLOAD_SEMANTICS_CH_WRITE          |
         OPTIX_PAYLOAD_SEMANTICS_MS_NONE           |
         OPTIX_PAYLOAD_SEMANTICS_AH_NONE           |
-        OPTIX_PAYLOAD_SEMANTICS_IS_WRITE,
+        OPTIX_PAYLOAD_SEMANTICS_IS_NONE,
 
 		// Barycentrics
         OPTIX_PAYLOAD_SEMANTICS_TRACE_CALLER_READ |
@@ -57,7 +57,14 @@ namespace Program
 		OPTIX_PAYLOAD_SEMANTICS_AH_NONE           |
 		OPTIX_PAYLOAD_SEMANTICS_IS_NONE,
 
-		// Light Type + Material Index
+		// Material Index
+        OPTIX_PAYLOAD_SEMANTICS_TRACE_CALLER_READ |
+        OPTIX_PAYLOAD_SEMANTICS_CH_WRITE          |
+        OPTIX_PAYLOAD_SEMANTICS_MS_WRITE          |
+        OPTIX_PAYLOAD_SEMANTICS_AH_NONE           |
+        OPTIX_PAYLOAD_SEMANTICS_IS_WRITE,
+
+		// Light Pointer
         OPTIX_PAYLOAD_SEMANTICS_TRACE_CALLER_READ |
         OPTIX_PAYLOAD_SEMANTICS_CH_WRITE          |
         OPTIX_PAYLOAD_SEMANTICS_MS_WRITE          |

@@ -19,18 +19,14 @@ enum class LightType
 	ALL,
 };
 // LightType enums we can have multiple of are also used as indices into arrays therefore static asserts
-CU_CONSTANT uint32_t KTriangleLightsArrayIndex{ static_cast<uint32_t>(LightType::TRIANGLE) };
-CU_CONSTANT uint32_t KDiskLightsArrayIndex{ static_cast<uint32_t>(LightType::DISK) };
-CU_CONSTANT uint32_t KSphereLightsArrayIndex{ static_cast<uint32_t>(LightType::SPHERE) };
-CU_CONSTANT uint32_t KLightTypeCount{ 3 };
+constexpr uint32_t KTriangleLightsArrayIndex{ static_cast<uint32_t>(LightType::TRIANGLE) };
+constexpr uint32_t KDiskLightsArrayIndex{ static_cast<uint32_t>(LightType::DISK) };
+constexpr uint32_t KSphereLightsArrayIndex{ static_cast<uint32_t>(LightType::SPHERE) };
+constexpr uint32_t KLightTypeCount{ 3 };
 static_assert(static_cast<int>(LightType::TRIANGLE) == 0);
 static_assert(static_cast<int>(LightType::DISK) == 1);
 static_assert(static_cast<int>(LightType::SPHERE) == 2);
 
-// CU_CONSTANT uint32_t KSampleableLightCount{ 2 };
-// CU_CONSTANT LightType KOrderedTypes[]{ LightType::SPHERE, LightType::DISK };
-// CU_CONSTANT uint32_t KSphereLightIndex{ 0 };
-// CU_CONSTANT uint32_t KDiskLightIndex{ 1 };
 struct DiskLightData
 {
 	glm::vec3 position{};
@@ -58,9 +54,10 @@ namespace LightTree
 {
 	constexpr inline uint32_t KLightCountBits{ 4 };
 	constexpr inline uint32_t KLightOffsetBits{ 31 - KLightCountBits };
-	constexpr inline uint32_t KMaxLeafLightCount{ 1 << KLightCountBits };
-	constexpr inline uint32_t KMaxLeafLightOffset{ 1 << KLightOffsetBits };
+	constexpr inline uint32_t KMaxLeafLightCount{ (1 << KLightCountBits) - 1 };
+	constexpr inline uint32_t KMaxLeafLightOffset{ (1 << KLightOffsetBits) - 1 };
 	constexpr inline uint32_t KMaxDepth{ 64 };
+	constexpr inline float KEnvironmentMapImportance{ 0.3f };
 
 	struct NodeAttributes
 	{
@@ -72,15 +69,19 @@ namespace LightTree
 
 		static NodeAttributes add(const NodeAttributes& nodeA, const NodeAttributes& nodeB)
 		{
+			namespace SG = SphericalGaussian;
+
 			NodeAttributes res{};
 
 			const float fluxWeightA{ nodeA.flux / (nodeA.flux + nodeB.flux) };
 			const float fluxWeightB{ nodeB.flux / (nodeA.flux + nodeB.flux) };
 
+			const float axisLengthA{ SG::VMFSharpnessToAxisLength(nodeA.sharpness) };
+			const float axisLengthB{ SG::VMFSharpnessToAxisLength(nodeB.sharpness) };
 			float averageDirection[3]{
-				fluxWeightA * nodeA.averageDirection[0] + fluxWeightB * nodeB.averageDirection[0],
-				fluxWeightA * nodeA.averageDirection[1] + fluxWeightB * nodeB.averageDirection[1],
-				fluxWeightA * nodeA.averageDirection[2] + fluxWeightB * nodeB.averageDirection[2], };
+				fluxWeightA * axisLengthA * nodeA.averageDirection[0] + fluxWeightB * axisLengthB * nodeB.averageDirection[0],
+				fluxWeightA * axisLengthA * nodeA.averageDirection[1] + fluxWeightB * axisLengthB * nodeB.averageDirection[1],
+				fluxWeightA * axisLengthA * nodeA.averageDirection[2] + fluxWeightB * axisLengthB * nodeB.averageDirection[2], };
 			float averageDirectionLength{ sqrt(averageDirection[0] * averageDirection[0] + averageDirection[1] * averageDirection[1] + averageDirection[2] * averageDirection[2]) };
 			averageDirection[0] = averageDirectionLength > 0.0001f ? averageDirection[0] / averageDirectionLength : 0.0f;
 			averageDirection[1] = averageDirectionLength > 0.0001f ? averageDirection[1] / averageDirectionLength : 0.0f;
@@ -99,8 +100,7 @@ namespace LightTree
 			res.averageDirection[1] = averageDirection[1];
 			res.averageDirection[2] = averageDirection[2];
 			res.flux = nodeA.flux + nodeB.flux;
-			const float& adl{ averageDirectionLength };
-			res.sharpness = (3.0f * adl - (adl * adl * adl)) / (1.0f - (adl * adl));
+			res.sharpness = SG::VMFAxisLengthToSharpness(averageDirectionLength);
 			return res;
 		}
 	};
@@ -133,18 +133,16 @@ namespace LightTree
 		PackedNode() {}
 		PackedNode(const NodeAttributes& attributes,
 				uint32_t rightChildIndex)
-			: spatialMean{ attributes.spatialMean[0], attributes.spatialMean[1], attributes.spatialMean[2] }, spatialVariance{ attributes.spatialVariance },
-			packedAverageDirection{ Octohedral::encodeU32(attributes.averageDirection[0], attributes.averageDirection[1], attributes.averageDirection[2]) },
-			sharpness{ attributes.sharpness }, flux{ attributes.flux },
-			coreData{ ((1u << 31u) - 1u) & rightChildIndex }
-		{}
+		{
+			packAttributes(attributes);
+			packCoreData(rightChildIndex);
+		}
 		PackedNode(const NodeAttributes& attributes,
 				uint32_t lightOffset, uint32_t lightCount)
-			: spatialMean{ attributes.spatialMean[0], attributes.spatialMean[1], attributes.spatialMean[2] }, spatialVariance{ attributes.spatialVariance },
-			packedAverageDirection{ Octohedral::encodeU32(attributes.averageDirection[0], attributes.averageDirection[1], attributes.averageDirection[2]) },
-			sharpness{ attributes.sharpness }, flux{ attributes.flux },
-			coreData{ (1u << 31u) | ((lightCount & ((1u << KLightCountBits) - 1u)) << KLightOffsetBits) | (lightOffset & ((1u << KLightOffsetBits) - 1u)) }
-		{}
+		{
+			packAttributes(attributes);
+			packCoreData(lightOffset, lightCount);
+		}
 		// PackedNode(const float* nodeSpatialMean, float nodeSpatialVariance,
 		// 		const float* averageDirection,
 		// 		float nodeSharpness, float nodeFlux,
@@ -187,7 +185,7 @@ namespace LightTree
 	};
 	static_assert(sizeof(PackedNode) == 32);
 
-	CU_HOSTDEVICE CU_INLINE UnpackedNode unpackNode(const PackedNode& packedNode)
+	CU_HOSTDEVICE CU_INLINE UnpackedNode unpackNode(const PackedNode& packedNode, bool& isLeaf)
 	{
 		UnpackedNode res{};
 		res.attributes.spatialMean[0] = packedNode.spatialMean[0];
@@ -199,14 +197,15 @@ namespace LightTree
 		Octohedral::decode((packedNode.packedAverageDirection & 0xFFFF) / 65535.0f, (packedNode.packedAverageDirection >> 16) / 65535.0f,
 				res.attributes.averageDirection[0], res.attributes.averageDirection[1], res.attributes.averageDirection[2]);
 
-		if (packedNode.coreData >> 31 == 0)
-		{
-			res.core.branch.rightChildIndex = packedNode.coreData & ((1u << 31u) - 1u);
-		}
-		else
+		isLeaf = (packedNode.coreData >> 31) != 0;
+		if (isLeaf)
 		{
 			res.core.leaf.lightCount = (packedNode.coreData >> KLightOffsetBits) & ((1u << KLightCountBits) - 1u);
 			res.core.leaf.lightOffset = packedNode.coreData & ((1u << KLightOffsetBits) - 1u);
+		}
+		else
+		{
+			res.core.branch.rightChildIndex = packedNode.coreData;
 		}
 
 		return res;
@@ -216,13 +215,14 @@ namespace LightTree
 	{
 		uint32_t lptr{};
 
-		constexpr static inline uint32_t KLightIndexBits{ 30u };
+		constexpr static inline uint32_t KLightIndexBits{ 29u };
 		constexpr static inline uint32_t KLightTypeBits{ 32u - KLightIndexBits };
-		void pack(LightType type, uint32_t index)
+		static_assert(static_cast<uint32_t>(LightType::NONE) < (1u << KLightTypeBits));
+		CU_HOSTDEVICE CU_INLINE void pack(LightType type, uint32_t index)
 		{
 			lptr = (static_cast<uint32_t>(type) << KLightIndexBits) | (index & ((1u << KLightIndexBits) - 1u));
 		}
-		void unpack(LightType& type, uint32_t& index) const
+		CU_HOSTDEVICE CU_INLINE void unpack(LightType& type, uint32_t& index) const
 		{
 			type = static_cast<LightType>(lptr >> KLightIndexBits);
 			index = lptr & ((1u << KLightIndexBits) - 1u);

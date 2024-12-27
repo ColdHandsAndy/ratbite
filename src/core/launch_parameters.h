@@ -51,24 +51,25 @@ struct LaunchParameters
 
 	struct LightTree
 	{
-		CUPTR(LightTree::Node) nodes{};
-		CUPTR(LightTree::LightPointer) lightPointers{};
+		CUPTR(::LightTree::PackedNode) nodes{};
+		CUPTR(::LightTree::LightPointer) lightPointers{};
 		CUPTR(DiskLightData) disks{};
 		CUPTR(SphereLightData) spheres{};
 		CUPTR(EmissiveTriangleLightData) triangles{};
 		CUPTR(uint64_t) bitmasks[KLightTypeCount]{};
+
+		struct EnvironmentMap
+		{
+			bool enabled{ false };
+			float width{};
+			float height{};
+			cudaTextureObject_t environmentTexture{};
+			CUPTR(uint16_t) conditionalCDFIndices{};
+			CUPTR(uint16_t) marginalCDFIndices{};
+			float integral{};
+		} envMap{};
 	} lightTree{};
 
-	struct EnvironmentMap
-	{
-		bool enabled{ false };
-		float width{};
-		float height{};
-		cudaTextureObject_t environmentTexture{};
-		CUPTR(uint16_t) conditionalCDFIndices{};
-		CUPTR(uint16_t) marginalCDFIndices{};
-		float integral{};
-	} envMap{};
 
 	CUPTR(MaterialData) materials{};
 	CUPTR(DenseSpectrum) spectra{};

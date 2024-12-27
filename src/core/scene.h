@@ -85,6 +85,7 @@ struct SceneData
 		IndexType indexType{};
 		uint32_t primitiveCount{};
 		void* indices{};
+		std::vector<uint32_t> discardedPrimitives{};
 		uint32_t vertexCount{};
 		std::vector<glm::vec4> vertices{};
 		std::vector<glm::vec4> normals{};
@@ -154,12 +155,12 @@ struct SceneData
 		float transformFluxCorrection{};
 		struct TriangleData
 		{
-			glm::vec3 v0{};
-			glm::vec3 v1{};
-			glm::vec3 v2{};
 			glm::vec3 v0WS{}; // Vertices transformed to world space
 			glm::vec3 v1WS{};
 			glm::vec3 v2WS{};
+			glm::vec3 v0{};
+			glm::vec3 v1{};
+			glm::vec3 v2{};
 			uint32_t primIndex{};
 			float flux{};
 		};
@@ -270,6 +271,7 @@ struct SceneData
 					for (auto& texCoordSet : submesh.texCoordsSets)
 						texCoordSet.clear();
 					free(submesh.indices);
+					submesh.discardedPrimitives.clear();
 				}
 		}
 		void clearImageData()
