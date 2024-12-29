@@ -3,6 +3,7 @@
 #include <cstdint>
 
 #include "../core/light_tree_types.h"
+#include "../core/debug_macros.h"
 
 // Light tree implementatino is based on
 // "Importance Sampling of Many Lights on the GPU"
@@ -40,6 +41,10 @@ namespace LightTree
 				lightPointers = nullptr;
 				lightCount = 0;
 			}
+			for (int i{ 0 }; i < ARRAYSIZE(lightCounts); ++i)
+			{
+				lightCounts[i] = 0;
+			}
 			for (int i{ 0 }; i < ARRAYSIZE(bitmaskSets); ++i)
 			{
 				if (bitmaskSets[i] != nullptr)
@@ -52,6 +57,20 @@ namespace LightTree
 	};
 	struct Builder
 	{
+		uint32_t maxLightCountPerLeaf{ 12 };
+		uint32_t binCount{ 32 };
+		bool splitAlongLargestDimensionOnly{ false };
+		bool createLeafsASAP{ true };
+
+		Builder()
+		{
+			if (maxLightCountPerLeaf > KMaxLeafLightCount || maxLightCountPerLeaf == 0)
+			{
+				maxLightCountPerLeaf = KMaxLeafLightCount;
+				R_LOG("Max light count per leaf option is invalid. Max allowed value is chosen.");
+			}
+		}
+
 		struct SortData
 		{
 			AABB::BBox bounds{};
@@ -70,7 +89,7 @@ namespace LightTree
 				} triangleRef{};
 			} lightDataRef{};
 		};
-		Tree build(const SceneData& scene, const float* cameraPosition, SortData* lightsSortData, const int lightCount, const int triangleLightCount);
+		Tree build(const SceneData& scene, SortData* lightsSortData, const int lightCount, const int triangleLightCount);
 		
 	private:
 		struct SortRange
@@ -99,7 +118,7 @@ namespace LightTree
 
 			bool isValid() const { return axis != UINT32_MAX && index != UINT32_MAX; }
 		};
-		uint32_t buildNodeHierarchy(const SceneData& scene, const float* cameraPosition, uint64_t bitmask, uint32_t depth, SortData* sortData, const SortRange& range, Tree& tree);
+		uint32_t buildNodeHierarchy(const SceneData& scene, uint64_t bitmask, uint32_t depth, SortData* sortData, const SortRange& range, Tree& tree);
 		SplitResult splitFunction(SortData* sortData, const SortRange& range, const AABB::BBox& bound, float flux);
 		NodeAttributes fillBranchNodeAttributes(uint32_t nodeIndex, Tree& tree);
 	};

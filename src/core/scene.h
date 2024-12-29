@@ -254,6 +254,29 @@ struct SceneData
 			return *this;
 		}
 
+		void setNewTransform(const glm::mat4x3& newTransform)
+		{
+			transform = newTransform;
+			for (auto& subset : instancedEmissiveMeshSubsets)
+			{
+				glm::mat4 worldFromModel{ newTransform };
+				worldFromModel[3][3] = 1.0f;
+				glm::mat4 modelFromLocal{ instances[subset.instanceIndex].transform };
+				modelFromLocal[3][3] = 1.0f;
+				for (auto& tri : subset.triangles)
+				{
+					tri.v0WS = worldFromModel * modelFromLocal * glm::vec4{tri.v0, 1.0f};
+					tri.v1WS = worldFromModel * modelFromLocal * glm::vec4{tri.v1, 1.0f};
+					tri.v2WS = worldFromModel * modelFromLocal * glm::vec4{tri.v2, 1.0f};
+				}
+				subset.transformFluxCorrection = glm::abs(glm::determinant(glm::mat3{worldFromModel * modelFromLocal}));
+			}
+		}
+		bool hasEmissiveData() const
+		{
+			return instancedEmissiveMeshSubsets.size() != 0;
+		}
+
 		int addTextureData(void* data, uint32_t width, uint32_t height, size_t byteSize)
 		{
 			imageData.emplace_back(data, width, height, byteSize);

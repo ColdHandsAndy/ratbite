@@ -59,6 +59,7 @@ namespace CommandPayloads
 	{
 		uint32_t id{};
 		uint32_t index{};
+		bool hadEmissiveData{};
 		SceneData::BxDF matType{};
 		SpectralData::SpectralDataType oldIORType{};
 		SpectralData::SpectralDataType oldACType{};

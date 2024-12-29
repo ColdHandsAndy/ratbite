@@ -1044,7 +1044,9 @@ CU_DEVICE CU_INLINE void sampleLightTree(const LaunchParameters::LightTree& tree
 		} };
 
 	// Choose between environment map and light tree sampling
-	float envMapImportance{ tree.envMap.enabled ? LightTree::KEnvironmentMapImportance : 0.0f };
+	bool envMapIsPresent{ parameters.lightTree.envMap.enabled };
+	bool lightTreeIsPresent{ parameters.lightTree.nodes != nullptr };
+	float envMapImportance{ envMapIsPresent ? (lightTreeIsPresent ? LightTree::KEnvironmentMapImportance : 1.0f) : 0.0f };
 	if (rand < envMapImportance)
 	{
 		type = LightType::SKY;

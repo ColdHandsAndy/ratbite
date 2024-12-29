@@ -11,7 +11,7 @@
 #include "../core/debug_macros.h"
 #include "../core/math_util.h"
 
-static LightTree::NodeAttributes generateLightNodeAttributes(const SceneData& scene, const float* cameraPosition, const LightTree::Builder::SortData& sortData)
+static LightTree::NodeAttributes generateLightNodeAttributes(const SceneData& scene, const LightTree::Builder::SortData& sortData)
 {
 	namespace SG = SphericalGaussian;
 
@@ -27,10 +27,7 @@ static LightTree::NodeAttributes generateLightNodeAttributes(const SceneData& sc
 	glm::vec3 e2{ triangle.v2WS - triangle.v0WS };
 	glm::vec3 normal{ glm::normalize(glm::cross(e1, e2)) };
 	glm::vec3 spatialMean{ (triangle.v0WS + triangle.v1WS + triangle.v2WS) / 3.0f };
-	// Translate spatial means to world camera space
-	spatialMean.x = spatialMean.x - cameraPosition[0];
-	spatialMean.y = spatialMean.y - cameraPosition[1];
-	spatialMean.z = spatialMean.z - cameraPosition[2];
+	// Spatial means are in the world space
 	resAttr.spatialMean[0] = spatialMean.x;
 	resAttr.spatialMean[1] = spatialMean.y;
 	resAttr.spatialMean[2] = spatialMean.z;
@@ -47,7 +44,7 @@ static LightTree::NodeAttributes generateLightNodeAttributes(const SceneData& sc
 
 namespace LightTree
 {
-	Tree Builder::build(const SceneData& scene, const float* cameraPosition, SortData* lightsSortData, const int lightCount, const int triangleLightCount)
+	Tree Builder::build(const SceneData& scene, SortData* lightsSortData, const int lightCount, const int triangleLightCount)
 	{
 		Tree tree{};
 
@@ -55,7 +52,7 @@ namespace LightTree
 			// If not - return
 		if (lightCount == 0)
 			return tree;
-		else if (lightCount > KMaxLeafLightOffset + KMaxLeafLightCount)
+		else if (lightCount > KMaxLeafLightOffset + maxLightCountPerLeaf)
 			R_ERR_LOG("Light count exceeds the maximum supported amount of lights.");
 
 		// Initialize Tree nodes and bitmasks
@@ -70,7 +67,7 @@ namespace LightTree
 		memset(tree.bitmaskSets[KTriangleLightsArrayIndex], 0xFF, triangleLightCount * sizeof(uint64_t));
 
 		// Build the Tree
-		buildNodeHierarchy(scene, cameraPosition, 0, 0, lightsSortData, SortRange{0, static_cast<uint32_t>(lightCount)}, tree);
+		buildNodeHierarchy(scene, 0, 0, lightsSortData, SortRange{0, static_cast<uint32_t>(lightCount)}, tree);
 		R_ASSERT_LOG(tree.nodeCount != 0, "No nodes produced by light tree construction");
 		for (int i{ 0 }; i < triangleLightCount; ++i)
 			R_ASSERT_LOG(tree.bitmaskSets[KTriangleLightsArrayIndex][i] != UINT64_MAX, "Invalid light tree bitmask generated.");
@@ -80,7 +77,7 @@ namespace LightTree
 
 		return tree;
 	}
-	uint32_t Builder::buildNodeHierarchy(const SceneData& scene, const float* cameraPosition, uint64_t bitmask, uint32_t depth, SortData* sortData, const SortRange& range, Tree& tree)
+	uint32_t Builder::buildNodeHierarchy(const SceneData& scene, uint64_t bitmask, uint32_t depth, SortData* sortData, const SortRange& range, Tree& tree)
 	{
 		auto reallocateTreeNodes{ [&tree]()
 			{
@@ -102,7 +99,7 @@ namespace LightTree
 			flux += sortData[i].flux;
 		}
 
-		SplitResult split{ range.length() > KMaxLeafLightCount ? splitFunction(sortData, range, bounds, flux) : SplitResult{} };
+		SplitResult split{ range.length() > maxLightCountPerLeaf ? splitFunction(sortData, range, bounds, flux) : SplitResult{} };
 
 		if (split.isValid())
 		{
@@ -126,8 +123,8 @@ namespace LightTree
 			// Build child branches and leafs
 			if (depth == KMaxDepth)
 				R_ERR_LOG("Max light tree depth exceeded.");
-			uint32_t leftIndex{ buildNodeHierarchy(scene, cameraPosition, bitmask | (0ull << depth), depth + 1, sortData, SortRange{range.begin, split.index}, tree) };
-			uint32_t rightIndex{ buildNodeHierarchy(scene, cameraPosition, bitmask | (1ull << depth), depth + 1, sortData, SortRange{split.index, range.end}, tree) };
+			uint32_t leftIndex{ buildNodeHierarchy(scene, bitmask | (0ull << depth), depth + 1, sortData, SortRange{range.begin, split.index}, tree) };
+			uint32_t rightIndex{ buildNodeHierarchy(scene, bitmask | (1ull << depth), depth + 1, sortData, SortRange{split.index, range.end}, tree) };
 
 			// Fill the node info
 			PackedNode branch{};
@@ -144,10 +141,10 @@ namespace LightTree
 				reallocateTreeNodes();
 			tree.nodeCount += 1;
 
-			NodeAttributes nodeAttributes{ generateLightNodeAttributes(scene, cameraPosition, sortData[range.begin]) };
+			NodeAttributes nodeAttributes{ generateLightNodeAttributes(scene, sortData[range.begin]) };
 			// Get every light and compute their combined node attributes
 			for (uint32_t i{ range.begin + 1 }; i < range.end; ++i)
-				nodeAttributes = NodeAttributes::add(nodeAttributes, generateLightNodeAttributes(scene, cameraPosition, sortData[i]));
+				nodeAttributes = NodeAttributes::add(nodeAttributes, generateLightNodeAttributes(scene, sortData[i]));
 
 			PackedNode leaf{ nodeAttributes, range.begin, range.length() };
 			tree.nodes[nodeIndex] = leaf;
@@ -165,8 +162,6 @@ namespace LightTree
 	Builder::SplitResult Builder::splitFunction(SortData* sortData, const SortRange& range, const AABB::BBox& bounds, float flux)
 	{
 		constexpr float KCosAngleEntireCone{ -1.0f };
-		constexpr uint32_t KBinCount{ 16 };
-		constexpr uint32_t KCostsArraySize{ KBinCount - 1 };
 
 		// Compute the minimum cos cone angle that includes both given cones
 		const auto computeCosConeAngle{ [](const float* coneDirA, const float cosThetaA, const float* coneDirB, const float cosThetaB) {
@@ -236,11 +231,12 @@ namespace LightTree
 		};
 
 		// Allocate bins and costs memory
-		Bin* bins{ new Bin[KBinCount] };
-		float* costs{ new float[KCostsArraySize] };
+		const uint32_t costsArraySize{ binCount - 1 };
+		Bin* bins{ new Bin[binCount] };
+		float* costs{ new float[costsArraySize] };
 
 		// Function that computes the best split along a given dimension
-		const auto binAlongDimension = [&bins, &costs,
+		const auto binAlongDimension = [this, &bins, &costs, &costsArraySize,
 			  &range, &sortData, &bounds,
 			  &split, &splitCost, &dimensions, &largestDimension,
 			  &computeCosConeAngle, &evalSAOH](const uint32_t dimension)
@@ -252,22 +248,22 @@ namespace LightTree
 				float bmax{ bounds.max[dimension] };
 				float w{ bmax - bmin };
 				R_ASSERT(w >= 0.0f);
-				float scale{ w > std::numeric_limits<float>::min() ? static_cast<float>(KBinCount) / w : 0.0f };
+				float scale{ w > std::numeric_limits<float>::min() ? static_cast<float>(binCount) / w : 0.0f };
 				float c[3]{};
 				sd.bounds.getCenter(c[0], c[1], c[2]);
 				float p{ c[dimension] };
 				R_ASSERT(bmin <= p && p <= bmax);
-				return std::min(static_cast<uint32_t>((p - bmin) * scale), KBinCount - 1);
+				return std::min(static_cast<uint32_t>((p - bmin) * scale), binCount - 1);
 			};
 
 			// Initialize bins
-			for (int i{ 0 }; i < KBinCount; ++i)
+			for (int i{ 0 }; i < binCount; ++i)
 				bins[i] = Bin{};
 			for (uint32_t i{ range.begin }; i < range.end; ++i)
 				bins[getBinId(sortData[i])] |= sortData[i];
 
 			// Compute bins cosConeAngles and coneDirections
-			for (int i{ 0 }; i < KBinCount; ++i)
+			for (int i{ 0 }; i < binCount; ++i)
 			{
 				Bin& bin{ bins[i] };
 				float coneDirL{ std::sqrt(
@@ -295,7 +291,7 @@ namespace LightTree
 
 			// Sweeping over the bins to calculate costs
 			Bin total{};
-			for (int i{ 0 }; i < KCostsArraySize; ++i)
+			for (int i{ 0 }; i < costsArraySize; ++i)
 			{
 				total |= bins[i];
 
@@ -318,7 +314,7 @@ namespace LightTree
 				costs[i] = evalSAOH(total.bounds, total.flux, cosTheta);
 			}
 			total = Bin{};
-			for (int i{ KCostsArraySize }; i > 0; --i)
+			for (int i{ static_cast<int>(costsArraySize) }; i > 0; --i)
 			{
 				total |= bins[i];
 
@@ -334,7 +330,7 @@ namespace LightTree
 						total.coneDirection[0] / coneDirL,
 						total.coneDirection[1] / coneDirL,
 						total.coneDirection[2] / coneDirL, };
-					for (int j = i; j <= KCostsArraySize; ++j)
+					for (int j = i; j <= costsArraySize; ++j)
 						cosTheta = computeCosConeAngle(coneDir, cosTheta, bins[j].coneDirection, bins[j].cosConeAngle);
 				}
 
@@ -344,7 +340,7 @@ namespace LightTree
 			// Get the best split
 			float axisSplitCost{ std::numeric_limits<float>::max() };
 			SplitResult axisSplit{ .axis = dimension, .index = 0 };
-			for (uint32_t i{ 0 }, lIdx{ range.begin }; i < KCostsArraySize; ++i)
+			for (uint32_t i{ 0 }, lIdx{ range.begin }; i < costsArraySize; ++i)
 			{
 				lIdx += bins[i].lCount;
 				if (costs[i] < axisSplitCost)
@@ -370,12 +366,21 @@ namespace LightTree
 			}
 		};
 
-		// Bin along larges though there may be better splits along other dimensions ( TODO: Add an option to bin along all dimensions)
-		binAlongDimension(largestDimension);
+		if (splitAlongLargestDimensionOnly)
+		{
+			binAlongDimension(largestDimension);
+		}
+		else
+		{
+			for (int dim{ 0 }; dim < 3; ++dim)
+			{
+				binAlongDimension(dim);
+			}
+		}
 
 		if (!split.isValid())
 		{
-			if (range.length() <= KMaxLeafLightCount) // TODO: Add an option to choose max leaf light count
+			if (range.length() <= maxLightCountPerLeaf)
 				return SplitResult{};
 			else
 				return SplitResult{.axis = largestDimension, .index = range.middle()};

@@ -46,8 +46,6 @@ private:
 	CUdeviceptr m_spectralData{};
 	CUdeviceptr m_sensorSpectralCurvesData{};
 	CUdeviceptr m_spectralBasisData{};
-	CUdeviceptr m_diskLights{};
-	CUdeviceptr m_sphereLights{};
 	CUdeviceptr m_lpBuffer{};
 	CUdeviceptr m_renderData{};
 	enum PathtracerProgramGroup
@@ -112,6 +110,13 @@ private:
 	};
 	std::map<uint32_t, LightResource> m_lightResources{};
 
+	LightTree::Builder m_lightTreeBuilder{};
+	LightTree::Tree m_lightTree{};
+	// Light data in the world space
+	std::vector<EmissiveTriangleLightData> m_triangleLights{};
+	std::vector<DiskLightData> m_diskLights{};
+	std::vector<SphereLightData> m_sphereLights{};
+
 	OptixTraversableHandle m_emissiveTriangleSetPrimHandle{};
 	CUdeviceptr m_emissiveTriangleSetPrimBuffer{};
 	OptixTraversableHandle m_customPrimHandle{};
@@ -174,12 +179,19 @@ private:
 	void removeModel(uint32_t modelID);
 	void removeLight(uint32_t lightID);
 	void loadEnvironmentMap(const char* path);
+	void fillLightDataBuffer(const glm::vec3& cameraPosition, LightType lightType, bool lightCountChanged);
+	void fillLightTreeDataBuffers(const Camera& camera,
+				bool nodeCountChanged,
+				bool lightCountChanged,
+				bool triangleLightCountChanged,
+				bool diskLightCountChanged,
+				bool sphereLightCountChanged);
 
 	void fillModelMaterials(RenderingInterface::ModelResource& modelRes, SceneData::Model& model);
 	uint32_t fillLightMaterial(const SceneData::MaterialDescriptor& desc);
 	void buildGeometryAccelerationStructures(RenderingInterface::ModelResource& modelRes, SceneData::Model& model);
 	void buildLightAccelerationStructure(const SceneData& scene, LightType type);
-	void uploadLightData(const SceneData& scene, const glm::vec3& cameraPosition, bool resizeBuffers);
+	void buildLightTree(const SceneData& scene, const Camera& camera);
 	void updateHitgroupSBTRecords(const SceneData& scene);
 	void updateInstanceAccelerationStructure(const SceneData& scene, const Camera& camera);
 

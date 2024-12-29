@@ -316,9 +316,9 @@ void UI::recordRenderSettingsWindow(CommandBuffer& commands, Camera& camera, Ren
 		commands.pushCommand(Command{ .type = CommandType::CHANGE_CAMERA_FIELD_OF_VIEW} );
 	}
 
-	constexpr float exposureParameterization{ 10.0f };
+	constexpr float exposureParameterization{ 20.0f };
 	static float exposure{ rContext.getImageExposure() * (1.0f / exposureParameterization) };
-	changed = ImGui::SliderFloat("Image exposure", &exposure, -1.0f, 1.0f, "%.5f", ImGuiSliderFlags_AlwaysClamp | ImGuiSliderFlags_Logarithmic);
+	changed = ImGui::SliderFloat("Image exposure", &exposure, -1.0f, 1.0f, "%.5f", ImGuiSliderFlags_AlwaysClamp);
 	if (changed)
 	{
 		rContext.setImageExposure(exposure * exposureParameterization);
@@ -529,11 +529,11 @@ void UI::recordSceneModelsSettings(CommandBuffer& commands, Window& window, Scen
 				startedTurning = false;
 			}
 
-			md.transform = glm::mat4x3{
+			md.setNewTransform(glm::mat4x3{
 				curRot[0] * xScale,
-					curRot[1] * yScale,
-					curRot[2] * zScale,
-					curPos};
+				curRot[1] * yScale,
+				curRot[2] * zScale,
+				curPos});
 
 			if (changesMade)
 			{
@@ -549,7 +549,7 @@ void UI::recordSceneModelsSettings(CommandBuffer& commands, Window& window, Scen
 			if (ImGui::Button("Remove"))
 			{
 				static CommandPayloads::Model modelPayload{};
-				modelPayload = { .id = scene.models[selectedIndex].id };
+				modelPayload = { .id = scene.models[selectedIndex].id, .hadEmissiveData = scene.models[selectedIndex].hasEmissiveData() };
 				scene.models.erase(scene.models.begin() + selectedIndex);
 				commands.pushCommand(Command{ .type = CommandType::REMOVE_MODEL, .payload = &modelPayload });
 				ImGui::CloseCurrentPopup();
