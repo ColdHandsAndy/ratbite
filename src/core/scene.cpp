@@ -9,6 +9,7 @@
 #include <stb/stb_image.h>
 
 #include "../core/debug_macros.h"
+#include "../core/sw_rast.h"
 
 namespace
 {
@@ -347,7 +348,8 @@ namespace
 						if (material->emissive_texture.texture != nullptr)
 						{
 							emissiveTexturePresent = true;
-							// TODO: Add emissive texture to the descriptor.
+							descriptor.emissiveTextureIndex = cgltf_texture_index(data, material->emissive_texture.texture);
+							descriptor.emTexCoordIndex = material->emissive_texture.texcoord;
 						}
 					}
 				}
@@ -476,39 +478,30 @@ namespace
 				}
 
 				// Cut emissive triangles from a submesh
-				// if (emissiveFactorPresent || emissiveTexturePresent)
-				if (emissiveFactorPresent && !emissiveTexturePresent) // Until emissive texture flux calculation is implemented
+				if (emissiveFactorPresent || emissiveTexturePresent)
 				{
 					emissiveSubsets[i].submeshIndex = j;
 
-					uint32_t triangleCount{ static_cast<uint32_t>(primitive.indices->count / 3) };
-					size_t stride{ primitive.indices->stride };
-					size_t offset{ primitive.indices->offset + primitive.indices->buffer_view->offset };
+					uint32_t triangleCount{ sceneSubmesh.primitiveCount };
 					emissiveSubsets[i].triangles.reserve(triangleCount);
 					for (uint32_t k{ 0 }; k < triangleCount; ++k)
 					{
+						// Get indices so we can get primitive attributes
 						uint32_t indices[3]{};
-						switch (primitive.indices->component_type)
+						switch (sceneSubmesh.indexType)
 						{
-							case cgltf_component_type_r_8u:
+							case IndexType::UINT_16:
 								{
-									indices[0] = *reinterpret_cast<uint8_t*>(reinterpret_cast<uint8_t*>(primitive.indices->buffer_view->buffer->data) + offset + (k * 3 + 0) * stride);
-									indices[1] = *reinterpret_cast<uint8_t*>(reinterpret_cast<uint8_t*>(primitive.indices->buffer_view->buffer->data) + offset + (k * 3 + 1) * stride);
-									indices[2] = *reinterpret_cast<uint8_t*>(reinterpret_cast<uint8_t*>(primitive.indices->buffer_view->buffer->data) + offset + (k * 3 + 2) * stride);
+									indices[0] = *reinterpret_cast<uint16_t*>(reinterpret_cast<uint8_t*>(sceneSubmesh.indices) + (k * 3 + 0) * sizeof(uint16_t));
+									indices[1] = *reinterpret_cast<uint16_t*>(reinterpret_cast<uint8_t*>(sceneSubmesh.indices) + (k * 3 + 1) * sizeof(uint16_t));
+									indices[2] = *reinterpret_cast<uint16_t*>(reinterpret_cast<uint8_t*>(sceneSubmesh.indices) + (k * 3 + 2) * sizeof(uint16_t));
 								}
 								break;
-							case cgltf_component_type_r_16u:
+							case IndexType::UINT_32:
 								{
-									indices[0] = *reinterpret_cast<uint16_t*>(reinterpret_cast<uint8_t*>(primitive.indices->buffer_view->buffer->data) + offset + (k * 3 + 0) * stride);
-									indices[1] = *reinterpret_cast<uint16_t*>(reinterpret_cast<uint8_t*>(primitive.indices->buffer_view->buffer->data) + offset + (k * 3 + 1) * stride);
-									indices[2] = *reinterpret_cast<uint16_t*>(reinterpret_cast<uint8_t*>(primitive.indices->buffer_view->buffer->data) + offset + (k * 3 + 2) * stride);
-								}
-								break;
-							case cgltf_component_type_r_32u:
-								{
-									indices[0] = *reinterpret_cast<uint32_t*>(reinterpret_cast<uint8_t*>(primitive.indices->buffer_view->buffer->data) + offset + (k * 3 + 0) * stride);
-									indices[1] = *reinterpret_cast<uint32_t*>(reinterpret_cast<uint8_t*>(primitive.indices->buffer_view->buffer->data) + offset + (k * 3 + 1) * stride);
-									indices[2] = *reinterpret_cast<uint32_t*>(reinterpret_cast<uint8_t*>(primitive.indices->buffer_view->buffer->data) + offset + (k * 3 + 2) * stride);
+									indices[0] = *reinterpret_cast<uint32_t*>(reinterpret_cast<uint8_t*>(sceneSubmesh.indices) + (k * 3 + 0) * sizeof(uint32_t));
+									indices[1] = *reinterpret_cast<uint32_t*>(reinterpret_cast<uint8_t*>(sceneSubmesh.indices) + (k * 3 + 1) * sizeof(uint32_t));
+									indices[2] = *reinterpret_cast<uint32_t*>(reinterpret_cast<uint8_t*>(sceneSubmesh.indices) + (k * 3 + 2) * sizeof(uint32_t));
 								}
 								break;
 							default:
@@ -516,14 +509,105 @@ namespace
 								continue;
 						}
 
-						float triangleFlux{ 0.0f };
+						// Triangle flux initialized by the factor
+						float triangleFlux{
+							(descriptor.emissiveFactor[0] +
+							descriptor.emissiveFactor[1] +
+							descriptor.emissiveFactor[2])
+							/ 3.0f };
+						// If the emission is texture based we calculate it separately
+						glm::vec2 uvs[3]{};
+						if (emissiveTexturePresent)
+						{
+							const auto& tex{ model.textureData[descriptor.emissiveTextureIndex] };
+							const auto& im{ model.imageData[tex.imageIndex] };
+							TextureAddress texAddressingX{ tex.addressX };
+							TextureAddress texAddressingY{ tex.addressY };
+							const uint32_t texWidth{ im.width };
+							const uint32_t texHeigth{ im.height };
+							uvs[0] = sceneSubmesh.texCoordsSets[descriptor.emTexCoordIndex][indices[0]];
+							uvs[1] = sceneSubmesh.texCoordsSets[descriptor.emTexCoordIndex][indices[1]];
+							uvs[2] = sceneSubmesh.texCoordsSets[descriptor.emTexCoordIndex][indices[2]];
+							const glm::vec2 texuv[3]{ uvs[0] * glm::vec2{texWidth, texHeigth},
+								uvs[1] * glm::vec2{texWidth, texHeigth},
+								uvs[2] * glm::vec2{texWidth, texHeigth} };
+							double averageEmission{ 0.0 };
+							uint32_t texelsFetched{ 0 };
+							// This function gathers the average emission from a texel
+							const std::function<void(int, int)> computeTexFlux{ [&tex, &im, &averageEmission, &texelsFetched](int x, int y)
+								{
+									if (tex.addressX == TextureAddress::WRAP)
+									{
+										x = (x >= 0) ? x : x + im.width * ((-x - 1) / im.width + 1);
+										x = x % im.width;
+									}
+									else if (tex.addressX == TextureAddress::CLAMP)
+									{
+										x = min(max(0, x), static_cast<int>(im.width) - 1);
+									}
+									else if (tex.addressX == TextureAddress::MIRROR)
+									{
+										x = (x >= 0) ? x : x + im.width * ((-x - 1) / im.width + 2);
+										bool even{ ((x / im.width) % 2) == 0 };
+										x = x % im.width;
+										if (even)
+											x = im.width - 1 - x;
+									}
+									else
+										x = 0;
+
+									if (tex.addressY == TextureAddress::WRAP)
+									{
+										y = (y >= 0) ? y : y + im.height * ((-y - 1) / im.height + 1);
+										y = y % im.height;
+									}
+									else if (tex.addressY == TextureAddress::CLAMP)
+									{
+										y = min(max(0, y), static_cast<int>(im.height) - 1);
+									}
+									else if (tex.addressY == TextureAddress::MIRROR)
+									{
+										y = (y >= 0) ? y : y + im.height * ((-y - 1) / im.height + 2);
+										bool even{ ((y / im.height) % 2) == 0 };
+										y = y % im.height;
+										if (even)
+											y = im.height - 1 - y;
+									}
+									else
+										y = 0;
+
+									float r{ reinterpret_cast<uint8_t*>(im.data)[4 * (im.width * y + x) + 0] / 255.0f };
+									float g{ reinterpret_cast<uint8_t*>(im.data)[4 * (im.width * y + x) + 1] / 255.0f };
+									float b{ reinterpret_cast<uint8_t*>(im.data)[4 * (im.width * y + x) + 2] / 255.0f };
+									float a{ reinterpret_cast<uint8_t*>(im.data)[4 * (im.width * y + x) + 3] / 255.0f };
+
+									averageEmission += (r + g + b) / 3.0f;
+									++texelsFetched;
+								} };
+							// Rasterization
+							SoftwareRasterization::drawTriangle2D(&(texuv[0][0]), &(texuv[1][0]), &(texuv[2][0]), computeTexFlux);
+							// If no texels are sampled just use an average from each uv vertex
+							if (texelsFetched != 0)
+								triangleFlux *= averageEmission / texelsFetched;
+							else
+							{
+								averageEmission = 0.0;
+								texelsFetched = 0;
+								for (int i{ 0 }; i < 3; ++i)
+								{
+									computeTexFlux(texuv[i].x, texuv[i].y);
+								}
+								triangleFlux *= averageEmission / texelsFetched;
+							}
+						}
+						// Adjust the flux by primitive area and diffuse distribution (Pi)
 						glm::vec3 vertices[3]{
 							sceneSubmesh.vertices[indices[0]],
 							sceneSubmesh.vertices[indices[1]],
 							sceneSubmesh.vertices[indices[2]], };
-						// TODO: Texture flux calculation
-						triangleFlux = glm::length(glm::cross(vertices[1] - vertices[0], vertices[2] - vertices[0])) * 0.5f;
-						if (triangleFlux > 0.0f)
+						triangleFlux *= glm::length(glm::cross(vertices[1] - vertices[0], vertices[2] - vertices[0])) * 0.5f * glm::pi<float>();
+						// Cull if the flux is negligible
+						if (triangleFlux > 0.000001f)
 						{
 							// Make emissive triangles degenerate since we need to create separate AC for them
 							sceneSubmesh.discardedPrimitives.push_back(k);
@@ -532,6 +616,9 @@ namespace
 									.v0 = vertices[0],
 									.v1 = vertices[1],
 									.v2 = vertices[2],
+									.uv0 = uvs[0],
+									.uv1 = uvs[1],
+									.uv2 = uvs[2],
 									.primIndex = k,
 									.flux = triangleFlux });
 						}

@@ -57,7 +57,7 @@ namespace LightTree
 	};
 	struct Builder
 	{
-		uint32_t maxLightCountPerLeaf{ 12 };
+		uint32_t maxLightCountPerLeaf{ 8 };
 		uint32_t binCount{ 32 };
 		bool splitAlongLargestDimensionOnly{ false };
 		bool createLeafsASAP{ true };

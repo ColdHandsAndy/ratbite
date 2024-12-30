@@ -87,12 +87,14 @@ struct MaterialData
 	bool trTexCoordSetIndex{};
 	bool shcTexCoordSetIndex{};
 	bool shrTexCoordSetIndex{};
+	bool emTexCoordSetIndex{};
 	cudaTextureObject_t baseColorTexture{};
 	cudaTextureObject_t normalTexture{};
 	cudaTextureObject_t pbrMetalRoughnessTexture{};
 	cudaTextureObject_t transmissionTexture{};
 	cudaTextureObject_t sheenColorTexture{};
 	cudaTextureObject_t sheenRoughTexture{};
+	cudaTextureObject_t emissiveTexture{};
 
 	FactorTypeBitfield factors{};
 	float baseColorFactor[4]{};

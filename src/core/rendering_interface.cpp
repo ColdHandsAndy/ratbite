@@ -177,6 +177,12 @@ void RenderingInterface::fillModelMaterials(RenderingInterface::ModelResource& m
 				mat.emissiveFactor[0] = desc.emissiveFactor[0];
 				mat.emissiveFactor[1] = desc.emissiveFactor[1];
 				mat.emissiveFactor[2] = desc.emissiveFactor[2];
+				if (desc.emissiveTextureIndex != -1)
+				{
+					mat.textures |= MaterialData::TextureTypeBitfield::EMISSION;
+					mat.emissiveTexture = modelRes.textures[desc.emissiveTextureIndex].getTextureObject();
+					mat.emTexCoordSetIndex = desc.emTexCoordIndex == 1;
+				}
 			}
 			mat.ior = desc.ior;
 
@@ -1023,6 +1029,7 @@ void RenderingInterface::buildLightAccelerationStructure(const SceneData& scene,
 			buildInput[0].triangleArray.numIndexTriplets = 0;
 			buildInput[0].triangleArray.indexFormat = indexFormat;
 			buildInput[0].triangleArray.indexStrideInBytes = indexStride;
+			buildInput[0].triangleArray.primitiveIndexOffset = 0;
 		}
 
 		OptixAccelBuildOptions accelBuildOptions{
@@ -1231,9 +1238,11 @@ void RenderingInterface::buildLightTree(const SceneData& scene, const Camera& ca
 		for (int i{ 0 }; i < scene.models.size(); ++i)
 		{
 			auto& model{ scene.models[i] };
+			const auto& triModelResource{ m_modelResources[model.id] };
 			for (int j{ 0 }; j < model.instancedEmissiveMeshSubsets.size(); ++j)
 			{
 				auto& subset{ model.instancedEmissiveMeshSubsets[j] };
+				const uint32_t submeshTotalIndex{ triModelResource.meshMaterialIndexOffsets[model.instances[subset.instanceIndex].meshIndex] + subset.submeshIndex };
 				for (int k{ 0 }; k < subset.triangles.size(); ++k)
 				{
 					auto& triangle{ subset.triangles[k] };
@@ -1248,9 +1257,13 @@ void RenderingInterface::buildLightTree(const SceneData& scene, const Camera& ca
 					ld.vertices[6] = triangle.v2WS.x;
 					ld.vertices[7] = triangle.v2WS.y;
 					ld.vertices[8] = triangle.v2WS.z;
+					ld.uvs[0] = triangle.uv0.x;
+					ld.uvs[1] = triangle.uv0.y;
+					ld.uvs[2] = triangle.uv1.x;
+					ld.uvs[3] = triangle.uv1.y;
+					ld.uvs[4] = triangle.uv2.x;
+					ld.uvs[5] = triangle.uv2.y;
 					ld.primitiveDataIndex = triangle.primIndex;
-					const auto& triModelResource{ m_modelResources[model.id] };
-					const uint32_t submeshTotalIndex{ triModelResource.meshMaterialIndexOffsets[model.instances[subset.instanceIndex].meshIndex] + subset.submeshIndex };
 					ld.materialIndex = triModelResource.materialIndices[submeshTotalIndex];
 					// Emissive triangles data should be in world camera space
 					glm::vec3 triCamWVerts[3]{

@@ -13,11 +13,19 @@ namespace sampling
 {
 	namespace triangle
 	{
-
 		CU_DEVICE CU_INLINE glm::vec3 sampleUniform(glm::vec2 uv, const glm::vec3& a, const glm::vec3& b, const glm::vec3& c)
 		{
 			if (uv.x + uv.y > 1.0f)
 				uv = glm::vec2{1.0f - uv.x, 1.0f - uv.y};
+			return a + (b - a) * uv.x + (c - a) * uv.y;
+		}
+		CU_DEVICE CU_INLINE glm::vec3 sampleUniform(glm::vec2 uv,
+				const glm::vec3& a, const glm::vec3& b, const glm::vec3& c,
+				float& baryA, float& baryB, float& baryC)
+		{
+			if (uv.x + uv.y > 1.0f)
+				uv = glm::vec2{1.0f - uv.x, 1.0f - uv.y};
+			baryA = 1.0f - uv.x - uv.y; baryB = uv.x; baryC = uv.y;
 			return a + (b - a) * uv.x + (c - a) * uv.y;
 		}
 	}

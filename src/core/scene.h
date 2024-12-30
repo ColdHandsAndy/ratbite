@@ -55,6 +55,8 @@ struct SceneData
 		int shcTexCoordIndex{};
 		int sheenRoughTextureIndex{ -1 };
 		int shrTexCoordIndex{};
+		int emissiveTextureIndex{ -1 };
+		int emTexCoordIndex{};
 
 		bool bcFactorPresent{};
 		glm::vec4 baseColorFactor{};
@@ -161,6 +163,9 @@ struct SceneData
 			glm::vec3 v0{};
 			glm::vec3 v1{};
 			glm::vec3 v2{};
+			glm::vec2 uv0{};
+			glm::vec2 uv1{};
+			glm::vec2 uv2{};
 			uint32_t primIndex{};
 			float flux{};
 		};

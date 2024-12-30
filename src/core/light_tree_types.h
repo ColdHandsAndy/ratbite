@@ -46,6 +46,7 @@ struct SphereLightData
 struct EmissiveTriangleLightData
 {
 	float vertices[9]{};
+	float uvs[6]{};
 	uint32_t materialIndex{};
 	uint32_t primitiveDataIndex{};
 };

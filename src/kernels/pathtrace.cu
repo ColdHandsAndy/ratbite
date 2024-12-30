@@ -117,10 +117,11 @@ extern "C" __global__ void __closesthit__triangle()
 	lightPointer.pack(LightType::NONE, 0);
 	if (materialIndex == 0xFFFFFFFF)
 	{
-		lightPointer.pack(LightType::TRIANGLE, primitiveIndex);
+		uint32_t emissivePrimIndex{ primitiveIndex };
+		lightPointer.pack(LightType::TRIANGLE, emissivePrimIndex);
 
-		primitiveIndex = parameters.lightTree.triangles[primitiveIndex].primitiveDataIndex;
-		materialIndex = parameters.lightTree.triangles[primitiveIndex].materialIndex;
+		primitiveIndex = parameters.lightTree.triangles[emissivePrimIndex].primitiveDataIndex;
+		materialIndex = parameters.lightTree.triangles[emissivePrimIndex].materialIndex;
 	}
 
 	optixSetPayload_0(__float_as_uint(verticesObj[0].x * WFO[0] + verticesObj[0].y * WFO[1] + verticesObj[0].z * WFO[2]   + WFO[3]));
@@ -1195,8 +1196,21 @@ extern "C" __global__ void __raygen__main()
 							float surfacePDF{ 1.0f / area };
 							lightPDF = surfacePDF * sqrdDistToLight / lCos;
 							const MaterialData& material{ parameters.materials[tri.materialIndex] };
+							float emission[3]{ material.emissiveFactor[0], material.emissiveFactor[1], material.emissiveFactor[2] };
+							if (static_cast<bool>(material.textures & MaterialData::TextureTypeBitfield::EMISSION))
+							{
+								glm::vec2 bary{ interaction.primitive.triangle.barycentrics.x, interaction.primitive.triangle.barycentrics.y };
+								float baryWeights[3]{ 1.0f - bary.x - bary.y, bary.x, bary.y };
+								glm::vec2 uv{ baryWeights[0] * glm::vec2{tri.uvs[0], tri.uvs[1]} +
+									baryWeights[1] * glm::vec2{tri.uvs[2], tri.uvs[3]} +
+									baryWeights[2] * glm::vec2{tri.uvs[4], tri.uvs[5]} };
+								float4 texEm{ tex2D<float4>(interaction.material->emissiveTexture, uv.x, uv.y) };
+								emission[0] *= texEm.x;
+								emission[1] *= texEm.y;
+								emission[2] *= texEm.z;
+							}
 							Le = color::RGBtoSpectrum(
-								glm::vec3{material.emissiveFactor[0], material.emissiveFactor[1], material.emissiveFactor[2]},
+								glm::vec3{emission[0], emission[1], emission[2]},
 								path.wavelengths, *parameters.spectralBasisR, *parameters.spectralBasisG, *parameters.spectralBasisB) * 0.01f;
 						}
 						break;
@@ -1591,7 +1605,10 @@ extern "C" __global__ void __raygen__main()
 								n /= nL;
 								float area{ nL / 2.0f };
 
-								glm::vec3 lSmplPos{ sampling::triangle::sampleUniform(glm::vec2{rand.x, rand.y}, a, b, c) };
+								float baryWeights[3]{};
+								glm::vec3 lSmplPos{ sampling::triangle::sampleUniform(glm::vec2{rand.x, rand.y},
+										a, b, c,
+										baryWeights[0], baryWeights[1], baryWeights[2]) };
 
 								const glm::vec3 sr{ lSmplPos - interaction.hitPos };
 								const bool inSample{ glm::dot(sn, sr) < 0.0f };
@@ -1613,8 +1630,19 @@ extern "C" __global__ void __raygen__main()
 								lightPDF = surfacePDF * sqrdToLight / lCos;
 
 								const MaterialData& material{ parameters.materials[tri.materialIndex] };
+								float emission[3]{ material.emissiveFactor[0], material.emissiveFactor[1], material.emissiveFactor[2] };
+								if (static_cast<bool>(material.textures & MaterialData::TextureTypeBitfield::EMISSION))
+								{
+									glm::vec2 uv{ baryWeights[0] * glm::vec2{tri.uvs[0], tri.uvs[1]} +
+										baryWeights[1] * glm::vec2{tri.uvs[2], tri.uvs[3]} +
+										baryWeights[2] * glm::vec2{tri.uvs[4], tri.uvs[5]} };
+									float4 texEm{ tex2D<float4>(material.emissiveTexture, uv.x, uv.y) };
+									emission[0] *= texEm.x;
+									emission[1] *= texEm.y;
+									emission[2] *= texEm.z;
+								}
 								directLightData.spectrumSample = color::RGBtoSpectrum(
-									glm::vec3{material.emissiveFactor[0], material.emissiveFactor[1], material.emissiveFactor[2]},
+									glm::vec3{emission[0], emission[1], emission[2]},
 									path.wavelengths, *parameters.spectralBasisR, *parameters.spectralBasisG, *parameters.spectralBasisB) * 0.01f;
 							}
 							break;
