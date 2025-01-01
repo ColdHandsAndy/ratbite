@@ -22,6 +22,7 @@ namespace QRNG
 		SURFACE_BXDF_2 = 4,
 		SURFACE_BXDF_3 = 5,
 
+		ALPHA_BLEND = 7,
 		ROULETTE = 8,
 		
 		DESC = 16,

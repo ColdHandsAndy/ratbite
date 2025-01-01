@@ -61,7 +61,7 @@ struct Interaction
 	uint32_t lightIndex{};
 	MaterialData* material{};
 	glm::vec3 geometryNormal{};
-	bool hitFromInside{};
+	bool backHit{};
 	bool skipped{ false };
 	union PrimitiveData
 	{
@@ -107,9 +107,7 @@ extern "C" __global__ void __closesthit__triangle()
 	geometryNormal = {geometryNormal.x * OFW[0] + geometryNormal.y * OFW[4] + geometryNormal.z * OFW[8], 
 				      geometryNormal.x * OFW[1] + geometryNormal.y * OFW[5] + geometryNormal.z * OFW[9], 
 				      geometryNormal.x * OFW[2] + geometryNormal.y * OFW[6] + geometryNormal.z * OFW[10]};
-	// bool flipNormals{ optixIsFrontFaceHit() && material.doubleSided };
-	bool flipNormals{ false };
-	float normalizeDiv{ (flipNormals ? -1.0f : 1.0f) * __frsqrt_rn(geometryNormal.x * geometryNormal.x + geometryNormal.y * geometryNormal.y + geometryNormal.z * geometryNormal.z) };
+	float normalizeDiv{ __frsqrt_rn(geometryNormal.x * geometryNormal.x + geometryNormal.y * geometryNormal.y + geometryNormal.z * geometryNormal.z) };
 	geometryNormal = {geometryNormal.x * normalizeDiv, geometryNormal.y * normalizeDiv, geometryNormal.z * normalizeDiv};
 	uint32_t encGeometryNormal{ Octohedral::encodeU32(glm::vec3{geometryNormal.x, geometryNormal.y, geometryNormal.z}) };
 
@@ -568,42 +566,42 @@ extern "C" __device__ void __direct_callable__ComplexSurface_BxDF(const Material
 	   Metal  Dielectric
 	   Base   Base
 
-                    ┌─────┐
-                   ┌┤ PBR ├─┐
-                   ││(MIX)│ │
-             1 - a │└─────┘ │ a
-                ┌──┘        └────┐
-            ┌───┴───┐        ┌───┴───┐
-            │Ambinet│       ┌┤Surface├─┐
-            │Medium │       ││(LAYER)│ │
-            └───────┘     1 │└───────┘ │ F
-                          ┌─┘          └──┐
-                    ┌─────┴─────┐       ┌─┴──┐
-                   ┌┤Coated Base├─┐     │FUZZ│
-                   ││  (LAYER)  │ │     └────┘
-                 1 │└───────────┘ │ C
-                 ┌─┘              └──┐
-            ┌────┴────┐            ┌─┴──┐
-          ┌─┤Base     ├─┐          │COAT│
-          │ │Substrate│ │          └────┘
-          │ │  (MIX)  │ │
-        M │ └─────────┘ │  1 - M
-       ┌──┘             └─────────┐
-    ┌──┴──┐                 ┌─────┴────┐
-    │Metal│               ┌─┤Dielectric│──┐
-    └─────┘               │ │Base      │  │
-                          │ │  (MIX)   │  │
-                       T  │ └──────────┘  │  1 - T
-                    ┌─────┘               └─────────┐
-              ┌─────┴─────┐                   ┌─────┴─────┐
-              │Translucent│                 ┌─│Opaque Base│──┐
-              │Base       │                 │ │   (MIX)   │  │
-              └───────────┘             S   │ └───────────┘  │ 1 - S
-                                     ┌──────┘                └──────┐
-                                 ┌───┴──────┐              ┌────────┴────────┐
-                                 │Subsurface│              │     (LAYER)     │
-                                 └──────────┘              │Diffuse     Gloss│
-                                                           └─────────────────┘
+					┌─────┐
+				   ┌┤ PBR ├─┐
+				   ││(MIX)│ │
+			 1 - a │└─────┘ │ a
+				┌──┘        └────┐
+			┌───┴───┐        ┌───┴───┐
+			│Ambinet│       ┌┤Surface├─┐
+			│Medium │       ││(LAYER)│ │
+			└───────┘     1 │└───────┘ │ F
+						  ┌─┘          └──┐
+					┌─────┴─────┐       ┌─┴──┐
+				   ┌┤Coated Base├─┐     │FUZZ│
+				   ││  (LAYER)  │ │     └────┘
+				 1 │└───────────┘ │ C
+				 ┌─┘              └──┐
+			┌────┴────┐            ┌─┴──┐
+		  ┌─┤Base     ├─┐          │COAT│
+		  │ │Substrate│ │          └────┘
+		  │ │  (MIX)  │ │
+		M │ └─────────┘ │  1 - M
+	   ┌──┘             └─────────┐
+	┌──┴──┐                 ┌─────┴────┐
+	│Metal│               ┌─┤Dielectric│──┐
+	└─────┘               │ │Base      │  │
+						  │ │  (MIX)   │  │
+					   T  │ └──────────┘  │  1 - T
+					┌─────┘               └─────────┐
+			  ┌─────┴─────┐                   ┌─────┴─────┐
+			  │Translucent│                 ┌─│Opaque Base│──┐
+			  │Base       │                 │ │   (MIX)   │  │
+			  └───────────┘             S   │ └───────────┘  │ 1 - S
+									 ┌──────┘                └──────┐
+								 ┌───┴──────┐              ┌────────┴────────┐
+								 │Subsurface│              │     (LAYER)     │
+								 └──────────┘              │Diffuse     Gloss│
+														   └─────────────────┘
 	TODO:
 	* Subsurface scattering (Have to learn more about volumetrics before implementing)
 	* Coat (GLTF has different specification for coat so not as important)
@@ -627,7 +625,13 @@ extern "C" __device__ void __direct_callable__ComplexSurface_BxDF(const Material
 	glm::vec3 wi{};
 
 	// Initialize GGX roughness data and regularize if necessary
-	float roughness{ cuda::std::fmax(0.001f, surface.specular.roughness) };
+	float roughness{ surface.specular.roughness };
+	bool perfectSpecular{ false };
+	if (roughness < 0.001f)
+	{
+		roughness = 0.001f;
+		perfectSpecular = true;
+	}
 	float alpha{ utility::roughnessToAlpha(roughness) };
 	microfacet::Alpha alphaMS{ .alphaX = alpha, .alphaY = alpha };
 	if (static_cast<bool>(stateFlags & PathStateBitfield::REGULARIZED))
@@ -654,7 +658,7 @@ extern "C" __device__ void __direct_callable__ComplexSurface_BxDF(const Material
 	}
 
 	// Calculate direct lighting
-	if (!directLightData.occluded && !static_cast<bool>(stateFlags & PathStateBitfield::CURRENT_HIT_SPECULAR))
+	if (!directLightData.occluded)
 	{
 		// Initialize an incoming direction of a sample and related variables
 		wi = locLi;
@@ -704,18 +708,24 @@ extern "C" __device__ void __direct_callable__ComplexSurface_BxDF(const Material
 
 		if (reflect)
 		{
-			SampledSpectrum FConductor{ color::RGBtoSpectrum(microfacet::F82(surface.base.color, wowmAbsDot) *
-					(1.0f + microfacet::FAvgIntegralForF82(surface.base.color) * ((1.0f - hemisphericalAlbedoConductor) / hemisphericalAlbedoConductor)),
-					wavelengths, *parameters.spectralBasisR, *parameters.spectralBasisG, *parameters.spectralBasisB) };
+			SampledSpectrum flConductor{ 0.0f };
+			float flDielectric{ 0.0f };
+			float lbxdfSpecPDF{ 0.0f };
+			if (!perfectSpecular)
+			{
+				SampledSpectrum FConductor{ color::RGBtoSpectrum(microfacet::F82(surface.base.color, wowmAbsDot) *
+						(1.0f + microfacet::FAvgIntegralForF82(surface.base.color) * ((1.0f - hemisphericalAlbedoConductor) / hemisphericalAlbedoConductor)),
+						wavelengths, *parameters.spectralBasisR, *parameters.spectralBasisG, *parameters.spectralBasisB) };
+				flConductor = Ds * Gs * FConductor / cuda::std::fabs(4.0f * LocalTransform::cosTheta(wo) * LocalTransform::cosTheta(wi));
+				flDielectric = Ds * Gs * energyCompensationTermDielectric // FDielectric is included in dSpecWeight
+					/ cuda::std::fabs(4.0f * LocalTransform::cosTheta(wo) * LocalTransform::cosTheta(wi));
+				lbxdfSpecPDF = microfacet::VNDF::PDF<microfacet::VNDF::SPHERICAL_CAP>(wo, wowmAbsDot, ctxo, ctxm, alphaMS) / (4.0f * wowmAbsDot);
+			}
 
-			SampledSpectrum flConductor{ Ds * Gs * FConductor / cuda::std::fabs(4.0f * LocalTransform::cosTheta(wo) * LocalTransform::cosTheta(wi)) };
-			float flDielectric{ Ds * Gs * energyCompensationTermDielectric // FDielectric is included in dSpecWeight
-				/ cuda::std::fabs(4.0f * LocalTransform::cosTheta(wo) * LocalTransform::cosTheta(wi)) };
 			SampledSpectrum flDiffuse{ energyPreservationTermDiffuse *
 				color::RGBtoSpectrum(surface.base.color, wavelengths, *parameters.spectralBasisR, *parameters.spectralBasisG, *parameters.spectralBasisB) / glm::pi<float>() };
-
-			const float lbxdfSpecPDF{ microfacet::VNDF::PDF<microfacet::VNDF::SPHERICAL_CAP>(wo, wowmAbsDot, ctxo, ctxm, alphaMS) / (4.0f * wowmAbsDot) };
 			const float lbxdfDiffPDF{ diffuse::CosWeighted::PDF(LocalTransform::cosTheta(wi)) };
+
 			const float bxdfPDF{
 				sheenWeight * lbxdfSheenPDF +
 				cSpecWeight * lbxdfSpecPDF +
@@ -734,17 +744,23 @@ extern "C" __device__ void __direct_callable__ComplexSurface_BxDF(const Material
 		}
 		else if (surface.transmission.weight != 0.0f && !(dotWmWo * cosThetaO <= 0.0f || dotWmWi * cosThetaI <= 0.0f))
 		{
-			const float t{ dotWmWi + dotWmWo / eta };
-			const float denom{ t * t };
-			const float dwmdwi{ cuda::std::fabs(dotWmWi) / denom };
-			const float lbxdfTransPDF{ microfacet::VNDF::PDF<microfacet::VNDF::SPHERICAL_CAP>(wo, wowmAbsDot, ctxo, ctxm, alphaMS) * dwmdwi };
+			float lbxdfTransPDF{ 0.0f };
+			SampledSpectrum flTransmission{ 0.0f };
+			if (!perfectSpecular)
+			{
+				const float t{ dotWmWi + dotWmWo / eta };
+				const float denom{ t * t };
+				const float dwmdwi{ cuda::std::fabs(dotWmWi) / denom };
+				lbxdfTransPDF = microfacet::VNDF::PDF<microfacet::VNDF::SPHERICAL_CAP>(wo, wowmAbsDot, ctxo, ctxm, alphaMS) * dwmdwi;
+				flTransmission = color::RGBtoSpectrum(surface.base.color, wavelengths, *parameters.spectralBasisR, *parameters.spectralBasisG, *parameters.spectralBasisB)
+					* Ds * (1.0f - FDielectric) * Gs * energyCompensationTermDielectric
+					* cuda::std::fabs(dotWmWo * dotWmWi / (cosThetaO * cosThetaI * denom));
+			}
+
 			const float bxdfPDF{
 				sheenWeight * lbxdfSheenPDF +
 				dTransWeight * lbxdfTransPDF };
 			const float mis{ MIS::powerHeuristic(1, directLightData.lightSamplePDF, 1, bxdfPDF) };
-			SampledSpectrum flTransmission{ color::RGBtoSpectrum(surface.base.color, wavelengths, *parameters.spectralBasisR, *parameters.spectralBasisG, *parameters.spectralBasisB)
-				* Ds * (1.0f - FDielectric) * Gs * energyCompensationTermDielectric
-				* cuda::std::fabs(dotWmWo * dotWmWi / (cosThetaO * cosThetaI * denom)) };
 			flTransmission /= (eta * eta);
 			L += directLightData.spectrumSample * throughputWeight * cosFactor * mis * (
 					sheenWeight * flSheen
@@ -923,7 +939,7 @@ CU_DEVICE CU_INLINE void unpackInteractionData(const LaunchParameters& params, u
 	}
 
 	interaction.primitive.triangle.hitPosInterp = interaction.hitPos;
-	interaction.hitFromInside = -glm::dot(interaction.geometryNormal, path.ray.d) < 0.0f;
+	interaction.backHit = glm::dot(interaction.geometryNormal, path.ray.d) > 0.0f;
 
 	worldFromObjectNormal[0][0] = __uint_as_float(pl[9]);
 	worldFromObjectNormal[1][0] = __uint_as_float(pl[10]);
@@ -978,7 +994,8 @@ CU_DEVICE CU_INLINE float evaluateNodeImportance(const LightTree::UnpackedNode& 
 	// Calculate importance (estimate for diffuse distribution only because we evaluate the entire BxDF when light sampling and it is cheaper)
 	const float amplitude{ cuda::std::exp(lightLobe.logAmplitude) };
 	const float cosine{ glm::clamp(glm::dot(lightLobe.axis, normal), -1.0f, 1.0f) };
-	const float importance{ amplitude * SG::ClampedCosineProductIntegralOverPi2024(cosine, lightLobe.sharpness) };
+	const float importance{ (node.attributes.flux / (lightVariance * SG::Integral(node.attributes.sharpness))) *
+		amplitude * SG::ClampedCosineProductIntegralOverPi2024(cosine, lightLobe.sharpness) };
 
 	return importance;
 }
@@ -1482,6 +1499,11 @@ extern "C" __global__ void __raygen__main()
 							if (bcTexData.w < interaction.material->alphaCutoff)
 								interaction.skipped = true;
 						}
+						else if (blend)
+						{
+							if (QRNG::Sobol::sample1D(qrngState, QRNG::DimensionOffset::ALPHA_BLEND) > bcTexData.w)
+								interaction.skipped = true;
+						}
 					}
 					else if (bcFactor)
 						surface.base.color
@@ -1502,8 +1524,6 @@ extern "C" __global__ void __raygen__main()
 						surface.base.metalness = metFactor ? interaction.material->metalnessFactor : surface.base.metalness;
 						surface.specular.roughness = roughFactor ? interaction.material->roughnessFactor : surface.specular.roughness;
 					}
-					if (surface.specular.roughness < 0.001f)
-						path.stateFlags |= PathStateBitfield::CURRENT_HIT_SPECULAR; // TODO: Remove here and only activate in BxDF when perfect specular path is chosen
 
 					bool trTexture{ static_cast<bool>(interaction.material->textures & MaterialData::TextureTypeBitfield::TRANSMISSION) };
 					bool trFactor{ static_cast<bool>(interaction.material->factors & MaterialData::FactorTypeBitfield::TRANSMISSION) };
@@ -1611,7 +1631,7 @@ extern "C" __global__ void __raygen__main()
 										baryWeights[0], baryWeights[1], baryWeights[2]) };
 
 								const glm::vec3 sr{ lSmplPos - interaction.hitPos };
-								const bool inSample{ glm::dot(sn, sr) < 0.0f };
+								const bool inSample{ (glm::dot(sn, sr) < 0.0f) };
 								if ((inSample && !surfaceCanTransmit) || (inSample && (glm::dot(gn, sr) > 0.0f)))
 									directLightData.occluded = true;
 								lightRayOrigin = utility::offsetPoint(
@@ -1724,8 +1744,6 @@ extern "C" __global__ void __raygen__main()
 									-cuda::std::sin(theta) * cuda::std::cos(phi),
 									cuda::std::sin(theta) * cuda::std::sin(phi),
 									cuda::std::cos(theta), };
-								if (glm::dot(sn, directLightData.lightDir) <= 0.0f)
-									directLightData.occluded = true;
 								float4 rgbSample{ tex2D<float4>(envMap.environmentTexture, impSample.x, impSample.y) };
 								directLightData.spectrumSample = color::RGBtoSpectrum(glm::vec3{rgbSample.x, rgbSample.y, rgbSample.z},
 										path.wavelengths, *parameters.spectralBasisR, *parameters.spectralBasisG, *parameters.spectralBasisB) * 0.01f;
@@ -1736,7 +1754,7 @@ extern "C" __global__ void __raygen__main()
 								dToL = FLT_MAX;
 								lightRayOrigin = utility::offsetPoint(
 										!triangularGeometry ? interaction.hitPos : interaction.primitive.triangle.hitPosInterp,
-										interaction.geometryNormal);
+										interaction.backHit ? -interaction.geometryNormal : interaction.geometryNormal);
 							}
 							break;
 						default:
@@ -1789,15 +1807,15 @@ extern "C" __global__ void __raygen__main()
 				path.throughput /= 1.0f - q;
 			}
 
-			// Offset new ray origin and correct direction
+			// Offset new ray origin and correct the direction
 			{
 				const bool refracted{ static_cast<bool>(path.stateFlags & PathStateBitfield::RAY_REFRACTED) };
 
 				const bool triangularGeometry{ static_cast<bool>(path.stateFlags & PathStateBitfield::TRIANGULAR_GEOMETRY) };
 				const bool in{ refracted || interaction.skipped };
-				const glm::vec3& chosenOrigin{ (in == interaction.hitFromInside) && triangularGeometry
+				const glm::vec3& chosenOrigin{ (in == interaction.backHit) && triangularGeometry
 					? interaction.primitive.triangle.hitPosInterp : interaction.hitPos };
-				const glm::vec3& chosenOffset{ in == interaction.hitFromInside
+				const glm::vec3 chosenOffset{ in == interaction.backHit
 					? interaction.geometryNormal : -interaction.geometryNormal };
 				path.ray.o = utility::offsetPoint(chosenOrigin, chosenOffset);
 
@@ -1805,7 +1823,7 @@ extern "C" __global__ void __raygen__main()
 				constexpr float correctionBias{ 0.001f };
 				if (dotNgRo > 0.0f
 					&&
-					(interaction.hitFromInside != refracted)
+					(interaction.backHit != refracted)
 					&&
 					!interaction.skipped)
 					path.ray.d = glm::normalize(path.ray.d - (interaction.geometryNormal * (dotNgRo + correctionBias)));

@@ -607,7 +607,7 @@ namespace
 							sceneSubmesh.vertices[indices[2]], };
 						triangleFlux *= glm::length(glm::cross(vertices[1] - vertices[0], vertices[2] - vertices[0])) * 0.5f * glm::pi<float>();
 						// Cull if the flux is negligible
-						if (triangleFlux > 0.000001f)
+						if (triangleFlux > 0.0f)
 						{
 							// Make emissive triangles degenerate since we need to create separate AC for them
 							sceneSubmesh.discardedPrimitives.push_back(k);
