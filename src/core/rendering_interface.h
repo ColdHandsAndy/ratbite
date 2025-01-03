@@ -117,11 +117,11 @@ private:
 	std::vector<DiskLightData> m_diskLights{};
 	std::vector<SphereLightData> m_sphereLights{};
 
-	OptixTraversableHandle m_emissiveTriangleSetPrimHandle{};
-	CUdeviceptr m_emissiveTriangleSetPrimBuffer{};
+	std::vector<OptixTraversableHandle> m_emissiveGASHandles{};
+	std::vector<CUdeviceptr> m_emissiveGASBuffers{};
 	OptixTraversableHandle m_customPrimHandle{};
 	CUdeviceptr m_customPrimBuffer{};
-	CUdeviceptr m_spherePrimitiveHandle{};
+	OptixTraversableHandle m_spherePrimitiveHandle{};
 	CUdeviceptr m_spherePrimBuffer{};
 
 	LaunchParameters m_launchParameters{};

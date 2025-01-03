@@ -15,7 +15,7 @@ namespace
 {
 	void processGLTFNode(const cgltf_data* modelData, const cgltf_node* node,
 			const glm::mat4& worldFromModel, glm::mat4 modelFromLocal,
-			const std::vector<SceneData::EmissiveMeshSubset>& emissiveMeshSubsets,
+			const std::vector<std::vector<SceneData::EmissiveMeshSubset>>& meshesEmissiveSubsets,
 			size_t& triangleCount, std::vector<SceneData::Instance>& instances, std::vector<SceneData::EmissiveMeshSubset>& instancedEmissiveSubsets)
 	{
 		cgltf_float localMat[16]{};
@@ -43,19 +43,23 @@ namespace
 					glm::vec3{modelFromLocal[2][0], modelFromLocal[2][1], modelFromLocal[2][2]},
 					glm::vec3{modelFromLocal[3][0], modelFromLocal[3][1], modelFromLocal[3][2]}, });
 
-			if (emissiveMeshSubsets[index].triangles.size() != 0)
+			for (int i{ 0 }; i < meshesEmissiveSubsets[index].size(); ++i)
 			{
-				auto& instancedEmissiveSubset{ instancedEmissiveSubsets.emplace_back() };
-				instancedEmissiveSubset.instanceIndex = instances.size() - 1;
-				instancedEmissiveSubset.submeshIndex = emissiveMeshSubsets[index].submeshIndex;
-				instancedEmissiveSubset.triangles = emissiveMeshSubsets[index].triangles;
-				for (int i{ 0 }; i < instancedEmissiveSubset.triangles.size(); ++i)
+				auto& emissiveSubset{ meshesEmissiveSubsets[index][i] };
+				if (emissiveSubset.triangles.size() != 0)
 				{
-					instancedEmissiveSubset.triangles[i].v0WS = worldFromModel * modelFromLocal * glm::vec4{instancedEmissiveSubset.triangles[i].v0, 1.0f};
-					instancedEmissiveSubset.triangles[i].v1WS = worldFromModel * modelFromLocal * glm::vec4{instancedEmissiveSubset.triangles[i].v1, 1.0f};
-					instancedEmissiveSubset.triangles[i].v2WS = worldFromModel * modelFromLocal * glm::vec4{instancedEmissiveSubset.triangles[i].v2, 1.0f};
+					auto& instancedEmissiveSubset{ instancedEmissiveSubsets.emplace_back() };
+					instancedEmissiveSubset.instanceIndex = instances.size() - 1;
+					instancedEmissiveSubset.submeshIndex = emissiveSubset.submeshIndex;
+					instancedEmissiveSubset.triangles = emissiveSubset.triangles;
+					for (int i{ 0 }; i < instancedEmissiveSubset.triangles.size(); ++i)
+					{
+						instancedEmissiveSubset.triangles[i].v0WS = worldFromModel * modelFromLocal * glm::vec4{instancedEmissiveSubset.triangles[i].v0, 1.0f};
+						instancedEmissiveSubset.triangles[i].v1WS = worldFromModel * modelFromLocal * glm::vec4{instancedEmissiveSubset.triangles[i].v1, 1.0f};
+						instancedEmissiveSubset.triangles[i].v2WS = worldFromModel * modelFromLocal * glm::vec4{instancedEmissiveSubset.triangles[i].v2, 1.0f};
+					}
+					instancedEmissiveSubset.transformFluxCorrection = glm::abs(glm::determinant(glm::mat3{worldFromModel * modelFromLocal}));
 				}
-				instancedEmissiveSubset.transformFluxCorrection = glm::abs(glm::determinant(glm::mat3{worldFromModel * modelFromLocal}));
 			}
 
 			for (int i{ 0 }; i < node->mesh->primitives_count; ++i)
@@ -68,11 +72,12 @@ namespace
 			const cgltf_node* child{ node->children[i] };
 			processGLTFNode(modelData, child,
 					worldFromModel, modelFromLocal,
-					emissiveMeshSubsets,
+					meshesEmissiveSubsets,
 					triangleCount, instances, instancedEmissiveSubsets);
 		}
 	}
-	void processGLTFSceneGraph(const cgltf_data* modelData, const std::vector<SceneData::EmissiveMeshSubset>& emissiveMeshSubsets,
+	void processGLTFSceneGraph(const cgltf_data* modelData,
+			const std::vector<std::vector<SceneData::EmissiveMeshSubset>>& meshesEmissiveSubsets,
 			const glm::mat4& worldFromModel,
 			size_t& triangleCount,
 			std::vector<SceneData::Instance>& instances, std::vector<SceneData::EmissiveMeshSubset>& instancedEmissiveSubsets)
@@ -80,7 +85,7 @@ namespace
 		for (int i{ 0 }; i < modelData->scene->nodes_count; ++i)
 			processGLTFNode(modelData, modelData->scene->nodes[i],
 					worldFromModel, glm::identity<glm::mat4>(),
-					emissiveMeshSubsets,
+					meshesEmissiveSubsets,
 					triangleCount, instances, instancedEmissiveSubsets);
 	}
 
@@ -197,7 +202,7 @@ namespace
 		}
 
 		// Create emissive subsets for every mesh but only fill ones with emissive materials
-		std::vector<SceneData::EmissiveMeshSubset> emissiveSubsets(data->meshes_count);
+		std::vector<std::vector<SceneData::EmissiveMeshSubset>> meshesEmissiveSubsets(data->meshes_count);
 
 		// Process meshes and submeshes
 		for (int i{ 0 }; i < data->meshes_count; ++i)
@@ -480,10 +485,11 @@ namespace
 				// Cut emissive triangles from a submesh
 				if (emissiveFactorPresent || emissiveTexturePresent)
 				{
-					emissiveSubsets[i].submeshIndex = j;
+					auto& emissiveSubset{ meshesEmissiveSubsets[i].emplace_back() };
+					emissiveSubset.submeshIndex = j;
 
 					uint32_t triangleCount{ sceneSubmesh.primitiveCount };
-					emissiveSubsets[i].triangles.reserve(triangleCount);
+					emissiveSubset.triangles.reserve(triangleCount);
 					for (uint32_t k{ 0 }; k < triangleCount; ++k)
 					{
 						// Get indices so we can get primitive attributes
@@ -593,9 +599,9 @@ namespace
 							{
 								averageEmission = 0.0;
 								texelsFetched = 0;
-								for (int i{ 0 }; i < 3; ++i)
+								for (int a{ 0 }; a < 3; ++a)
 								{
-									computeTexFlux(texuv[i].x, texuv[i].y);
+									computeTexFlux(texuv[a].x, texuv[a].y);
 								}
 								triangleFlux *= averageEmission / texelsFetched;
 							}
@@ -612,7 +618,7 @@ namespace
 							// Make emissive triangles degenerate since we need to create separate AC for them
 							sceneSubmesh.discardedPrimitives.push_back(k);
 
-							emissiveSubsets[i].triangles.push_back(SceneData::EmissiveMeshSubset::TriangleData{
+							emissiveSubset.triangles.push_back(SceneData::EmissiveMeshSubset::TriangleData{
 									.v0 = vertices[0],
 									.v1 = vertices[1],
 									.v2 = vertices[2],
@@ -627,7 +633,7 @@ namespace
 			}
 		}
 
-		processGLTFSceneGraph(data, emissiveSubsets, model.transform, model.triangleCount, model.instances, model.instancedEmissiveMeshSubsets);
+		processGLTFSceneGraph(data, meshesEmissiveSubsets, model.transform, model.triangleCount, model.instances, model.instancedEmissiveMeshSubsets);
 
 		cgltf_free(data);
 

@@ -766,14 +766,14 @@ void RenderingInterface::buildGeometryAccelerationStructures(RenderingInterface:
 					switch (submesh.indexType)
 					{
 						case IndexType::UINT_16:
-							reinterpret_cast<uint16_t*>(iBuffer)[a * 3 + 0] = 0;
-							reinterpret_cast<uint16_t*>(iBuffer)[a * 3 + 1] = 0;
-							reinterpret_cast<uint16_t*>(iBuffer)[a * 3 + 2] = 0;
+							reinterpret_cast<uint16_t*>(iBuffer)[prim * 3 + 0] = 0;
+							reinterpret_cast<uint16_t*>(iBuffer)[prim * 3 + 1] = 0;
+							reinterpret_cast<uint16_t*>(iBuffer)[prim * 3 + 2] = 0;
 							break;
 						case IndexType::UINT_32:
-							reinterpret_cast<uint32_t*>(iBuffer)[a * 3 + 0] = 0;
-							reinterpret_cast<uint32_t*>(iBuffer)[a * 3 + 1] = 0;
-							reinterpret_cast<uint32_t*>(iBuffer)[a * 3 + 2] = 0;
+							reinterpret_cast<uint32_t*>(iBuffer)[prim * 3 + 0] = 0;
+							reinterpret_cast<uint32_t*>(iBuffer)[prim * 3 + 1] = 0;
+							reinterpret_cast<uint32_t*>(iBuffer)[prim * 3 + 2] = 0;
 							break;
 						default:
 							R_ERR_LOG("Unknown index type.");
@@ -990,78 +990,94 @@ void RenderingInterface::buildLightAccelerationStructure(const SceneData& scene,
 	}
 	else if (type == LightType::TRIANGLE)
 	{
-		if (m_emissiveTriangleSetPrimBuffer != CUdeviceptr{})
-			CUDA_CHECK(cudaFree(reinterpret_cast<void*>(m_emissiveTriangleSetPrimBuffer)));
+		m_emissiveGASHandles.clear();
+		for (auto& gasBuffer : m_emissiveGASBuffers)
+			CUDA_CHECK(cudaFree(reinterpret_cast<void*>(gasBuffer)));
+		m_emissiveGASBuffers.clear();
 
-		constexpr uint32_t emissiveTriangleLightSBTRecordCount{ 1 };
-		OptixTraversableHandle gasHandle{};
-		CUdeviceptr gasBuffer{};
-		CUdeviceptr tempBuffer{};
+		int insts{ 0 };
+		for (int i{ 0 }; i < scene.models.size(); ++i)
+			insts += scene.models[i].instancedEmissiveMeshSubsets.size();
 
-		constexpr OptixIndicesFormat indexFormat{ OPTIX_INDICES_FORMAT_NONE };
-		constexpr uint32_t indexStride{ 0 };
-		constexpr uint32_t flags{ OPTIX_GEOMETRY_FLAG_DISABLE_ANYHIT | OPTIX_GEOMETRY_FLAG_DISABLE_TRIANGLE_FACE_CULLING };
-		OptixBuildInput buildInput[1]{};
-		buildInput[0] = OptixBuildInput{.type = OPTIX_BUILD_INPUT_TYPE_TRIANGLES};
-		buildInput[0].triangleArray.flags = &flags;
-		buildInput[0].triangleArray.numSbtRecords = emissiveTriangleLightSBTRecordCount;
-		buildInput[0].triangleArray.transformFormat = OPTIX_TRANSFORM_FORMAT_NONE;
-		CUdeviceptr vertexBuffer{};
-		uint32_t triCount{ static_cast<uint32_t>(m_triangleLights.size()) };
-
-		if (triCount != 0)
+		if (insts != 0)
 		{
-			CUDA_CHECK(cudaMalloc(reinterpret_cast<void**>(&vertexBuffer), 3 * sizeof(glm::vec4) * triCount));
-			glm::vec4* vertices{ new glm::vec4[3 * triCount] };
-			for (int i{ 0 }; i < triCount; ++i)
+			uint32_t currentPrimitiveIndexOffset{ 0 };
+			OptixBuildInput buildInput{};
+			for (int i{ 0 }; i < scene.models.size(); ++i)
 			{
-				vertices[3 * i + 0] = glm::vec4{m_triangleLights[i].vertices[0], m_triangleLights[i].vertices[1], m_triangleLights[i].vertices[2], 0.0f};
-				vertices[3 * i + 1] = glm::vec4{m_triangleLights[i].vertices[3], m_triangleLights[i].vertices[4], m_triangleLights[i].vertices[5], 0.0f};
-				vertices[3 * i + 2] = glm::vec4{m_triangleLights[i].vertices[6], m_triangleLights[i].vertices[7], m_triangleLights[i].vertices[8], 0.0f};
+				for (int j{ 0 }; j < scene.models[i].instancedEmissiveMeshSubsets.size(); ++j)
+				{
+					const SceneData::EmissiveMeshSubset& instancedEmissiveSubset{ scene.models[i].instancedEmissiveMeshSubsets[j] };
+					CUdeviceptr vertexBuffer{};
+					CUdeviceptr tempBuffer{};
+
+					CUdeviceptr gasBuffer{};
+					CUdeviceptr gasHandle{};
+
+					constexpr OptixIndicesFormat indexFormat{ OPTIX_INDICES_FORMAT_NONE };
+					constexpr uint32_t indexStride{ 0 };
+					constexpr uint32_t flags{ OPTIX_GEOMETRY_FLAG_DISABLE_ANYHIT | OPTIX_GEOMETRY_FLAG_DISABLE_TRIANGLE_FACE_CULLING };
+					constexpr uint32_t emissiveTriangleLightSBTRecordCount{ 1 };
+					buildInput.type = OPTIX_BUILD_INPUT_TYPE_TRIANGLES;
+					buildInput.triangleArray.flags = &flags;
+					buildInput.triangleArray.numSbtRecords = emissiveTriangleLightSBTRecordCount;
+					buildInput.triangleArray.transformFormat = OPTIX_TRANSFORM_FORMAT_NONE;
+
+					const int triCount{ static_cast<int>(instancedEmissiveSubset.triangles.size()) };
+					CUDA_CHECK(cudaMalloc(reinterpret_cast<void**>(&vertexBuffer), 3 * sizeof(glm::vec4) * triCount));
+					glm::vec4* vertices{ new glm::vec4[3 * triCount] };
+					for (int k{ 0 }; k < triCount; ++k)
+					{
+						vertices[3 * k + 0] = glm::vec4{instancedEmissiveSubset.triangles[k].v0, 0.0f};
+						vertices[3 * k + 1] = glm::vec4{instancedEmissiveSubset.triangles[k].v1, 0.0f};
+						vertices[3 * k + 2] = glm::vec4{instancedEmissiveSubset.triangles[k].v2, 0.0f};
+					}
+					CUDA_CHECK(cudaMemcpy(reinterpret_cast<void*>(vertexBuffer), vertices, 3 * sizeof(glm::vec4) * triCount, cudaMemcpyDefault));
+					delete[] vertices;
+
+					buildInput.triangleArray.vertexBuffers = &(vertexBuffer);
+					buildInput.triangleArray.numVertices = triCount * 3;
+					buildInput.triangleArray.vertexFormat = OPTIX_VERTEX_FORMAT_FLOAT3;
+					buildInput.triangleArray.vertexStrideInBytes = sizeof(glm::vec4);
+					buildInput.triangleArray.numIndexTriplets = 0;
+					buildInput.triangleArray.indexFormat = indexFormat;
+					buildInput.triangleArray.indexStrideInBytes = indexStride;
+					buildInput.triangleArray.primitiveIndexOffset = currentPrimitiveIndexOffset;
+					currentPrimitiveIndexOffset += instancedEmissiveSubset.triangles.size();
+
+					OptixAccelBuildOptions accelBuildOptions{
+						.buildFlags = OPTIX_BUILD_FLAG_ALLOW_RANDOM_VERTEX_ACCESS | OPTIX_BUILD_FLAG_PREFER_FAST_TRACE | OPTIX_BUILD_FLAG_ALLOW_COMPACTION,
+						.operation = OPTIX_BUILD_OPERATION_BUILD };
+					OptixAccelBufferSizes computedBufferSizes{};
+					OPTIX_CHECK(optixAccelComputeMemoryUsage(m_context, &accelBuildOptions, &buildInput, 1, &computedBufferSizes));
+					size_t compactedSizeOffset{ ALIGNED_SIZE(computedBufferSizes.tempSizeInBytes, 8ull) };
+					CUDA_CHECK(cudaMalloc(reinterpret_cast<void**>(&tempBuffer), compactedSizeOffset + sizeof(size_t)));
+					CUDA_CHECK(cudaMalloc(reinterpret_cast<void**>(&gasBuffer), computedBufferSizes.outputSizeInBytes));
+					OptixAccelEmitDesc emittedProperty{};
+					emittedProperty.type = OPTIX_PROPERTY_TYPE_COMPACTED_SIZE;
+					emittedProperty.result = reinterpret_cast<CUdeviceptr>(reinterpret_cast<uint8_t*>(tempBuffer) + compactedSizeOffset);
+					OPTIX_CHECK(optixAccelBuild(m_context, 0, &accelBuildOptions,
+								&buildInput, 1,
+								tempBuffer, computedBufferSizes.tempSizeInBytes,
+								gasBuffer, computedBufferSizes.outputSizeInBytes, &gasHandle, &emittedProperty, 1));
+					size_t compactedGasSize{};
+					CUDA_CHECK(cudaMemcpy(&compactedGasSize, reinterpret_cast<void*>(emittedProperty.result), sizeof(size_t), cudaMemcpyDeviceToHost));
+					if (compactedGasSize < computedBufferSizes.outputSizeInBytes)
+					{
+						CUdeviceptr noncompactedGasBuffer{ gasBuffer };
+						CUDA_CHECK(cudaMalloc(reinterpret_cast<void**>(&gasBuffer), compactedGasSize));
+						OPTIX_CHECK(optixAccelCompact(m_context, 0, gasHandle, gasBuffer, compactedGasSize, &gasHandle));
+						CUDA_CHECK(cudaFree(reinterpret_cast<void*>(noncompactedGasBuffer)));
+					}
+					CUDA_CHECK(cudaFree(reinterpret_cast<void*>(tempBuffer)));
+
+					CUDA_CHECK(cudaFree(reinterpret_cast<void*>(vertexBuffer)));
+
+					m_emissiveGASHandles.push_back(gasHandle);
+					m_emissiveGASBuffers.push_back(gasBuffer);
+				}
 			}
-			CUDA_CHECK(cudaMemcpy(reinterpret_cast<void*>(vertexBuffer), vertices, 3 * sizeof(glm::vec4) * triCount, cudaMemcpyDefault));
-			delete[] vertices;
-
-			buildInput[0].triangleArray.vertexBuffers = &(vertexBuffer);
-			buildInput[0].triangleArray.numVertices = triCount * 3;
-			buildInput[0].triangleArray.vertexFormat = OPTIX_VERTEX_FORMAT_FLOAT3;
-			buildInput[0].triangleArray.vertexStrideInBytes = sizeof(glm::vec4);
-			buildInput[0].triangleArray.numIndexTriplets = 0;
-			buildInput[0].triangleArray.indexFormat = indexFormat;
-			buildInput[0].triangleArray.indexStrideInBytes = indexStride;
-			buildInput[0].triangleArray.primitiveIndexOffset = 0;
 		}
-
-		OptixAccelBuildOptions accelBuildOptions{
-			.buildFlags = OPTIX_BUILD_FLAG_ALLOW_RANDOM_VERTEX_ACCESS | OPTIX_BUILD_FLAG_PREFER_FAST_TRACE | OPTIX_BUILD_FLAG_ALLOW_COMPACTION,
-				.operation = OPTIX_BUILD_OPERATION_BUILD };
-		OptixAccelBufferSizes computedBufferSizes{};
-		OPTIX_CHECK(optixAccelComputeMemoryUsage(m_context, &accelBuildOptions, buildInput, ARRAYSIZE(buildInput), &computedBufferSizes));
-		size_t compactedSizeOffset{ ALIGNED_SIZE(computedBufferSizes.tempSizeInBytes, 8ull) };
-		CUDA_CHECK(cudaMalloc(reinterpret_cast<void**>(&tempBuffer), compactedSizeOffset + sizeof(size_t)));
-		CUDA_CHECK(cudaMalloc(reinterpret_cast<void**>(&gasBuffer), computedBufferSizes.outputSizeInBytes));
-		OptixAccelEmitDesc emittedProperty{};
-		emittedProperty.type = OPTIX_PROPERTY_TYPE_COMPACTED_SIZE;
-		emittedProperty.result = reinterpret_cast<CUdeviceptr>(reinterpret_cast<uint8_t*>(tempBuffer) + compactedSizeOffset);
-		OPTIX_CHECK(optixAccelBuild(m_context, 0, &accelBuildOptions,
-					buildInput, ARRAYSIZE(buildInput),
-					tempBuffer, computedBufferSizes.tempSizeInBytes,
-					gasBuffer, computedBufferSizes.outputSizeInBytes, &gasHandle, &emittedProperty, 1));
-		size_t compactedGasSize{};
-		CUDA_CHECK(cudaMemcpy(&compactedGasSize, reinterpret_cast<void*>(emittedProperty.result), sizeof(size_t), cudaMemcpyDeviceToHost));
-		if (compactedGasSize < computedBufferSizes.outputSizeInBytes)
-		{
-			CUdeviceptr noncompactedGasBuffer{ gasBuffer };
-			CUDA_CHECK(cudaMalloc(reinterpret_cast<void**>(&gasBuffer), compactedGasSize));
-			OPTIX_CHECK(optixAccelCompact(m_context, 0, gasHandle, gasBuffer, compactedGasSize, &gasHandle));
-			CUDA_CHECK(cudaFree(reinterpret_cast<void*>(noncompactedGasBuffer)));
-		}
-		CUDA_CHECK(cudaFree(reinterpret_cast<void*>(tempBuffer)));
-
-		CUDA_CHECK(cudaFree(reinterpret_cast<void*>(vertexBuffer)));
-
-		m_emissiveTriangleSetPrimHandle = gasHandle;
-		m_emissiveTriangleSetPrimBuffer = gasBuffer;
 	}
 }
 void RenderingInterface::updateInstanceAccelerationStructure(const SceneData& scene, const Camera& camera)
@@ -1073,33 +1089,18 @@ void RenderingInterface::updateInstanceAccelerationStructure(const SceneData& sc
 
 	CUdeviceptr tempBuffer{};
 
-	uint32_t instanceCount{ 3 }; // Emissive geometry primitives
+	uint32_t instanceCount{ 2 }; // Emissive geometry primitives
 	for(auto& model : scene.models)
+	{
+		instanceCount += model.instancedEmissiveMeshSubsets.size();
 		instanceCount += model.instances.size();
+	}
 
 	OptixInstance* instances{};
 	CUdeviceptr instanceBuffer{};
 	CUDA_CHECK(cudaHostAlloc(&instances, sizeof(OptixInstance) * instanceCount, cudaHostAllocMapped));
 	CUDA_CHECK(cudaHostGetDevicePointer(reinterpret_cast<void**>(&instanceBuffer), instances, 0));
 	int inst{ 0 };
-	instances[inst].instanceId = inst;
-	instances[inst].sbtOffset = KTriangleLightsArrayIndex;
-	instances[inst].traversableHandle = m_emissiveTriangleSetPrimHandle;
-	instances[inst].visibilityMask = 0xFF;
-	instances[inst].flags = OPTIX_INSTANCE_FLAG_NONE;
-	instances[inst].transform[0]  = 1.0f;
-	instances[inst].transform[1]  = 0.0f;
-	instances[inst].transform[2]  = 0.0f;
-	instances[inst].transform[3]  = -cameraPosition.x;
-	instances[inst].transform[4]  = 0.0f;
-	instances[inst].transform[5]  = 1.0f;
-	instances[inst].transform[6]  = 0.0f;
-	instances[inst].transform[7]  = -cameraPosition.y;
-	instances[inst].transform[8]  = 0.0f;
-	instances[inst].transform[9]  = 0.0f;
-	instances[inst].transform[10] = 1.0f;
-	instances[inst].transform[11] = -cameraPosition.z;
-	++inst;
 	instances[inst].instanceId = inst;
 	instances[inst].sbtOffset = KDiskLightsArrayIndex;
 	instances[inst].traversableHandle = m_customPrimHandle;
@@ -1136,7 +1137,38 @@ void RenderingInterface::updateInstanceAccelerationStructure(const SceneData& sc
 	instances[inst].transform[10] = 1.0f;
 	instances[inst].transform[11] = -cameraPosition.z;
 	++inst;
-	int sbtOffset{ inst }; // SBT offset is "inst" because each previous instance has only one hit record
+	int currentEmissiveSubset{ 0 };
+	for (auto& model : scene.models)
+	{
+		glm::mat4 modelTransform{ model.transform };
+		modelTransform[3][3] = 1.0f;
+		for (auto& subset : model.instancedEmissiveMeshSubsets)
+		{
+			glm::mat4 transform{ model.instances[subset.instanceIndex].transform };
+			transform[3][3] = 1.0f;
+			transform = modelTransform * transform;
+
+			instances[inst].instanceId = inst;
+			instances[inst].sbtOffset = KTriangleLightsArrayIndex;
+			instances[inst].traversableHandle = m_emissiveGASHandles[currentEmissiveSubset++];
+			instances[inst].visibilityMask = 0xFF;
+			instances[inst].flags = OPTIX_INSTANCE_FLAG_NONE;
+			instances[inst].transform[0]  = transform[0][0];
+			instances[inst].transform[1]  = transform[1][0];
+			instances[inst].transform[2]  = transform[2][0];
+			instances[inst].transform[3]  = -cameraPosition.x + transform[3][0];
+			instances[inst].transform[4]  = transform[0][1];
+			instances[inst].transform[5]  = transform[1][1];
+			instances[inst].transform[6]  = transform[2][1];
+			instances[inst].transform[7]  = -cameraPosition.y + transform[3][1];
+			instances[inst].transform[8]  = transform[0][2];
+			instances[inst].transform[9]  = transform[1][2];
+			instances[inst].transform[10] = transform[2][2];
+			instances[inst].transform[11] = -cameraPosition.z + transform[3][2];
+			++inst;
+		}
+	}
+	int sbtOffset{ KLightTypeCount };
 	for(auto& model : scene.models)
 	{
 		const RenderingInterface::ModelResource& modelRes{ m_modelResources[model.id] };
@@ -2134,6 +2166,9 @@ void RenderingInterface::cleanup()
 		for(auto buf : mdr.second.attributeBuffers)
 			CUDA_CHECK(cudaFree(reinterpret_cast<void*>(buf)));
 	}
+	for (auto& gasBuffer : m_emissiveGASBuffers)
+		CUDA_CHECK(cudaFree(reinterpret_cast<void*>(gasBuffer)));
+	m_emissiveGASBuffers.clear();
 	CUDA_CHECK(cudaFree(reinterpret_cast<void*>(m_customPrimBuffer)));
 	CUDA_CHECK(cudaFree(reinterpret_cast<void*>(m_spherePrimBuffer)));
 	CUDA_CHECK(cudaFree(reinterpret_cast<void*>(m_iasBuffer)));

@@ -810,37 +810,36 @@ void UI::recordCoordinateFrameWindow(Camera& camera)
 	ImDrawList* drawList{ ImGui::GetWindowDrawList() };
 
 	ImVec2 coordBGStartPos{ ImGui::GetCursorScreenPos() };
-	float coordBGSize{ std::min(ImGui::GetContentRegionAvail().x, ImGui::GetContentRegionAvail().y) };
-	coordBGSize = std::max(50.0f, coordBGSize);
+	float coordBGSizeX{ ImGui::GetContentRegionAvail().x };
+	float coordBGSizeY{ ImGui::GetContentRegionAvail().y };
+	float coordBGSizeMin{ std::min(coordBGSizeX, coordBGSizeY) };
 
-	drawList->AddRectFilled(coordBGStartPos, ImVec2(coordBGStartPos.x + coordBGSize, coordBGStartPos.y + coordBGSize),
+	drawList->AddRectFilled(coordBGStartPos, ImVec2(coordBGStartPos.x + coordBGSizeX, coordBGStartPos.y + coordBGSizeY),
 			IM_COL32(0, 0, 0, 255));
-	drawList->AddRect(coordBGStartPos, ImVec2(coordBGStartPos.x + coordBGSize, coordBGStartPos.y + coordBGSize), ImGui::GetColorU32(ImGuiCol_Border));
+	drawList->AddRect(coordBGStartPos, ImVec2(coordBGStartPos.x + coordBGSizeX, coordBGStartPos.y + coordBGSizeY), ImGui::GetColorU32(ImGuiCol_Border));
 
 	glm::vec3 coordFrame[3]{
 		{1.0f, 0.0f, 0.0f},
-			{0.0f, 1.0f, 0.0f},
-			{0.0f, 0.0f, 1.0f} };
-	glm::mat4 view{ glm::transpose(glm::mat4{
-			glm::vec4{camera.getU(), 0.0f},
-			glm::vec4{camera.getV(), 1.0f},
-			glm::vec4{camera.getW(), 0.0f},
-			glm::vec4{glm::vec3{0.0f}, 1.0f}}) };
-	glm::mat4 ortho{
-		glm::vec4{0.8f, 0.0f, 0.0f, 0.0f},
-			glm::vec4{0.0f, 0.8f, 0.0f, 0.0f},
-			glm::vec4{0.0f, 0.0f, 0.8f, 0.0f},
-			glm::vec4{0.0f, 0.0f, 0.0f, 1.0f} };
-	glm::vec2 frameOrigin{ coordBGStartPos.x + coordBGSize * 0.5f,
-		coordBGStartPos.y + coordBGSize * 0.5f };
+		{0.0f, 1.0f, 0.0f},
+		{0.0f, 0.0f, 1.0f} };
+	glm::mat3 view{ glm::transpose(glm::mat3{
+			glm::vec3{camera.getU()},
+			glm::vec3{camera.getV()},
+			glm::vec3{camera.getW()}, }) };
+	glm::mat3 ortho{
+		glm::vec3{0.8f, 0.0f, 0.0f},
+		glm::vec3{0.0f, 0.8f, 0.0f},
+		glm::vec3{0.0f, 0.0f, 0.8f}, };
+	glm::vec2 frameOrigin{ coordBGStartPos.x + coordBGSizeX * 0.5f,
+		coordBGStartPos.y + coordBGSizeY * 0.5f };
 	glm::vec3 coordFrameScreenSpace[3]{};
 	for (int i{ 0 }; i < ARRAYSIZE(coordFrameScreenSpace); ++i)
 	{
-		coordFrameScreenSpace[i] = (ortho * view * glm::vec4{coordFrame[i], 1.0f}) * 0.5f + 0.5f;
+		coordFrameScreenSpace[i] = ortho * view * coordFrame[i];
 		coordFrameScreenSpace[i] =
-		{coordBGStartPos.x + coordFrameScreenSpace[i].x * coordBGSize,
+			{frameOrigin.x + coordFrameScreenSpace[i].x * coordBGSizeMin * 0.5f,
 			coordFrameScreenSpace[i].y,
-			coordBGStartPos.y + coordBGSize * (1.0f - coordFrameScreenSpace[i].z)};
+			frameOrigin.y - coordFrameScreenSpace[i].z * coordBGSizeMin * 0.5f};
 	}
 
 	int drawOrder[3]{ 0, 1, 2 };
@@ -853,7 +852,7 @@ void UI::recordCoordinateFrameWindow(Camera& camera)
 		{
 			if (coordFrameScreenSpace[drawOrder[j]].y
 					<
-					coordFrameScreenSpace[drawOrder[j + 1]].y)
+				coordFrameScreenSpace[drawOrder[j + 1]].y)
 			{
 				int tmp{ drawOrder[j] };
 				drawOrder[j] = drawOrder[j + 1];
@@ -866,9 +865,16 @@ void UI::recordCoordinateFrameWindow(Camera& camera)
 	}
 	for (int i{ 0 }; i < ARRAYSIZE(drawOrder); ++i)
 	{
+		ImU32 color{ colors[drawOrder[i]] };
+		if (i == 0)
+		{
+			ImVec4 colvec{ ImGui::ColorConvertU32ToFloat4(color) };
+			colvec.x *= 0.5f; colvec.y *= 0.5f; colvec.z *= 0.5f;
+			color = ImGui::ColorConvertFloat4ToU32(colvec);
+		}
 		drawList->AddLine(ImVec2{frameOrigin.x, frameOrigin.y},
 				ImVec2{coordFrameScreenSpace[drawOrder[i]].x, coordFrameScreenSpace[drawOrder[i]].z},
-				colors[drawOrder[i]], 3.0f);
+				color, 3.0f);
 		drawList->AddText(ImVec2{coordFrameScreenSpace[drawOrder[i]].x, coordFrameScreenSpace[drawOrder[i]].z}, IM_COL32_WHITE, names[drawOrder[i]]);
 	}
 
@@ -960,8 +966,8 @@ void UI::recordInput(CommandBuffer& commands, Window& window, Camera& camera, Re
 {
 	static bool first{ true };
 
-	static double prevTime{ 0.0f };
-	static double delta{};
+	static double prevTime{ 0.0 };
+	static double delta{ 0.0 };
 	double newTime{ glfwGetTime() };
 	delta = newTime - prevTime;
 	prevTime = newTime;
