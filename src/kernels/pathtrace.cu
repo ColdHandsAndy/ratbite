@@ -93,7 +93,7 @@ extern "C" __global__ void __closesthit__triangle()
 
 	float3 verticesObj[3];
 	optixGetTriangleVertexData(optixGetGASTraversableHandle(), optixGetPrimitiveIndex(), optixGetSbtGASIndex(), 0.0f, verticesObj);
-	
+
 	float WFO[12]{};
 	optixGetObjectToWorldTransformMatrix(WFO);
 	float OFW[12]{};
@@ -149,82 +149,82 @@ extern "C" __global__ void __closesthit__triangle()
 }
 extern "C" __global__ void __intersection__disk()
 {
-	optixSetPayloadTypes(OPTIX_PAYLOAD_TYPE_ID_0);
-
-	float3 rOT{ optixGetWorldRayOrigin() };
-	float3 rDT{ optixGetWorldRayDirection() };
-	glm::vec3 rO{ rOT.x, rOT.y, rOT.z };
-	glm::vec3 rD{ rDT.x, rDT.y, rDT.z };
-
-	uint32_t lightIndex{ optixGetPrimitiveIndex() };
-
-	const DiskLightData& dl{ parameters.lightTree.disks[lightIndex] };
-
-	glm::mat3 matFrame{ glm::mat3_cast(dl.frame) };
-	glm::vec3 dC{ dl.position };
-	//glm::vec3 dT{ matFrame[0] };
-	//glm::vec3 dB{ matFrame[1] };
-	glm::vec3 dN{ matFrame[2] };
-	dN = glm::dot(rD, dN) < 0.0f ? dN : -dN;
-	float dR{ dl.radius };
-
-	glm::vec3 o{ rO - dC };
-	float t{ -glm::dot(dN, o) / glm::dot(rD, dN) };
-	glm::vec3 rhP{ o + rD * t };
-
-	LightTree::LightPointer lightPointer{};
-	lightPointer.pack(LightType::DISK, lightIndex);
-
-	bool intersect{ glm::dot(rhP, rhP) < dR * dR };
-	if (intersect)
-	{
-		uint32_t encGeometryNormal{ Octohedral::encodeU32(dN) };
-		glm::vec3 hP{ rhP + dC };
-		optixSetPayload_0(__float_as_uint(hP.x));
-		optixSetPayload_1(__float_as_uint(hP.y));
-		optixSetPayload_2(__float_as_uint(hP.z));
-		optixSetPayload_3(encGeometryNormal);
-		optixSetPayload_7(dl.materialIndex);
-		optixSetPayload_8(lightPointer.lptr);
-		optixReportIntersection(t, 0);
-	}
+	// optixSetPayloadTypes(OPTIX_PAYLOAD_TYPE_ID_0);
+	//
+	// float3 rOT{ optixGetWorldRayOrigin() };
+	// float3 rDT{ optixGetWorldRayDirection() };
+	// glm::vec3 rO{ rOT.x, rOT.y, rOT.z };
+	// glm::vec3 rD{ rDT.x, rDT.y, rDT.z };
+	//
+	// uint32_t lightIndex{ optixGetPrimitiveIndex() };
+	//
+	// const DiskLightData& dl{ parameters.lightTree.disks[lightIndex] };
+	//
+	// glm::mat3 matFrame{ glm::mat3_cast(dl.frame) };
+	// glm::vec3 dC{ dl.position };
+	// //glm::vec3 dT{ matFrame[0] };
+	// //glm::vec3 dB{ matFrame[1] };
+	// glm::vec3 dN{ matFrame[2] };
+	// dN = glm::dot(rD, dN) < 0.0f ? dN : -dN;
+	// float dR{ dl.radius };
+	//
+	// glm::vec3 o{ rO - dC };
+	// float t{ -glm::dot(dN, o) / glm::dot(rD, dN) };
+	// glm::vec3 rhP{ o + rD * t };
+	//
+	// LightTree::LightPointer lightPointer{};
+	// lightPointer.pack(LightType::DISK, lightIndex);
+	//
+	// bool intersect{ glm::dot(rhP, rhP) < dR * dR };
+	// if (intersect)
+	// {
+	// 	uint32_t encGeometryNormal{ Octohedral::encodeU32(dN) };
+	// 	glm::vec3 hP{ rhP + dC };
+	// 	optixSetPayload_0(__float_as_uint(hP.x));
+	// 	optixSetPayload_1(__float_as_uint(hP.y));
+	// 	optixSetPayload_2(__float_as_uint(hP.z));
+	// 	optixSetPayload_3(encGeometryNormal);
+	// 	optixSetPayload_7(dl.materialIndex);
+	// 	optixSetPayload_8(lightPointer.lptr);
+	// 	optixReportIntersection(t, 0);
+	// }
 }
 extern "C" __global__ void __closesthit__disk()
 {
-	optixSetPayloadTypes(OPTIX_PAYLOAD_TYPE_ID_0);
+	// optixSetPayloadTypes(OPTIX_PAYLOAD_TYPE_ID_0);
 }
 extern "C" __global__ void __closesthit__sphere()
 {
-	optixSetPayloadTypes(OPTIX_PAYLOAD_TYPE_ID_0);
-
-	const uint32_t primID{ optixGetPrimitiveIndex() };
-
-	uint32_t lightIndex{ primID };
-	const SphereLightData& sl{ parameters.lightTree.spheres[lightIndex] };
-	glm::vec4 sphere{ sl.position, sl.radius };
-
-	float3 rOT{ optixGetWorldRayOrigin() };
-	float3 rDT{ optixGetWorldRayDirection() };
-	glm::vec3 rO{ rOT.x, rOT.y, rOT.z };
-	glm::vec3 rD{ rDT.x, rDT.y, rDT.z };
-
-	glm::vec3 hP{ rO + rD * optixGetRayTmax() };
-	glm::vec3 dN{ glm::normalize(hP - glm::vec3{sphere.x, sphere.y, sphere.z}) };
-	glm::vec3 oc{ rO - glm::vec3{sphere.x, sphere.y, sphere.z} };
-	float d2{ oc.x * oc.x + oc.y * oc.y + oc.z * oc.z };
-	if (d2 < sphere.w * sphere.w)
-		dN = -dN;
-
-	LightTree::LightPointer lightPointer{};
-	lightPointer.pack(LightType::SPHERE, lightIndex);
-
-	uint32_t encGeometryNormal{ Octohedral::encodeU32(dN) };
-	optixSetPayload_0(__float_as_uint(hP.x));
-	optixSetPayload_1(__float_as_uint(hP.y));
-	optixSetPayload_2(__float_as_uint(hP.z));
-	optixSetPayload_3(encGeometryNormal);
-	optixSetPayload_7(sl.materialIndex);
-	optixSetPayload_8(lightPointer.lptr);
+	// optixSetPayloadTypes(OPTIX_PAYLOAD_TYPE_ID_0);
+	//
+	// const uint32_t primID{ optixGetPrimitiveIndex() };
+	//
+	// uint32_t lightIndex{ primID };
+	// const SphereLightData& sl{ parameters.lightTree.spheres[lightIndex] };
+	// glm::vec4 sphere{ sl.position, sl.radius };
+	//
+	// float3 rOT{ optixGetWorldRayOrigin() };
+	// float3 rDT{ optixGetWorldRayDirection() };
+	// glm::vec3 rO{ rOT.x, rOT.y, rOT.z };
+	// glm::vec3 rD{ rDT.x, rDT.y, rDT.z };
+	//
+	// glm::vec3 hP{ rO + rD * optixGetRayTmax() };
+	// glm::vec3 dN{ glm::normalize(hP - glm::vec3{sphere.x, sphere.y, sphere.z}) };
+	// glm::vec3 oc{ rO - glm::vec3{sphere.x, sphere.y, sphere.z} };
+	// float d2{ oc.x * oc.x + oc.y * oc.y + oc.z * oc.z };
+	// if (d2 < sphere.w * sphere.w)
+	// 	dN = -dN;
+	//
+	// LightTree::LightPointer lightPointer{};
+	// lightPointer.pack(LightType::SPHERE, lightIndex);
+	//
+	// uint32_t encGeometryNormal{ Octohedral::encodeU32(dN) };
+	// optixSetPayload_0(__float_as_uint(hP.x));
+	// optixSetPayload_1(__float_as_uint(hP.y));
+	// optixSetPayload_2(__float_as_uint(hP.z));
+	// optixSetPayload_3(encGeometryNormal);
+	// optixSetPayload_7(sl.materialIndex);
+	// optixSetPayload_8(lightPointer.lptr);
 }
 
 extern "C" __global__ void __miss__miss()
@@ -1231,28 +1231,6 @@ extern "C" __global__ void __raygen__main()
 								path.wavelengths, *parameters.spectralBasisR, *parameters.spectralBasisG, *parameters.spectralBasisB) * 0.01f;
 						}
 						break;
-					case LightType::DISK:
-						{
-							const DiskLightData& disk{ parameters.lightTree.disks[interaction.lightIndex] };
-							glm::vec3 norm{ glm::mat3_cast(disk.frame)[2] };
-							float lCos{ -glm::dot(path.ray.d, norm) };
-							noEmission = lCos <= 0.0f;
-							float surfacePDF{ 1.0f / (glm::pi<float>() * disk.radius * disk.radius) };
-							lightPDF = surfacePDF * sqrdDistToLight / lCos;
-							float lightPowerScale{ disk.powerScale };
-							uint32_t emissionSpectrumDataIndex{ parameters.materials[disk.materialIndex].emissionSpectrumDataIndex };
-							Le = parameters.spectra[emissionSpectrumDataIndex].sample(path.wavelengths) * lightPowerScale;
-						}
-						break;
-					case LightType::SPHERE:
-						{
-							const SphereLightData& sphere{ parameters.lightTree.spheres[interaction.lightIndex] };
-							lightPDF = sampling::sphere::pdfUniformSolidAngle(path.ray.o, sphere.position, sphere.radius);
-							float lightPowerScale{ sphere.powerScale };
-							uint32_t emissionSpectrumDataIndex{ parameters.materials[sphere.materialIndex].emissionSpectrumDataIndex };
-							Le = parameters.spectra[emissionSpectrumDataIndex].sample(path.wavelengths) * lightPowerScale;
-						}
-						break;
 					case LightType::SKY:
 						{
 							const LaunchParameters::LightTree::EnvironmentMap& envMap{ parameters.lightTree.envMap };
@@ -1664,56 +1642,6 @@ extern "C" __global__ void __raygen__main()
 								directLightData.spectrumSample = color::RGBtoSpectrum(
 									glm::vec3{emission[0], emission[1], emission[2]},
 									path.wavelengths, *parameters.spectralBasisR, *parameters.spectralBasisG, *parameters.spectralBasisB) * 0.01f;
-							}
-							break;
-						case LightType::DISK:
-							{
-								const DiskLightData& disk{ parameters.lightTree.disks[index] };
-								directLightData.spectrumSample
-									= parameters.spectra[parameters.materials[disk.materialIndex].emissionSpectrumDataIndex].sample(path.wavelengths) * disk.powerScale;
-								glm::mat3 matframe{ glm::mat3_cast(disk.frame) };
-								glm::vec3 lSmplPos{ disk.position + sampling::disk::sampleUniform3D(glm::vec2{rand.x, rand.y}, matframe) * disk.radius };
-
-								const glm::vec3 sr{ lSmplPos - interaction.hitPos };
-								const bool inSample{ glm::dot(sn, sr) < 0.0f };
-								if ((inSample && !surfaceCanTransmit) || (inSample && (glm::dot(gn, sr) > 0.0f)))
-									directLightData.occluded = true;
-								lightRayOrigin = utility::offsetPoint(
-										inSample || !triangularGeometry ? interaction.hitPos : interaction.primitive.triangle.hitPosInterp,
-										inSample ? -gn : gn);
-
-								glm::vec3 rToLight{ lSmplPos - lightRayOrigin };
-								float sqrdToLight{ rToLight.x * rToLight.x + rToLight.y * rToLight.y + rToLight.z * rToLight.z };
-								dToL = cuda::std::sqrtf(sqrdToLight);
-								directLightData.lightDir = rToLight / dToL;
-								float lCos{ -glm::dot(matframe[2], directLightData.lightDir) };
-
-								directLightData.occluded = lCos <= 0.0f;
-
-								float surfacePDF{ 1.0f / (glm::pi<float>() * disk.radius * disk.radius) };
-								lightPDF = surfacePDF * sqrdToLight / lCos;
-							}
-							break;
-						case LightType::SPHERE:
-							{
-								const SphereLightData& sphere{ parameters.lightTree.spheres[index] };
-								directLightData.spectrumSample = parameters.spectra[parameters.materials[sphere.materialIndex].emissionSpectrumDataIndex].sample(path.wavelengths) * sphere.powerScale;
-								glm::vec3 lSmplPos{ sampling::sphere::sampleUniformWorldSolidAngle(glm::vec2{rand.x, rand.y}, interaction.hitPos, sphere.position, sphere.radius, lightPDF) };
-
-								const glm::vec3 sr{ lSmplPos - interaction.hitPos };
-								const bool inSample{ glm::dot(sn, sr) < 0.0f };
-								if ((inSample && !surfaceCanTransmit) || (inSample && (glm::dot(gn, sr) > 0.0f)))
-									directLightData.occluded = true;
-								lightRayOrigin = utility::offsetPoint(
-										inSample || !triangularGeometry ? interaction.hitPos : interaction.primitive.triangle.hitPosInterp,
-										inSample ? -gn : gn);
-
-								glm::vec3 rToLight{ lSmplPos - lightRayOrigin };
-								dToL = glm::length(rToLight);
-								directLightData.lightDir = rToLight / dToL;
-
-								if (lightPDF == 0.0f || dToL <= 0.0f)
-									directLightData.occluded = true;
 							}
 							break;
 						case LightType::SKY:

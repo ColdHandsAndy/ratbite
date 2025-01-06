@@ -10,8 +10,6 @@
 enum class LightType
 {
 	TRIANGLE,
-	DISK,
-	SPHERE,
 
 	SKY,
 	NONE,
@@ -20,12 +18,8 @@ enum class LightType
 };
 // LightType enums we can have multiple of are also used as indices into arrays therefore static asserts
 constexpr uint32_t KTriangleLightsArrayIndex{ static_cast<uint32_t>(LightType::TRIANGLE) };
-constexpr uint32_t KDiskLightsArrayIndex{ static_cast<uint32_t>(LightType::DISK) };
-constexpr uint32_t KSphereLightsArrayIndex{ static_cast<uint32_t>(LightType::SPHERE) };
-constexpr uint32_t KLightTypeCount{ 3 };
+constexpr uint32_t KMultiLightTypeCount{ 1 };
 static_assert(static_cast<int>(LightType::TRIANGLE) == 0);
-static_assert(static_cast<int>(LightType::DISK) == 1);
-static_assert(static_cast<int>(LightType::SPHERE) == 2);
 
 struct DiskLightData
 {
@@ -144,24 +138,6 @@ namespace LightTree
 			packAttributes(attributes);
 			packCoreData(lightOffset, lightCount);
 		}
-		// PackedNode(const float* nodeSpatialMean, float nodeSpatialVariance,
-		// 		const float* averageDirection,
-		// 		float nodeSharpness, float nodeFlux,
-		// 		uint32_t rightChildIndex)
-		// 	: spatialMean{ nodeSpatialMean[0], nodeSpatialMean[1], nodeSpatialMean[2] }, spatialVariance{ nodeSpatialVariance },
-		// 	packedAverageDirection{ Octohedral::encodeU32(averageDirection[0], averageDirection[1], averageDirection[2]) },
-		// 	sharpness{ nodeSharpness }, flux{ nodeFlux },
-		// 	coreData{ ((1u << 31u) - 1u) & rightChildIndex }
-		// {}
-		// PackedNode(const float* nodeSpatialMean, float nodeSpatialVariance,
-		// 		const float* averageDirection,
-		// 		float nodeSharpness, float nodeFlux,
-		// 		uint32_t lightOffset, uint32_t lightCount)
-		// 	: spatialMean{ nodeSpatialMean[0], nodeSpatialMean[1], nodeSpatialMean[2] }, spatialVariance{ nodeSpatialVariance },
-		// 	packedAverageDirection{ Octohedral::encodeU32(averageDirection[0], averageDirection[1], averageDirection[2]) },
-		// 	sharpness{ nodeSharpness }, flux{ nodeFlux },
-		// 	coreData{ (1u << 31u) | ((lightCount & ((1u << KLightCountBits) - 1u)) << KLightOffsetBits) | (lightOffset & ((1u << KLightOffsetBits) - 1u)) }
-		// {}
 
 		bool isLeaf() const { return (coreData >> 31u) != 0u; }
 
@@ -216,7 +192,7 @@ namespace LightTree
 	{
 		uint32_t lptr{};
 
-		constexpr static inline uint32_t KLightIndexBits{ 29u };
+		constexpr static inline uint32_t KLightIndexBits{ 30u };
 		constexpr static inline uint32_t KLightTypeBits{ 32u - KLightIndexBits };
 		static_assert(static_cast<uint32_t>(LightType::NONE) < (1u << KLightTypeBits));
 		CU_HOSTDEVICE CU_INLINE void pack(LightType type, uint32_t index)

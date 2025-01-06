@@ -183,9 +183,7 @@ private:
 	void fillLightTreeDataBuffers(const Camera& camera,
 				bool nodeCountChanged,
 				bool lightCountChanged,
-				bool triangleLightCountChanged,
-				bool diskLightCountChanged,
-				bool sphereLightCountChanged);
+				bool triangleLightCountChanged);
 
 	void fillModelMaterials(RenderingInterface::ModelResource& modelRes, SceneData::Model& model);
 	uint32_t fillLightMaterial(const SceneData::MaterialDescriptor& desc);

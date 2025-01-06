@@ -490,12 +490,8 @@ struct SceneData
 			return glm::quat_cast(glm::mat3(tang, bitang, m_normal));
 		}
 	};
-	std::vector<SceneData::DiskLight> diskLights{};
-	std::vector<SceneData::SphereLight> sphereLights{};
 
 	std::string environmentMapPath{};
-
-	int getLightCount() const { return diskLights.size() + sphereLights.size(); }
 
 	SceneData()
 	{

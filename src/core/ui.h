@@ -22,10 +22,184 @@
 class UI
 {
 private:
-	bool m_previewWindowIsFocused{ false };
-	bool m_cursorIsDraggingOverPreviewWindow{ false };
-	bool m_imageRenderWindowIsOpen{ false };
-	bool m_imageRenderSettingsWindowIsOpen{ false };
+	struct Menu
+	{
+	} m_menu{};
+	void recordMenu(CommandBuffer& commands, Window& window, Camera& camera, RenderContext& rContext);
+
+	struct PreviewWindow
+	{
+		static constexpr bool detachable{ false };
+
+		static constexpr float KViewportOverlayRelativeSize{ 0.5f };
+		bool drawViewportOverlay{ false };
+		bool drawRuleOfThirds{ false };
+		uint32_t width{};
+		uint32_t height{};
+	} m_previewWindow{};
+	void recordPreviewWindow(CommandBuffer& commands, RenderContext& rContext, GLuint renderResult);
+
+	// TODO: Add debug modes
+	struct RenderSettingsWindow
+	{
+		static constexpr bool detachable{ false };
+
+		static constexpr int KMinSampleCount{ 1 };
+		static constexpr int KMaxSampleCount{ 65535 };
+
+		static constexpr int KMinPathDepth{ 1 };
+		static constexpr int KMaxPathDepth{ 4096 };
+		int generalPathDepth{ 12 };
+		int reflectedPathDepth{ 4 };
+		int transmittedPathDepth{ 12 };
+
+
+		static constexpr int KMinRenderDimSize{ 1 };
+		static constexpr int KMaxRenderDimSize{ 65535 };
+		int largestDimSize{ 1200 };
+		int filmWidth{ 1200 };
+		int filmHeight{ 1200 };
+		static constexpr float KMinAspect{ -1.0f };
+		static constexpr float KMaxAspect{ 1.0f };
+		float aspectParameter{ 0.0f };
+
+
+		enum class Mode
+		{
+			BEAUTY,
+
+			ALL_MODES
+		};
+		static inline const char* modeNames[static_cast<int>(Mode::ALL_MODES)]{
+			"Beauty"
+		};
+		Mode currentMode{ Mode::BEAUTY };
+
+		// Preview mode settings (Child window)
+		bool scalingEnabled{ true };
+		static constexpr float KMinResolutionScale{ 0.0f };
+		static constexpr float KMaxResolutionScale{ 1.0f };
+		float resolutionScale{ 0.3f };
+
+		static constexpr float KMinParametrizedPreviewRatio{ -1.0f };
+		static constexpr float KMaxParametrizedPreviewRatio{ 1.0f };
+		float parametrizedPreviewRatio{ 0.0f };
+
+		// Debug mode settings
+	} m_renderSettingsWindow{};
+	void recordRenderSettingsWindow(CommandBuffer& commands, Camera& camera, RenderContext& rContext);
+
+	// Scene window struct -> Contains all the actors in the scene
+		// A: Camera
+		// B: Environment map -> Load (change) environment map
+		// C: Models -> General material. General transform.
+			// D: Meshes -> Material change
+			// E: Instances -> Transform change
+	// Inspector window struct -> Allows to make changes in actors
+		// A: Speed, Exposure, Field of view, Depth of field (Child window)
+		// B: Load (change) environment map
+		// C: Change general material and transform.
+		// D: Change mesh's materials
+		// E: Change transform
+	struct SceneActorsWindow
+	{
+		static constexpr bool detachable{ false };
+
+		enum class ActorType
+		{
+			NONE,
+			CAMERA,
+			ENVIRONMENT_MAP,
+			MODEL,
+			MESH,
+			INSTANCE,
+
+			ALL_ACTOR_TYPES
+		} currentSelectedActor{ ActorType::CAMERA };
+		int selectedModelIndex{ 0 };
+		int modelForRemovalIndex{ 0 };
+	} m_sceneActorsWindow{};
+	void recordSceneActorWindow(CommandBuffer& commands, Window& window, SceneData& scene, Camera& camera);
+
+	struct CameraSettings
+	{
+		static constexpr float KMinParametrizedExposure{ -1.0f };
+		static constexpr float KMaxParametrizedExposure{ 1.0f };
+		static constexpr float KExposureMultiplier{ 15.0f };
+
+		static constexpr float KMinFieldOfView{ 1.0f };
+		static constexpr float KMaxFieldOfView{ 179.0f };
+
+		static constexpr float KMinAppertureDOF{ 0.001f };
+		static constexpr float KMaxAppertureDOF{ 100.0f };
+		static constexpr float KDraggingSpeedAppertureDOF{ 0.001f };
+		static constexpr float KMinFocusDistnaceDOF{ 0.0001f };
+		static constexpr float KMaxFocusDistanceDOF{ 1000.0f };
+		static constexpr float KDraggingSpeedFocusDistanceDOF{ 0.05f };
+
+		float outputFieldOfView{ 70.0f };
+	} m_cameraSettings{};
+	struct TransformSettingContext
+	{
+		// Translate
+		static constexpr float KTranslationSpeed{ 0.1f };
+		// Scale
+		static constexpr float KMinScale{ 0.0001f };
+		static constexpr float KMaxScale{ 1000.0f };
+		static constexpr float KScalingSpeed{ 0.01f };
+		float currentUniformScale{ 1.0f };
+		// Rotate
+		static constexpr float KRotationStart{ 0.0f };
+		static constexpr float KRotationFinish{ 2.0f * glm::pi<float>() };
+		bool turningStarted{ false };
+		glm::mat3 nonappliedRotation{ glm::identity<glm::mat3>() };
+		float currentRotationAngleX{ 0.0f };
+		float currentRotationAngleY{ 0.0f };
+		float currentRotationAngleZ{ 0.0f };
+	} m_transformSettingContext{};
+	struct ActorInspectorWindow
+	{
+		static constexpr bool detachable{ false };
+	} m_actorInspectorWindow{};
+	void recordActorInspectorWindow(CommandBuffer& commands, Window& window, SceneData& scene, Camera& camera, RenderContext& rContext);
+
+	// TODO: Light tree data
+	struct AppInfoWindow
+	{
+		static constexpr bool detachable{ false };
+
+		int currentSampleCount{ 0 };
+		size_t triangleCount{ 0 };
+		size_t deviceMemoryUsed{ 0 };
+	} m_infoWindow{};
+	void recordAppInformationWindow(SceneData& scene, int samplesProcessed);
+
+	struct CoordinateFrameWindow
+	{
+		static constexpr bool detachable{ false };
+	} m_coordinateFrameWindow{};
+	void recordCoordinateFrameWindow(Camera& camera);
+
+	struct ImageRenderWindow
+	{
+		static constexpr bool detachable{ true };
+		bool isOpen{ false };
+	} m_imageRenderWindow{};
+	void recordImageRenderWindow(CommandBuffer& commands, Window& window, Camera& camera, RenderContext& rContext, GLuint renderResult, int currentSampleCount);
+
+	struct InnerState
+	{
+		bool previewWindowIsFocused{ false };
+		bool cursorIsDraggingOverPreviewWindow{ false };
+
+		bool disableMainWindow{ false };
+	} m_innerState{};
+
+	struct Colors
+	{
+		constexpr static ImColor notPresentIndicatorColor{ 0.99f, 0.33f, 0.29f };
+	};
+
 public:
 	UI(GLFWwindow* window)
 	{
@@ -36,6 +210,7 @@ public:
 		io.ConfigFlags |= ImGuiConfigFlags_DockingEnable;
 		io.ConfigFlags |= ImGuiConfigFlags_ViewportsEnable;
 		io.ConfigWindowsMoveFromTitleBarOnly = true;
+		setFont();
 		setTheme();
 		ImGui_ImplGlfw_InitForOpenGL(window, true);
 		ImGui_ImplOpenGL3_Init();
@@ -201,25 +376,12 @@ private:
 		ImGui::NewFrame();
 	}
 
-	void recordDockspace(CommandBuffer& commands, Window& window, bool& openImageRenderSettings);
-	void recordImageRenderSettingsWindow(CommandBuffer& commands, RenderContext& rContext, GLuint renderResult, bool openImageRenderSettings);
-	void recordImageRenderWindow(CommandBuffer& commands, Window& window, RenderContext& rContext, GLuint renderResult, int currentSampleCount);
-	void recordPreviewWindow(CommandBuffer& commands, RenderContext& rContext,
-			float& renderWinWidth, float& renderWinHeight,
-			GLuint renderResult, float renderScale);
-	void recordRenderSettingsWindow(CommandBuffer& commands, Camera& camera, RenderContext& rContext, float& renderScale, float renderWinWidth, float renderWinHeight);
-	void recordSceneGeneralSettings(CommandBuffer& commands, Window& window, SceneData& scene, Camera& camera, const ImVec4& infoColor);
-	void recordSceneModelsSettings(CommandBuffer& commands, Window& window, SceneData& scene, const ImVec4& infoColor);
-	void recordSceneLightsSettings(CommandBuffer& commands, SceneData& scene, const ImVec4& infoColor);
-	void recordSceneEnvironmentMapSettings(CommandBuffer& commands, Window& window, SceneData& scene, const ImVec4& infoColor);
-	void recordCoordinateFrameWindow(Camera& camera);
-	void recordInformationWindow(SceneData& scene, int currentSampleCount);
-
 private:
+	void setFont();
 	void setTheme()
 	{
 		ImVec4* colors = ImGui::GetStyle().Colors;
-		colors[ImGuiCol_Text]                   = ImVec4(0.831f, 0.847f, 0.878f, 1.000f);
+		colors[ImGuiCol_Text]                   = ImVec4(0.931f, 0.947f, 0.978f, 1.000f);
 		colors[ImGuiCol_TextDisabled]           = ImVec4(0.831f, 0.847f, 0.878f, 0.502f);
 
 		colors[ImGuiCol_WindowBg]               = ImVec4(0.173f, 0.192f, 0.235f, 1.000f);

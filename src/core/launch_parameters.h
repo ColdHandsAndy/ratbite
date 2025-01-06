@@ -56,7 +56,7 @@ struct LaunchParameters
 		CUPTR(DiskLightData) disks{};
 		CUPTR(SphereLightData) spheres{};
 		CUPTR(EmissiveTriangleLightData) triangles{};
-		CUPTR(uint64_t) bitmasks[KLightTypeCount]{};
+		CUPTR(uint64_t) bitmasks[KMultiLightTypeCount]{};
 
 		struct EnvironmentMap
 		{
