@@ -159,17 +159,25 @@ namespace ImGuiWidgets
 	}
 }
 
-static void adjustFieldOfViewForPreviewWindow(CommandBuffer& commands, Camera& camera,
-		double fieldOfView, float filmWidth, float filmHeight, float previewWidth, float previewHeigth, float viewportOverlayRelativeSize)
+static double adjustFieldOfView(bool cameraToPreview,
+		double fieldOfView,
+		float filmWidth, float filmHeight, float previewWidth, float previewHeigth,
+		float viewportOverlayRelativeSize)
 {
-		bool scaleByWidth{};
-		float currentAspect{ filmWidth / filmHeight };
-		float windowAspect{ previewWidth / previewHeigth };
-		scaleByWidth = currentAspect / windowAspect > 1.0f;
-		double fovScale{ (1.0f / viewportOverlayRelativeSize) * (scaleByWidth ? currentAspect : 1.0) };
-		double currentRenderFieldOfView{ glm::atan(glm::tan(glm::radians(fieldOfView) * 0.5) * fovScale) * 2.0 };
-		camera.setFieldOfView(currentRenderFieldOfView);
-		commands.pushCommand(Command{.type = CommandType::CHANGE_CAMERA_FIELD_OF_VIEW} );
+	double result{};
+
+	bool scaleByWidth{};
+	float currentAspect{ filmWidth / filmHeight };
+	float windowAspect{ previewWidth / previewHeigth };
+	scaleByWidth = currentAspect / windowAspect > 1.0f;
+	double fovScale{};
+	if (cameraToPreview)
+		fovScale = (1.0f / viewportOverlayRelativeSize) * (scaleByWidth ? currentAspect / windowAspect : 1.0);
+	else
+		fovScale = viewportOverlayRelativeSize * (scaleByWidth ? windowAspect / currentAspect : 1.0);
+	result = glm::atan(glm::tan(glm::radians(fieldOfView) * 0.5) * fovScale) * 2.0;
+
+	return result;
 }
 
 void UI::recordMenu(CommandBuffer& commands, Window& window, Camera& camera, RenderContext& rContext)
@@ -217,11 +225,12 @@ void UI::recordMenu(CommandBuffer& commands, Window& window, Camera& camera, Ren
 	}
 	ImGui::End();
 }
-void UI::recordPreviewWindow(CommandBuffer& commands, RenderContext& rContext, GLuint renderResult)
+void UI::recordPreviewWindow(CommandBuffer& commands, Camera& camera, RenderContext& rContext, GLuint renderResult)
 {
 	if (!m_previewWindow.detachable)
 		ImGui::SetNextWindowViewport(ImGui::GetMainViewport()->ID);
 
+	ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2(0, 0));
 	ImGui::Begin(ICON_FA_BULLSEYE " Preview");
 
 	ImVec2 winPos{ ImGui::GetWindowPos() };
@@ -247,8 +256,11 @@ void UI::recordPreviewWindow(CommandBuffer& commands, RenderContext& rContext, G
 
 	if (renderWidth != 0 && renderHeight != 0 && !ImGui::IsWindowCollapsed())
 	{
-		ImGui::GetWindowDrawList()->AddImage(reinterpret_cast<ImTextureID>(renderResult), vMin, vMax, ImVec2(0.0f, 1.0f), ImVec2(1.0f, 0.0f));
+		// Draw current render
+		if (!m_imageRenderWindow.isOpen)
+			ImGui::GetWindowDrawList()->AddImage(reinterpret_cast<ImTextureID>(renderResult), vMin, vMax, ImVec2(0.0f, 1.0f), ImVec2(1.0f, 0.0f));
 
+		// Composition guides and camera render overlay
 		bool& drawViewportOverlay{ m_previewWindow.drawViewportOverlay };
 		bool& drawThirds{ m_previewWindow.drawRuleOfThirds };
 		if (drawViewportOverlay)
@@ -326,6 +338,94 @@ void UI::recordPreviewWindow(CommandBuffer& commands, RenderContext& rContext, G
 		ImGui::PopStyleVar(2);
 		ImGui::PopStyleColor(3);
 
+		// Draw coordinate frame
+		{
+			ImDrawList* drawList{ ImGui::GetWindowDrawList() };
+
+			float coordFrameSize{ 65.0f };
+			ImVec2 coordFrameStartPos{ vMax.x - coordFrameSize - 10.0f, vMax.y - coordFrameSize - 10.0f };
+
+			constexpr float scle{ 0.7f };
+			glm::vec3 coordFrame[6]{
+				{1.0f, 0.0f, 0.0f},
+					{0.0f, 1.0f, 0.0f},
+					{0.0f, 0.0f, 1.0f},
+					{-1.0f, 0.0f, 0.0f},
+					{0.0f, -1.0f, 0.0f},
+					{0.0f, 0.0f, -1.0f},
+			};
+			glm::mat3 view{ glm::transpose(glm::mat3{
+					glm::vec3{camera.getU()},
+					glm::vec3{camera.getV()},
+					glm::vec3{camera.getW()}, }) };
+			glm::mat3 ortho{
+				glm::vec3{scle, 0.0f, 0.0f},
+				glm::vec3{0.0f, scle, 0.0f},
+				glm::vec3{0.0f, 0.0f, scle},};
+			glm::vec2 frameOrigin{ coordFrameStartPos.x + coordFrameSize * 0.5f,
+				coordFrameStartPos.y + coordFrameSize * 0.5f };
+			glm::vec3 coordFrameScreenSpace[6]{};
+			for (int i{ 0 }; i < ARRAYSIZE(coordFrameScreenSpace); ++i)
+			{
+				coordFrameScreenSpace[i] = ortho * view * coordFrame[i];
+				coordFrameScreenSpace[i] =
+					{frameOrigin.x + coordFrameScreenSpace[i].x * coordFrameSize * 0.5f,
+					coordFrameScreenSpace[i].y,
+					frameOrigin.y - coordFrameScreenSpace[i].z * coordFrameSize * 0.5f};
+			}
+
+			int drawOrder[6]{ 0, 1, 2, 3, 4, 5 };
+			const ImU32 colors[6]{
+				IM_COL32(200, 0, 0, 255), IM_COL32(0, 200, 0, 255), IM_COL32(0, 0, 200, 255),
+				IM_COL32(255, 0, 0, 255), IM_COL32(0, 255, 0, 255), IM_COL32(0, 0, 255, 255), };
+			const char* names[6]{ "X", "Y", "Z", "-X", "-Y", "-Z", };
+			for (int i{ 0 }, n{ ARRAYSIZE(drawOrder) }; i < n - 1; ++i)
+			{
+				bool swapped{ false };
+				for (int j{ 0 }; j < n - i - 1; j++)
+				{
+					if (coordFrameScreenSpace[drawOrder[j]].y
+						<
+						coordFrameScreenSpace[drawOrder[j + 1]].y)
+					{
+						int tmp{ drawOrder[j] };
+						drawOrder[j] = drawOrder[j + 1];
+						drawOrder[j + 1] = tmp;
+						swapped = true;
+					}
+				}
+				if (!swapped)
+					break;
+			}
+			for (int i{ 0 }; i < ARRAYSIZE(drawOrder); ++i)
+			{
+				ImU32 color{ colors[drawOrder[i]] };
+				ImVec4 colvec{ ImGui::ColorConvertU32ToFloat4(color) };
+				float alpha{ (1.0f - coordFrameScreenSpace[drawOrder[i]].y / scle) * 0.75f + 0.25f };
+				colvec.w = std::min(alpha, 1.0f);
+				color = ImGui::ColorConvertFloat4ToU32(colvec);
+
+				if (drawOrder[i] < 3)
+				{
+					drawList->AddLine(ImVec2{frameOrigin.x, frameOrigin.y},
+						ImVec2{coordFrameScreenSpace[drawOrder[i]].x, coordFrameScreenSpace[drawOrder[i]].z},
+						color, 3.0f);
+					drawList->AddCircleFilled(ImVec2{coordFrameScreenSpace[drawOrder[i]].x, coordFrameScreenSpace[drawOrder[i]].z}, 6.5f, color);
+				}
+				else
+				{
+					ImVec4 dimCircle{ colvec };
+					dimCircle.w *= 0.3f;
+					drawList->AddCircleFilled(ImVec2{coordFrameScreenSpace[drawOrder[i]].x, coordFrameScreenSpace[drawOrder[i]].z}, 6.5f, ImGui::ColorConvertFloat4ToU32(dimCircle));
+					drawList->AddCircle(ImVec2{coordFrameScreenSpace[drawOrder[i]].x, coordFrameScreenSpace[drawOrder[i]].z}, 6.5f, color);
+				}
+				ImVec2 letterSize{ ImGui::GetFont()->CalcTextSizeA(14.0f, FLT_MAX, 0.0f, names[drawOrder[i]]) };
+				drawList->AddText(ImGui::GetFont(), 14.0f,
+						ImVec2{coordFrameScreenSpace[drawOrder[i]].x - letterSize.x * 0.5f, coordFrameScreenSpace[drawOrder[i]].z - letterSize.y * 0.5f},
+						IM_COL32_WHITE, names[drawOrder[i]]);
+			}
+		}
+
 		static bool onPreviewClick{ false };
 		if (!onPreviewClick && !m_innerState.disableMainWindow)
 		{
@@ -339,6 +439,7 @@ void UI::recordPreviewWindow(CommandBuffer& commands, RenderContext& rContext, G
 	}
 
 	ImGui::End();
+	ImGui::PopStyleVar();
 }
 void UI::recordRenderSettingsWindow(CommandBuffer& commands, Camera& camera, RenderContext& rContext)
 {
@@ -377,11 +478,19 @@ void UI::recordRenderSettingsWindow(CommandBuffer& commands, Camera& camera, Ren
 		{
 			m_renderSettingsWindow.filmWidth = m_renderSettingsWindow.largestDimSize;
 			m_renderSettingsWindow.filmHeight = std::max(1, static_cast<int>(m_renderSettingsWindow.filmWidth * (1.0f - m_renderSettingsWindow.aspectParameter)));
+
+			m_cameraSettings.outputFieldOfView = glm::degrees(adjustFieldOfView(false, glm::degrees(camera.getFieldOfView()),
+				m_renderSettingsWindow.filmWidth, m_renderSettingsWindow.filmHeight, m_previewWindow.width, m_previewWindow.height,
+				PreviewWindow::KViewportOverlayRelativeSize));
 		}
 		else
 		{
 			m_renderSettingsWindow.filmHeight = m_renderSettingsWindow.largestDimSize;
 			m_renderSettingsWindow.filmWidth = std::max(1, static_cast<int>(m_renderSettingsWindow.filmHeight * (1.0f + m_renderSettingsWindow.aspectParameter)));
+
+			m_cameraSettings.outputFieldOfView = glm::degrees(adjustFieldOfView(false, glm::degrees(camera.getFieldOfView()),
+				m_renderSettingsWindow.filmWidth, m_renderSettingsWindow.filmHeight, m_previewWindow.width, m_previewWindow.height,
+				PreviewWindow::KViewportOverlayRelativeSize));
 		}
 	}
 
@@ -535,6 +644,12 @@ void UI::recordSceneActorWindow(CommandBuffer& commands, Window& window, SceneDa
 			int removeModelIndex{ m_sceneActorsWindow.modelForRemovalIndex };
 			modelPayload = { .id = scene.models[removeModelIndex].id, .hadEmissiveData = scene.models[removeModelIndex].hasEmissiveData() };
 			scene.models.erase(scene.models.begin() + removeModelIndex);
+			if (m_sceneActorsWindow.selectedModelIndex == removeModelIndex)
+			{
+				if (selectedActor == SceneActorsWindow::ActorType::MODEL)
+					selectedActor = SceneActorsWindow::ActorType::NONE;
+				m_sceneActorsWindow.selectedModelIndex = 0;
+			}
 			commands.pushCommand(Command{.type = CommandType::REMOVE_MODEL, .payload = &modelPayload});
 			ImGui::CloseCurrentPopup();
 		}
@@ -588,9 +703,11 @@ void UI::recordActorInspectorWindow(CommandBuffer& commands, Window& window, Sce
 						CameraSettings::KMinFieldOfView, CameraSettings::KMaxFieldOfView, "%.0f", ImGuiSliderFlags_AlwaysClamp);
 				if (changed)
 				{
-					adjustFieldOfViewForPreviewWindow(commands, camera, m_cameraSettings.outputFieldOfView,
+					double previewFOV{ adjustFieldOfView(true, m_cameraSettings.outputFieldOfView,
 						m_renderSettingsWindow.filmWidth, m_renderSettingsWindow.filmHeight, m_previewWindow.width, m_previewWindow.height,
-						PreviewWindow::KViewportOverlayRelativeSize);
+						PreviewWindow::KViewportOverlayRelativeSize) };
+					camera.setFieldOfView(previewFOV);
+					commands.pushCommand(Command{.type = CommandType::CHANGE_CAMERA_FIELD_OF_VIEW} );
 				}
 
 				float movingSpeed{ static_cast<float>(camera.getMovingSpeed()) };
@@ -748,86 +865,6 @@ void UI::recordAppInformationWindow(SceneData& scene, int samplesProcessed)
 
 	ImGui::End();
 }
-void UI::recordCoordinateFrameWindow(Camera& camera)
-{
-	if (!m_coordinateFrameWindow.detachable)
-		ImGui::SetNextWindowViewport(ImGui::GetMainViewport()->ID);
-
-	ImGui::Begin("XYZ");
-
-	ImDrawList* drawList{ ImGui::GetWindowDrawList() };
-
-	ImVec2 coordBGStartPos{ ImGui::GetCursorScreenPos() };
-	float coordBGSizeX{ ImGui::GetContentRegionAvail().x };
-	float coordBGSizeY{ ImGui::GetContentRegionAvail().y };
-	float coordBGSizeMin{ std::min(coordBGSizeX, coordBGSizeY) };
-
-	drawList->AddRectFilled(coordBGStartPos, ImVec2(coordBGStartPos.x + coordBGSizeX, coordBGStartPos.y + coordBGSizeY),
-			IM_COL32(0, 0, 0, 255));
-	drawList->AddRect(coordBGStartPos, ImVec2(coordBGStartPos.x + coordBGSizeX, coordBGStartPos.y + coordBGSizeY), ImGui::GetColorU32(ImGuiCol_Border));
-
-	glm::vec3 coordFrame[3]{
-		{1.0f, 0.0f, 0.0f},
-		{0.0f, 1.0f, 0.0f},
-		{0.0f, 0.0f, 1.0f} };
-	glm::mat3 view{ glm::transpose(glm::mat3{
-			glm::vec3{camera.getU()},
-			glm::vec3{camera.getV()},
-			glm::vec3{camera.getW()}, }) };
-	glm::mat3 ortho{
-		glm::vec3{0.8f, 0.0f, 0.0f},
-		glm::vec3{0.0f, 0.8f, 0.0f},
-		glm::vec3{0.0f, 0.0f, 0.8f}, };
-	glm::vec2 frameOrigin{ coordBGStartPos.x + coordBGSizeX * 0.5f,
-		coordBGStartPos.y + coordBGSizeY * 0.5f };
-	glm::vec3 coordFrameScreenSpace[3]{};
-	for (int i{ 0 }; i < ARRAYSIZE(coordFrameScreenSpace); ++i)
-	{
-		coordFrameScreenSpace[i] = ortho * view * coordFrame[i];
-		coordFrameScreenSpace[i] =
-			{frameOrigin.x + coordFrameScreenSpace[i].x * coordBGSizeMin * 0.5f,
-			coordFrameScreenSpace[i].y,
-			frameOrigin.y - coordFrameScreenSpace[i].z * coordBGSizeMin * 0.5f};
-	}
-
-	int drawOrder[3]{ 0, 1, 2 };
-	const ImU32 colors[3]{ IM_COL32(255, 0, 0, 255), IM_COL32(0, 255, 0, 255), IM_COL32(0, 0, 255, 255) };
-	const char* names[3]{ "X", "Y", "Z" };
-	for (int i{ 0 }, n{ ARRAYSIZE(drawOrder) }; i < n - 1; ++i)
-	{
-		bool swapped{ false };
-		for (int j{ 0 }; j < n - i - 1; j++)
-		{
-			if (coordFrameScreenSpace[drawOrder[j]].y
-					<
-				coordFrameScreenSpace[drawOrder[j + 1]].y)
-			{
-				int tmp{ drawOrder[j] };
-				drawOrder[j] = drawOrder[j + 1];
-				drawOrder[j + 1] = tmp;
-				swapped = true;
-			}
-		}
-		if (!swapped)
-			break;
-	}
-	for (int i{ 0 }; i < ARRAYSIZE(drawOrder); ++i)
-	{
-		ImU32 color{ colors[drawOrder[i]] };
-		if (i == 0)
-		{
-			ImVec4 colvec{ ImGui::ColorConvertU32ToFloat4(color) };
-			colvec.x *= 0.5f; colvec.y *= 0.5f; colvec.z *= 0.5f;
-			color = ImGui::ColorConvertFloat4ToU32(colvec);
-		}
-		drawList->AddLine(ImVec2{frameOrigin.x, frameOrigin.y},
-				ImVec2{coordFrameScreenSpace[drawOrder[i]].x, coordFrameScreenSpace[drawOrder[i]].z},
-				color, 3.0f);
-		drawList->AddText(ImVec2{coordFrameScreenSpace[drawOrder[i]].x, coordFrameScreenSpace[drawOrder[i]].z}, IM_COL32_WHITE, names[drawOrder[i]]);
-	}
-
-	ImGui::End();
-}
 void UI::recordImageRenderWindow(CommandBuffer& commands, Window& window, Camera& camera, RenderContext& rContext, GLuint renderResult, int currentSampleCount)
 {
 	if (!m_imageRenderWindow.detachable)
@@ -882,9 +919,11 @@ void UI::recordImageRenderWindow(CommandBuffer& commands, Window& window, Camera
 		commands.pushCommand(Command{.type = CommandType::CHANGE_RENDER_MODE});
 		m_innerState.disableMainWindow = false;
 
-		adjustFieldOfViewForPreviewWindow(commands, camera, m_cameraSettings.outputFieldOfView,
+		double previewFOV{ adjustFieldOfView(true, m_cameraSettings.outputFieldOfView,
 			m_renderSettingsWindow.filmWidth, m_renderSettingsWindow.filmHeight, m_previewWindow.width, m_previewWindow.height,
-			PreviewWindow::KViewportOverlayRelativeSize);
+			PreviewWindow::KViewportOverlayRelativeSize) };
+		camera.setFieldOfView(previewFOV);
+		commands.pushCommand(Command{.type = CommandType::CHANGE_CAMERA_FIELD_OF_VIEW} );
 	}
 }
 
@@ -896,11 +935,10 @@ void UI::recordInterface(CommandBuffer& commands, Window& window, Camera& camera
 		ImGui::BeginDisabled();
 
 	recordMenu(commands, window, camera, rContext);
-	recordPreviewWindow(commands, rContext, renderResult);
+	recordPreviewWindow(commands, camera, rContext, renderResult);
 	recordRenderSettingsWindow(commands, camera, rContext);
 	recordSceneActorWindow(commands, window, scene, camera);
 	recordActorInspectorWindow(commands, window, scene, camera, rContext);
-	recordCoordinateFrameWindow(camera);
 	recordAppInformationWindow(scene, currentSampleCount);
 
 	if (m_innerState.disableMainWindow)

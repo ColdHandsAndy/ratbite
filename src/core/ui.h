@@ -37,7 +37,7 @@ private:
 		uint32_t width{};
 		uint32_t height{};
 	} m_previewWindow{};
-	void recordPreviewWindow(CommandBuffer& commands, RenderContext& rContext, GLuint renderResult);
+	void recordPreviewWindow(CommandBuffer& commands, Camera& camera, RenderContext& rContext, GLuint renderResult);
 
 	// TODO: Add debug modes
 	struct RenderSettingsWindow
@@ -89,18 +89,21 @@ private:
 	} m_renderSettingsWindow{};
 	void recordRenderSettingsWindow(CommandBuffer& commands, Camera& camera, RenderContext& rContext);
 
-	// Scene window struct -> Contains all the actors in the scene
-		// A: Camera
-		// B: Environment map -> Load (change) environment map
-		// C: Models -> General material. General transform.
-			// D: Meshes -> Material change
-			// E: Instances -> Transform change
-	// Inspector window struct -> Allows to make changes in actors
-		// A: Speed, Exposure, Field of view, Depth of field (Child window)
-		// B: Load (change) environment map
-		// C: Change general material and transform.
-		// D: Change mesh's materials
-		// E: Change transform
+	/*
+	TODO:
+	Scene window struct -> Contains all the actors in the scene
+		A: Camera
+		B: Environment map -> Load (change) environment map
+		C: Models -> General material. General transform.
+			D: Meshes -> Material change
+			E: Instances -> Transform change
+	Inspector window struct -> Allows to make changes in actors
+		A: Speed, Exposure, Field of view, Depth of field (Child window)
+		B: Load (change) environment map
+		C: Change general material and transform.
+		D: Change mesh's materials
+		E: Change transform
+	*/
 	struct SceneActorsWindow
 	{
 		static constexpr bool detachable{ false };
@@ -173,12 +176,6 @@ private:
 		size_t deviceMemoryUsed{ 0 };
 	} m_infoWindow{};
 	void recordAppInformationWindow(SceneData& scene, int samplesProcessed);
-
-	struct CoordinateFrameWindow
-	{
-		static constexpr bool detachable{ false };
-	} m_coordinateFrameWindow{};
-	void recordCoordinateFrameWindow(Camera& camera);
 
 	struct ImageRenderWindow
 	{
@@ -467,7 +464,8 @@ private:
 		style.ScrollbarSize                     = 13;
 		style.GrabMinSize                       = 14;
 
-		style.WindowBorderSize                  = 1;
+		style.WindowBorderSize                  = 0;
+		style.DockingSeparatorSize              = 0;
 		style.ChildBorderSize                   = 0;
 		style.PopupBorderSize                   = 1;
 		style.FrameBorderSize                   = 0;
