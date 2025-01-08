@@ -1228,7 +1228,7 @@ extern "C" __global__ void __raygen__main()
 							}
 							Le = color::RGBtoSpectrum(
 								glm::vec3{emission[0], emission[1], emission[2]},
-								path.wavelengths, *parameters.spectralBasisR, *parameters.spectralBasisG, *parameters.spectralBasisB) * 0.01f;
+								path.wavelengths, *parameters.spectralBasisR, *parameters.spectralBasisG, *parameters.spectralBasisB);
 						}
 						break;
 					case LightType::SKY:
@@ -1245,7 +1245,7 @@ extern "C" __global__ void __raygen__main()
 								lightPDF = surfacePDF * ((skyColor.x + skyColor.y + skyColor.z) / 3.0f)
 									* cuda::std::sin(theta) // Applying Cartesian to spherical Jacobian
 									/ envMap.integral;
-								Le = color::RGBtoSpectrum(skyColor, path.wavelengths, *parameters.spectralBasisR, *parameters.spectralBasisG, *parameters.spectralBasisB) * 0.01f;
+								Le = color::RGBtoSpectrum(skyColor, path.wavelengths, *parameters.spectralBasisR, *parameters.spectralBasisG, *parameters.spectralBasisB);
 								path.stateFlags |= PathStateBitfield::FINISHED;
 							}
 							else
@@ -1641,7 +1641,7 @@ extern "C" __global__ void __raygen__main()
 								}
 								directLightData.spectrumSample = color::RGBtoSpectrum(
 									glm::vec3{emission[0], emission[1], emission[2]},
-									path.wavelengths, *parameters.spectralBasisR, *parameters.spectralBasisG, *parameters.spectralBasisB) * 0.01f;
+									path.wavelengths, *parameters.spectralBasisR, *parameters.spectralBasisG, *parameters.spectralBasisB);
 							}
 							break;
 						case LightType::SKY:
@@ -1674,7 +1674,7 @@ extern "C" __global__ void __raygen__main()
 									cuda::std::cos(theta), };
 								float4 rgbSample{ tex2D<float4>(envMap.environmentTexture, impSample.x, impSample.y) };
 								directLightData.spectrumSample = color::RGBtoSpectrum(glm::vec3{rgbSample.x, rgbSample.y, rgbSample.z},
-										path.wavelengths, *parameters.spectralBasisR, *parameters.spectralBasisG, *parameters.spectralBasisB) * 0.01f;
+										path.wavelengths, *parameters.spectralBasisR, *parameters.spectralBasisG, *parameters.spectralBasisB);
 								float surfacePDF{ 1.0f / (4.0f * glm::pi<float>()) };
 								lightPDF = surfacePDF * ((rgbSample.x + rgbSample.y + rgbSample.z) / 3.0f)
 									* cuda::std::sin(theta) // Applying Cartesian to spherical Jacobian

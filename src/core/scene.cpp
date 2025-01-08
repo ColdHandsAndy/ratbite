@@ -587,7 +587,7 @@ namespace
 									float b{ reinterpret_cast<uint8_t*>(im.data)[4 * (im.width * y + x) + 2] / 255.0f };
 									float a{ reinterpret_cast<uint8_t*>(im.data)[4 * (im.width * y + x) + 3] / 255.0f };
 
-									averageEmission += (r + g + b) / 3.0f;
+									averageEmission += (r + g + b) * a / 3.0f;
 									++texelsFetched;
 								} };
 							// Rasterization

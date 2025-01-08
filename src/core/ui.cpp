@@ -474,23 +474,26 @@ void UI::recordRenderSettingsWindow(CommandBuffer& commands, Camera& camera, Ren
 		ImGui::Text("Aspect");
 		changed = ImGui::SliderFloat("###ASP", &m_renderSettingsWindow.aspectParameter,
 				RenderSettingsWindow::KMinAspect, RenderSettingsWindow::KMaxAspect);
-		if (m_renderSettingsWindow.aspectParameter > 0.0f)
+		if (!m_imageRenderWindow.isOpen)
 		{
-			m_renderSettingsWindow.filmWidth = m_renderSettingsWindow.largestDimSize;
-			m_renderSettingsWindow.filmHeight = std::max(1, static_cast<int>(m_renderSettingsWindow.filmWidth * (1.0f - m_renderSettingsWindow.aspectParameter)));
+			if (m_renderSettingsWindow.aspectParameter > 0.0f)
+			{
+				m_renderSettingsWindow.filmWidth = m_renderSettingsWindow.largestDimSize;
+				m_renderSettingsWindow.filmHeight = std::max(1, static_cast<int>(m_renderSettingsWindow.filmWidth * (1.0f - m_renderSettingsWindow.aspectParameter)));
 
-			m_cameraSettings.outputFieldOfView = glm::degrees(adjustFieldOfView(false, glm::degrees(camera.getFieldOfView()),
-				m_renderSettingsWindow.filmWidth, m_renderSettingsWindow.filmHeight, m_previewWindow.width, m_previewWindow.height,
-				PreviewWindow::KViewportOverlayRelativeSize));
-		}
-		else
-		{
-			m_renderSettingsWindow.filmHeight = m_renderSettingsWindow.largestDimSize;
-			m_renderSettingsWindow.filmWidth = std::max(1, static_cast<int>(m_renderSettingsWindow.filmHeight * (1.0f + m_renderSettingsWindow.aspectParameter)));
+				m_cameraSettings.outputFieldOfView = glm::degrees(adjustFieldOfView(false, glm::degrees(camera.getFieldOfView()),
+							m_renderSettingsWindow.filmWidth, m_renderSettingsWindow.filmHeight, m_previewWindow.width, m_previewWindow.height,
+							PreviewWindow::KViewportOverlayRelativeSize));
+			}
+			else
+			{
+				m_renderSettingsWindow.filmHeight = m_renderSettingsWindow.largestDimSize;
+				m_renderSettingsWindow.filmWidth = std::max(1, static_cast<int>(m_renderSettingsWindow.filmHeight * (1.0f + m_renderSettingsWindow.aspectParameter)));
 
-			m_cameraSettings.outputFieldOfView = glm::degrees(adjustFieldOfView(false, glm::degrees(camera.getFieldOfView()),
-				m_renderSettingsWindow.filmWidth, m_renderSettingsWindow.filmHeight, m_previewWindow.width, m_previewWindow.height,
-				PreviewWindow::KViewportOverlayRelativeSize));
+				m_cameraSettings.outputFieldOfView = glm::degrees(adjustFieldOfView(false, glm::degrees(camera.getFieldOfView()),
+							m_renderSettingsWindow.filmWidth, m_renderSettingsWindow.filmHeight, m_previewWindow.width, m_previewWindow.height,
+							PreviewWindow::KViewportOverlayRelativeSize));
+			}
 		}
 	}
 

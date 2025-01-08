@@ -25,7 +25,6 @@ CU_DEVICE CU_INLINE void tonemap(glm::vec3& col)
 
 	col = color::sRGBfromLinearRGB(col);
 #elif TONEMAP_AGX
-	col = glm::clamp(col, 0.0f, 1.0f);
 	const glm::mat3 agx_mat{
 			0.842479062253094f, 0.0423282422610123f, 0.0423756549057051f,
 			0.0784335999999992f,  0.878468636469772f,  0.0784336f,
@@ -58,13 +57,14 @@ CU_DEVICE CU_INLINE void tonemap(glm::vec3& col)
 		-0.098020881140136776078f, 1.1519031299041727435f, -0.098043450117124120312f,
 		-0.099029744079720471434f, -0.098961176844843346553f, 1.1510736726411610622f };
 	col = inv_agx_mat * col;
+	col = glm::clamp(col, 0.0f, 1.0f);
 #elif TONEMAP_UCHIMURA
 	const float P{ 1.0f };
-    const float a{ 1.0f };
-    const float m{ 0.22f };
-    const float l{ 0.4f };
-    const float c{ 1.33f };
-    const float b{ 0.0f };
+	const float a{ 1.0f };
+	const float m{ 0.22f };
+	const float l{ 0.4f };
+	const float c{ 1.33f };
+	const float b{ 0.0f };
 	float l0{ ((P - m) * l) / a };
 	float S0{ m + l0 };
 	float S1{ m + a * l0 };
@@ -89,7 +89,7 @@ CU_DEVICE CU_INLINE void tonemap(glm::vec3& col)
 #endif
 }
 
-extern "C" __global__ void renderResolve(const uint32_t winWidth, const uint32_t winHeight, const glm::mat3 colorspaceTransform, float exposure, const glm::dvec4* renderData, cudaSurfaceObject_t presentData)
+extern "C" __global__ void renderResolve(const uint32_t winWidth, const uint32_t winHeight, const glm::mat3 colorspaceTransform, float exposureScale, const glm::dvec4* renderData, cudaSurfaceObject_t presentData)
 {
 	uint32_t x{ blockIdx.x * blockDim.x + threadIdx.x };
 	uint32_t y{ blockIdx.y * blockDim.y + threadIdx.y };
@@ -102,9 +102,8 @@ extern "C" __global__ void renderResolve(const uint32_t winWidth, const uint32_t
 						  static_cast<float>(data.y * normval), 
 						  static_cast<float>(data.z * normval) };
 
-	glm::vec3 color{ colorspaceTransform * normalized };
-
-	color = glm::max(color, 0.0f) * cuda::std::pow(2.0f, exposure);
+	glm::vec3 color{ glm::max(normalized, 0.0f) * exposureScale };
+	color = colorspaceTransform * color;
 
 	tonemap(color);
 

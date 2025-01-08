@@ -1519,8 +1519,9 @@ void RenderingInterface::resolveRender(const glm::mat3& colorspaceTransform)
 	cudaResourceDesc resDesc{ .resType = cudaResourceTypeArray, .res = { m_imageCudaArray } };
 	CUDA_CHECK(cudaCreateSurfaceObject(&m_imageCudaSurface, &resDesc));
 
+	float exposureScale{ std::pow(2.0f, m_imageExposure - 7.0f) };
 	glm::mat3 colspTransform{ colorspaceTransform };
-	void* params[]{ &m_launchWidth, &m_launchHeight, &colspTransform, &m_imageExposure, &m_renderData, &m_imageCudaSurface };
+	void* params[]{ &m_launchWidth, &m_launchHeight, &colspTransform, &exposureScale, &m_renderData, &m_imageCudaSurface };
 	CUDA_CHECK(cuLaunchKernel(m_resolveRenderDataFunc,
 				DISPATCH_SIZE(m_launchWidth, 16), DISPATCH_SIZE(m_launchHeight, 16), 1, 
 				16, 16, 1,
