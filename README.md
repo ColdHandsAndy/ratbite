@@ -27,9 +27,10 @@ Spectral Monte Carlo Path Tracer[^1] written in C++ with OptiX and CUDA
 ![](docs/pics/spaceship.png)
 ![](docs/pics/plaza1.png)
 ![](docs/pics/plaza2.png)
+![](docs/pics/glass_titan.png)
 ![](docs/pics/armor.png)
 ![](docs/pics/office.png)
-###### Credits: [Sponza](https://www.intel.com/content/www/us/en/developer/topic-technology/graphics-research/samples.html), [Microscope](https://sketchfab.com/3d-models/game-ready-pbr-microscope-a4d9a0fbe5d844769c1865d7b9a6ad9d), [Spaceship](https://sketchfab.com/3d-models/dss-harbinger-battle-cruiser-474f62d00ed54212b37f93ce91569c53), [Plaza](https://sketchfab.com/3d-models/plaza-night-time-282f497334f64a589edee4e63ad7e428), [Armor](https://sketchfab.com/3d-models/the-parade-armour-of-king-erik-xiv-of-sweden-bd189bba7d9e4924b12826a6d68200d9), [Office](https://sketchfab.com/3d-models/late-night-office-29986085d4a6477c9dda61e63327bdfc)
+###### Credits: [Sponza](https://www.intel.com/content/www/us/en/developer/topic-technology/graphics-research/samples.html), [Microscope](https://sketchfab.com/3d-models/game-ready-pbr-microscope-a4d9a0fbe5d844769c1865d7b9a6ad9d), [Spaceship](https://sketchfab.com/3d-models/dss-harbinger-battle-cruiser-474f62d00ed54212b37f93ce91569c53), [Plaza](https://sketchfab.com/3d-models/plaza-night-time-282f497334f64a589edee4e63ad7e428), [Titan](https://sketchfab.com/3d-models/titan-646952b9348443c0892672204ab3779c), [Armor](https://sketchfab.com/3d-models/the-parade-armour-of-king-erik-xiv-of-sweden-bd189bba7d9e4924b12826a6d68200d9), [Office](https://sketchfab.com/3d-models/late-night-office-29986085d4a6477c9dda61e63327bdfc)
 
 [^1]: [Physically Based Rendering: From Theory To Implementation. Fourth edition.](https://pbr-book.org/4ed/contents)
 [^2]: [OpenPBR surface](https://academysoftwarefoundation.github.io/OpenPBR/)

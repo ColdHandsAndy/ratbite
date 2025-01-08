@@ -240,13 +240,6 @@ namespace
 							textureData[cgltf_texture_index(data, material->pbr_metallic_roughness.base_color_texture.texture)].sRGB = true;
 							descriptor.baseColorTextureIndex = cgltf_texture_index(data, material->pbr_metallic_roughness.base_color_texture.texture);
 							descriptor.bcTexCoordIndex = material->pbr_metallic_roughness.base_color_texture.texcoord;
-							if (material->alpha_mode == cgltf_alpha_mode_mask)
-								descriptor.alphaInterpretation = SceneData::MaterialDescriptor::AlphaInterpretation::CUTOFF;
-							else if (material->alpha_mode == cgltf_alpha_mode_blend)
-								descriptor.alphaInterpretation = SceneData::MaterialDescriptor::AlphaInterpretation::BLEND;
-							else
-								descriptor.alphaInterpretation = SceneData::MaterialDescriptor::AlphaInterpretation::NONE;
-							descriptor.alphaCutoff = material->alpha_cutoff;
 						}
 						if (material->pbr_metallic_roughness.base_color_factor[0] != 1.0f ||
 							material->pbr_metallic_roughness.base_color_factor[1] != 1.0f ||
@@ -259,6 +252,13 @@ namespace
 							descriptor.baseColorFactor[2] = material->pbr_metallic_roughness.base_color_factor[2];
 							descriptor.baseColorFactor[3] = material->pbr_metallic_roughness.base_color_factor[3];
 						}
+						if (material->alpha_mode == cgltf_alpha_mode_mask)
+							descriptor.alphaInterpretation = SceneData::MaterialDescriptor::AlphaInterpretation::CUTOFF;
+						else if (material->alpha_mode == cgltf_alpha_mode_blend)
+							descriptor.alphaInterpretation = SceneData::MaterialDescriptor::AlphaInterpretation::BLEND;
+						else
+							descriptor.alphaInterpretation = SceneData::MaterialDescriptor::AlphaInterpretation::NONE;
+						descriptor.alphaCutoff = material->alpha_cutoff;
 						if (material->pbr_metallic_roughness.metallic_factor != 1.0f)
 						{
 							descriptor.metFactorPresent = true;

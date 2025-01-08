@@ -634,8 +634,8 @@ extern "C" __device__ void __direct_callable__ComplexSurface_BxDF(const Material
 	}
 	float alpha{ utility::roughnessToAlpha(roughness) };
 	microfacet::Alpha alphaMS{ .alphaX = alpha, .alphaY = alpha };
-	if (static_cast<bool>(stateFlags & PathStateBitfield::REGULARIZED))
-		alphaMS.regularize();
+	// if (static_cast<bool>(stateFlags & PathStateBitfield::REGULARIZED))
+	// 	alphaMS.regularize();
 
 	// Initialize eta and f0
 	float eta{ wo.z > 0.0f ? surface.specular.ior / 1.0f : 1.0f / surface.specular.ior };
@@ -1462,30 +1462,38 @@ extern "C" __global__ void __raygen__main()
 
 					bool bcTexture{ static_cast<bool>(interaction.material->textures & MaterialData::TextureTypeBitfield::BASE_COLOR) };
 					bool bcFactor{ static_cast<bool>(interaction.material->factors & MaterialData::FactorTypeBitfield::BASE_COLOR) };
+					float alpha{};
 					if (bcTexture)
 					{
 						float2 uv{ interaction.material->nmTexCoordSetIndex ? float2{texC2.x, texC2.y} : float2{texC1.x, texC1.y} };
 						float4 bcTexData{ tex2D<float4>(interaction.material->baseColorTexture, uv.x, uv.y) };
 						surface.base.color = glm::vec3{bcTexData.x, bcTexData.y, bcTexData.z};
+						alpha = bcTexData.w;
 						if (bcFactor)
+						{
 							surface.base.color
 								*= glm::vec3{interaction.material->baseColorFactor[0], interaction.material->baseColorFactor[1], interaction.material->baseColorFactor[2]};
-						const bool cutoff{ static_cast<bool>(interaction.material->factors & MaterialData::FactorTypeBitfield::CUTOFF) };
-						const bool blend{ static_cast<bool>(interaction.material->factors & MaterialData::FactorTypeBitfield::BLEND) };
-						if (cutoff)
-						{
-							if (bcTexData.w < interaction.material->alphaCutoff)
-								interaction.skipped = true;
-						}
-						else if (blend)
-						{
-							if (QRNG::Sobol::sample1D(qrngState, QRNG::DimensionOffset::ALPHA_BLEND) > bcTexData.w)
-								interaction.skipped = true;
+							alpha *= interaction.material->baseColorFactor[3];
 						}
 					}
 					else if (bcFactor)
+					{
 						surface.base.color
 							= glm::vec3{interaction.material->baseColorFactor[0], interaction.material->baseColorFactor[1], interaction.material->baseColorFactor[2]};
+						alpha = interaction.material->baseColorFactor[3];
+					}
+					const bool cutoff{ static_cast<bool>(interaction.material->factors & MaterialData::FactorTypeBitfield::CUTOFF) };
+					const bool blend{ static_cast<bool>(interaction.material->factors & MaterialData::FactorTypeBitfield::BLEND) };
+					if (cutoff)
+					{
+						if (alpha < interaction.material->alphaCutoff)
+							interaction.skipped = true;
+					}
+					else if (blend)
+					{
+						if (QRNG::Sobol::sample1D(qrngState, QRNG::DimensionOffset::ALPHA_BLEND) > alpha)
+							interaction.skipped = true;
+					}
 
 					bool mrTexture{ static_cast<bool>(interaction.material->textures & MaterialData::TextureTypeBitfield::MET_ROUGH) };
 					bool metFactor{ static_cast<bool>(interaction.material->factors & MaterialData::FactorTypeBitfield::METALNESS) };
