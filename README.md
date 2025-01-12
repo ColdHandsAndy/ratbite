@@ -20,7 +20,7 @@ Spectral Monte Carlo Path Tracer[^1] written in C++ with OptiX and CUDA
 * Low-discrepancy sequence generation
 * ImGui interface with export and render utilities
 
-### Examples
+### Examples ([Showcase Video](https://youtu.be/WYM2YJnsO-w))
 ![](docs/pics/ui.png)
 ![](docs/pics/mats.png)
 ![](docs/pics/microscope.png)
